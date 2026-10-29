@@ -11,7 +11,6 @@ class LightIntent(Enum):
     DROP = 'drop'
 
 
-# Nine musical sections map onto four lighting intents.
 SECTION_CLASS_INTENTS: dict[str, LightIntent] = {
     'intro': LightIntent.ATMOSPHERIC,
     'altintro': LightIntent.ATMOSPHERIC,
@@ -25,15 +24,15 @@ SECTION_CLASS_INTENTS: dict[str, LightIntent] = {
 }
 
 PREFERRED_AUTOLOOPS: dict[LightIntent, str] = {
-    LightIntent.ATMOSPHERIC: 'cold_breathe',
-    LightIntent.BREAKDOWN: 'wide_space',
-    LightIntent.BUILDUP: 'ramp',
+    LightIntent.ATMOSPHERIC: 'dawn',
+    LightIntent.BREAKDOWN: 'drift_apart',
+    LightIntent.BUILDUP: 'stutter',
     LightIntent.DROP: 'kick',
 }
 
 AutoloopTable = dict[LightIntent, tuple[tuple[str, str], ...]]
 
-STANDBY_AUTOLOOP = ('standby', 'warm_white')
+STANDBY_AUTOLOOP = ('standby', 'white')
 STANDBY_CROSSFADE_SECONDS = 1.0
 
 DEFAULT_AUTOLOOPS: AutoloopTable = {
@@ -65,10 +64,30 @@ class AutoloopMeta:
 
 AutoloopMetaTable = Mapping[tuple[str, str], AutoloopMeta]
 
+OVERLAY_BANKS = ('hit', 'fill', 'riser', 'dip', 'accent')
+
+OVERLAY_META_VALUES: dict[str, tuple[str, ...]] = {
+    'strobe': ('yes', 'no'),
+    'intensity': ('htp', 'ltp'),
+    'movement': AUTOLOOP_META_VALUES['movement'],
+    'texture': AUTOLOOP_META_VALUES['texture'],
+}
+
+
+@dataclass(frozen=True)
+class OverlayMeta:
+    strobe: bool
+    intensity_htp: bool
+    movement: str
+    texture: str
+
+
+OverlayMetaTable = Mapping[tuple[str, str], OverlayMeta]
+
 DEFAULT_AUTOLOOP_META: AutoloopMetaTable = {
-    ('atmospheric', 'cold_breathe'): AutoloopMeta(1, 'sweep', 'mixed'),
-    ('breakdown', 'wide_space'): AutoloopMeta(1, 'sweep', 'mixed'),
-    ('buildup', 'ramp'): AutoloopMeta(2, 'sweep', 'mixed'),
+    ('atmospheric', 'dawn'): AutoloopMeta(1, 'sweep', 'mixed'),
+    ('breakdown', 'drift_apart'): AutoloopMeta(1, 'sweep', 'beam'),
+    ('buildup', 'stutter'): AutoloopMeta(3, 'snap', 'wash'),
     ('drop', 'kick'): AutoloopMeta(3, 'snap', 'wash'),
 }
 
@@ -78,7 +97,6 @@ QUIET_HOLD_SECONDS = 2.0
 QUIET_BRIGHTNESS = 0.4
 BEAT_LOSS_SECONDS = 2.5
 
-STROBE_BURST_BEATS = 8
 STROBE_MAX_BURST_SECONDS = 4.0
 STROBE_RATE_HZ = 8.0
 STARFIRE_MAX_STROBE_HZ = 10.0
@@ -90,24 +108,18 @@ MAX_STROBE_COOLDOWN_SECONDS = 600.0
 DIGITAL_SILENCE_SECONDS = 2.0
 MAX_DIGITAL_SILENCE_SECONDS = 10.0
 MAX_CROSSFADE_BEATS = 16.0
-# The dashboard's three intensity levels. They differ in kind, not just degree: calm
-# re-maps drops and builds to quiet banks and drops strobes, wild leans on energy 3 and
-# strobes more often. Starfire's pulse/movement curve (starfire::intensity) keys off the
-# same three values.
+# Starfire's pulse/movement curve (starfire::intensity) keys off these same three levels.
 INTENSITY_CALM = 0.3
 INTENSITY_BALANCED = 0.7
 INTENSITY_WILD = 1.0
 DEFAULT_INTENSITY = INTENSITY_BALANCED
 CALM, BALANCED, WILD = 'calm', 'balanced', 'wild'
-# Strobes (and starfire's intense-special gate) are off at or below calm.
 STROBE_GATE_INTENSITY = INTENSITY_CALM
-# Calm stretches every look change; wild snaps between them.
 CROSSFADE_SCALE = {CALM: 2.0, BALANCED: 1.0, WILD: 0.5}
 DROP_STROBE_COOLDOWN_SCALE = {CALM: 1.0, BALANCED: 1.0, WILD: 0.5}
 
 
 def intensity_level(intensity: float) -> str:
-    """Continuous intensities between calm and wild behave as balanced."""
     if intensity <= INTENSITY_CALM:
         return CALM
     if intensity >= INTENSITY_WILD:
@@ -141,8 +153,7 @@ class ShowSettings:
     intensity: float = DEFAULT_INTENSITY
     intensity_auto: bool = False
     fx_auto: bool = True
-    # Inhibitive submasters by rig group, 0..1: Starfire scales the group after the master.
-    # An absent group is at full.
+    # 0..1 per rig group, applied by Starfire after the master; an absent group is at full.
     group_masters: dict[str, float] = field(default_factory=dict)
 
     def __post_init__(self):
@@ -151,7 +162,6 @@ class ShowSettings:
                 raise ValueError(f'{name} must be true or false')
         if not isinstance(self.group_masters, dict):
             raise TypeError('group_masters must map group names to levels')
-        # Before sorting, which mixed key types would fail with a bare TypeError.
         if any(type(group) is not str or not group for group in self.group_masters):
             raise ValueError('group_masters keys must be group names')
         masters = {}
@@ -183,12 +193,11 @@ class ShowSettings:
 
 
 def live_crossfade_beats(settings: ShowSettings) -> float:
-    """The renderer's default crossfade: the saved setting scaled by the intensity level."""
     return settings.crossfade_beats * CROSSFADE_SCALE[intensity_level(settings.intensity)]
 
 
-def transition_for(intent: LightIntent) -> dict | None:
-    return {'kind': 'cut'} if intent == LightIntent.DROP else None
+def crossfade_for(intent: LightIntent) -> float | None:
+    return 0.0 if intent == LightIntent.DROP else None
 
 
 def intent_for_class(label: str) -> LightIntent:

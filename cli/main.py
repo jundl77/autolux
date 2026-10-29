@@ -1,5 +1,3 @@
-"""Autolux command line and application lifecycle coordination."""
-
 import argparse
 import asyncio
 import logging
@@ -26,7 +24,11 @@ async def run_cmd(args: argparse.Namespace):
     import uuid
 
     from autolux.lib.clients.starfire_client import StarfireClient
-    from autolux.lighting.autoloop_catalogue import discover_autoloops, read_autoloop_meta
+    from autolux.lighting.autoloop_catalogue import (
+        discover_autoloops,
+        read_autoloop_meta,
+        read_overlay_meta,
+    )
     from cli.starfire import ROOT
     from cli.starfire_assets import static_rig
     from cli.starfire_runtime import StarfireRuntime, fixture_setup, selected_rig
@@ -35,7 +37,6 @@ async def run_cmd(args: argparse.Namespace):
     output_device_index = int(args.output_device) if args.output_device is not None else None
     run_id = secrets.randbits(64) or 1
     rig = selected_rig(args.rig, args.library)
-    # Hashed before Starfire reads the rig: an edit in between then shows as a stale rig, not hides.
     setup = fixture_setup(args, rig)
     with StarfireRuntime(
         args.starfire_binary,
@@ -56,6 +57,7 @@ async def run_cmd(args: argparse.Namespace):
             fixture_setup=setup,
             autoloops=discover_autoloops(args.autoloops),
             autoloop_meta=read_autoloop_meta(args.autoloops),
+            overlay_meta=read_overlay_meta(args.autoloops),
             selection_seed=run_id,
             static_rig=static_rig(rig),
         )
@@ -87,7 +89,6 @@ async def list_cmd(args: argparse.Namespace):
 
 
 async def label_cmd(args: argparse.Namespace):
-    """Load the annotation tool only when requested, keeping Dash optional."""
     training = str(Path(__file__).resolve().parents[1] / 'autolux' / 'training')
     if training not in sys.path:
         sys.path.insert(0, training)
@@ -97,11 +98,7 @@ async def label_cmd(args: argparse.Namespace):
 
 
 def death_handler(signum, frame):
-    """These handlers are installed at import, so every subcommand gets them --
-    including the ones that never build a show. Returning without a show would
-    be the end of it: the interrupt is delivered, consumed, and never becomes a
-    KeyboardInterrupt, so anything blocked in a serve loop keeps serving and
-    Ctrl-C looks broken. Raise what the default handler would have."""
+    # Installed for every subcommand; returning without a show would swallow Ctrl-C.
     if global_app is None:
         raise KeyboardInterrupt
     LOGGER.info('[main] stop requested; shutting down controller and receiver')
@@ -233,7 +230,6 @@ def _parse_command():
 
 
 async def main():
-    """Async entry for analysis and simulation callers."""
     args = _parse_command()
     if args is None:
         return

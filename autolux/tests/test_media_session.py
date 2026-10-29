@@ -20,8 +20,6 @@ GAP_SECONDS = 16 * 256 / 44100
 
 
 class _FedShow(_Show):
-    """A show whose media session is a fake feed delivered the way the listener delivers it."""
-
     def __init__(self):
         super().__init__()
         self.track_source = TrackSource(clock=self.clock)
@@ -85,7 +83,7 @@ async def test_a_pause_stops_the_show_at_once_and_drops_the_delayed_audio(status
     assert commands.count({'kind': 'discard_delayed_audio'}) == 1
     assert show.monitor_silenced == 1
     assert show.queue.pending == 0
-    assert ('standby', 'warm_white') in _selections(commands)
+    assert ('standby', 'white') in _selections(commands)
 
 
 async def test_the_fade_after_a_pause_does_not_rearm_but_play_does():
@@ -102,7 +100,7 @@ async def test_the_fade_after_a_pause_does_not_rearm_but_play_does():
     await show.keep_reporting(1.0, 0.2)
     assert show.chain.resets > resets, 'the show restarts from scratch as after silence'
     await show.keep_reporting(PLAYBACK_DELAY_SEC + 1.0, 0.2)
-    assert _selections(show.commands(parked)) == [('atmospheric', 'cold_breathe')]
+    assert _selections(show.commands(parked)) == [('atmospheric', 'dawn')]
 
 
 async def test_the_audio_cues_are_dormant_while_the_session_reports_and_return_after_it_goes_quiet():

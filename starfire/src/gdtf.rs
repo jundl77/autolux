@@ -1,10 +1,9 @@
-//! Validate DMX modes Autolux compiled from GDTF once, then encode physical attributes.
-
 use std::collections::{BTreeMap, BTreeSet};
 
 use anyhow::{Context, Result, ensure};
 
 use crate::model::{AttributeValue, DMX_CHANNELS, FixtureState, Rgb, lerp};
+use crate::palette::WHITE;
 use crate::protocol::wire;
 
 const MAX_CHANNEL_BYTES: usize = 4;
@@ -13,6 +12,11 @@ const CURVE_TOLERANCE: f64 = 1e-9;
 const MAX_FUNCTIONS: usize = 4096;
 const MAX_ATTRIBUTE_VALUES: usize = 512;
 const MAX_ATTRIBUTE_ID_BYTES: usize = 512;
+/// Below this a wheel slot is white (GDTF's Open); Autolux's palette floor is the same.
+const WHITE_SLOT_SATURATION: f64 = 0.05;
+pub const GOBO_ATTRIBUTE: &str = "Gobo1";
+const OPEN_GOBO: &str = "Open";
+pub const SNAP_POINT: f64 = 0.5;
 const DMX_BYTE_BITS: usize = 8;
 const DMX_BYTE_MASK: u32 = 255;
 const CIE_LUMINANCE_SCALE: f64 = 100.0;
@@ -57,8 +61,7 @@ struct Function {
     curve: Option<DmxCurve>,
 }
 
-/// A GDTF DMXProfile: output as a piecewise cubic of the DMX position, both fractions 0..1
-/// (GDTF 1.2's Figure 1 gives "DMXPercentage = 0,75" for 75% of the DMX range).
+/// Both axes are fractions 0..1: GDTF 1.2 Figure 1's "DMXPercentage = 0,75" is 75%.
 #[derive(Clone, Debug, PartialEq)]
 struct DmxCurve {
     points: Vec<wire::DmxProfilePoint>,
@@ -112,7 +115,6 @@ impl DmxCurve {
             })
     }
 
-    /// The DMX value in first..=last whose output is nearest `amount` of full output.
     fn dmx(&self, amount: f64, first: u32, last: u32) -> u32 {
         let position = |value: u32| {
             if last == first {
@@ -151,7 +153,6 @@ struct ModeCondition {
 
 #[derive(Clone, Debug, PartialEq)]
 struct Channel {
-    /// The channel's geometry and its ancestors, root first.
     geometry_path: Vec<String>,
     offsets: Vec<usize>,
     default: u32,
@@ -163,7 +164,6 @@ struct Channel {
     closes_when_dark: bool,
 }
 
-/// One channel function as seen by renderers that address attributes by family.
 #[derive(Clone, Debug, PartialEq)]
 pub struct FunctionInfo {
     pub channel: usize,
@@ -176,28 +176,23 @@ pub struct FunctionInfo {
     pub slot_colours: bool,
 }
 
-/// Resolved mode: offsets, physical mappings and dependencies are validated before playback.
 #[derive(Clone, Debug, PartialEq)]
 pub struct GdtfProfile {
     channels: Vec<Channel>,
     order: Vec<usize>,
     footprint: usize,
+    wheel_only_colour: bool,
 }
 
-/// One channel-owning geometry of a mode, encoded from its own state into the shared footprint.
 #[derive(Clone, Debug)]
 pub struct GdtfCell {
     pub geometry: String,
-    /// One-based DMX offsets of this geometry's channels within the fixture footprint, ascending.
     pub offsets: Vec<usize>,
     pub profile: GdtfProfile,
-    /// A master cell (a Dimmer above several pixel cells) lists the cells it scales; GDTF
-    /// multiplies the master's output into every pixel below it.
     pub governed: Vec<usize>,
 }
 
 impl GdtfProfile {
-    /// Validates a mode Autolux compiled from GDTF; Starfire reads no GDTF itself.
     pub fn from_wire(mode: &wire::DmxMode) -> Result<Self> {
         ensure!(
             !mode.channels.is_empty() && mode.channels.len() <= DMX_CHANNELS,
@@ -216,8 +211,7 @@ impl GdtfProfile {
                 (1..=MAX_CHANNEL_BYTES).contains(&width),
                 "GDTF channel resolution must be 8, 16, 24 or 32 bits"
             );
-            let maximum =
-                (u64::from(u32::MAX) >> ((MAX_CHANNEL_BYTES - width) * DMX_BYTE_BITS)) as u32;
+            let maximum = max_dmx_value(width);
             let mut offsets = Vec::with_capacity(width);
             for &offset in &channel.offsets {
                 let offset = offset as usize;
@@ -289,7 +283,6 @@ impl GdtfProfile {
         Self::assemble(channels)
     }
 
-    /// The compiled mode's cells in order of their first DMX offset.
     pub fn cells_from_wire(mode: &wire::DmxMode) -> Result<Vec<GdtfCell>> {
         Self::from_wire(mode)?.into_cells()
     }
@@ -366,8 +359,7 @@ impl GdtfProfile {
                     }
                     channels.push(channel);
                 }
-                // Only a dimmer inside the cell gates its colour; a master's is applied by
-                // FixtureRig::encode, which divides the master level out of each pixel.
+                // A master's dimmer is applied by FixtureRig::encode, divided out of each pixel.
                 let own_dimmers: Vec<_> = channels
                     .iter()
                     .filter(|channel| {
@@ -388,6 +380,7 @@ impl GdtfProfile {
                     geometry,
                     offsets: offsets(&channels),
                     profile: Self {
+                        wheel_only_colour: wheel_only_colour(&channels),
                         channels,
                         order,
                         footprint: self.footprint,
@@ -431,7 +424,6 @@ impl GdtfProfile {
     }
 
     fn assemble(mut channels: Vec<Channel>) -> Result<Self> {
-        // A dimmer controls its own geometry and descendants, never unrelated cells.
         for index in 0..channels.len() {
             let path = &channels[index].geometry_path;
             let geometry = path.last().context("GDTF channel has no geometry")?;
@@ -481,6 +473,7 @@ impl GdtfProfile {
             + 1;
         let order = dependency_order(&channels)?;
         Ok(Self {
+            wheel_only_colour: wheel_only_colour(&channels),
             channels,
             order,
             footprint,
@@ -533,20 +526,51 @@ impl GdtfProfile {
         to: &AttributeValue,
         amount: f64,
     ) -> AttributeValue {
-        if let (AttributeValue::Number(first), AttributeValue::Number(last)) = (from, to) {
-            let functions = self.matching_functions(key);
-            if functions.len() == 1 {
-                let function = functions[0].1;
-                if !function.snap && function.sets.is_empty() {
-                    return AttributeValue::Number(lerp(*first, *last, amount));
-                }
-            }
+        if let (AttributeValue::Number(first), AttributeValue::Number(last)) = (from, to)
+            && self.mixes(key)
+        {
+            return AttributeValue::Number(lerp(*first, *last, amount));
         }
-        if amount < 1.0 {
+        if amount < SNAP_POINT {
             from.clone()
         } else {
             to.clone()
         }
+    }
+
+    pub fn blend_attributes(
+        &self,
+        from: &BTreeMap<String, AttributeValue>,
+        to: &BTreeMap<String, AttributeValue>,
+        amount: f64,
+    ) -> BTreeMap<String, AttributeValue> {
+        let mut blended = BTreeMap::new();
+        for (key, value) in to {
+            match from.get(key) {
+                Some(source) => {
+                    blended.insert(
+                        key.clone(),
+                        self.interpolate_attribute(key, source, value, amount),
+                    );
+                }
+                None if self.mixes(key) || amount >= SNAP_POINT => {
+                    blended.insert(key.clone(), value.clone());
+                }
+                None => {}
+            }
+        }
+        for (key, value) in from {
+            let until = if self.mixes(key) { 1.0 } else { SNAP_POINT };
+            if !to.contains_key(key) && amount < until && !self.shares_channel(key, &blended) {
+                blended.insert(key.clone(), value.clone());
+            }
+        }
+        blended
+    }
+
+    fn mixes(&self, key: &str) -> bool {
+        let functions = self.matching_functions(key);
+        functions.len() == 1 && !functions[0].1.snap && functions[0].1.sets.is_empty()
     }
 
     pub fn encode(&self, state: &FixtureState, output: &mut [u8]) -> Result<()> {
@@ -577,8 +601,6 @@ impl GdtfProfile {
             active_function_ends[index] =
                 channel.active_function_ends(&values, &active_function_ends, &self.channels);
             let dimmer = channel.has_dimmer;
-            // Where several active functions can express the look (a colour wheel's indexed
-            // and scrolling ranges), the lowest DMX range wins.
             let requested = channel
                 .functions_by_dmx_start
                 .iter()
@@ -640,7 +662,6 @@ impl GdtfProfile {
             }
             values[index] = explicit.or(requested).unwrap_or(channel.default);
         }
-        // A supplied value must resolve in the final mode, not silently disappear behind ModeMaster.
         for key in state.attributes.keys().filter(|_| !state.output_blackout) {
             ensure!(
                 resolved_attributes.contains(key),
@@ -656,7 +677,6 @@ impl GdtfProfile {
         Ok(())
     }
 
-    /// Unconditional functions with their physical rest value and addressable channel sets.
     pub fn functions(&self) -> Vec<FunctionInfo> {
         let mut infos = Vec::new();
         for (index, channel) in self.channels.iter().enumerate() {
@@ -665,11 +685,7 @@ impl GdtfProfile {
                 if function.condition.is_some() {
                     continue;
                 }
-                let last = channel.functions_by_dmx_start[position + 1..]
-                    .iter()
-                    .map(|&next| channel.functions[next].first)
-                    .find(|&first| first > function.first)
-                    .map_or(function.maximum_dmx_value, |first| first - 1);
+                let last = channel.unconditional_end(position);
                 let rest = if (function.first..=last).contains(&channel.default) {
                     let span = f64::from(last - function.first);
                     let amount = if span == 0.0 {
@@ -721,6 +737,67 @@ impl GdtfProfile {
         infos
     }
 
+    pub fn gobo_name(&self, slot: u64) -> Option<String> {
+        let (channel, position) = self.channels.iter().find_map(|channel| {
+            channel
+                .functions_by_dmx_start
+                .iter()
+                .position(|&index| {
+                    let function = &channel.functions[index];
+                    function.attribute == GOBO_ATTRIBUTE && function.condition.is_none()
+                })
+                .map(|position| (channel, position))
+        })?;
+        let function = &channel.functions[channel.functions_by_dmx_start[position]];
+        let last = channel.unconditional_end(position);
+        let names: Vec<&str> = function
+            .sets
+            .iter()
+            .filter(|set| {
+                set.first <= last
+                    && set.colour.is_some()
+                    && !set.name.is_empty()
+                    && function
+                        .sets
+                        .iter()
+                        .filter(|other| other.name == set.name)
+                        .count()
+                        == 1
+            })
+            .map(|set| set.name.as_str())
+            .collect();
+        let open = names
+            .iter()
+            .position(|name| name.eq_ignore_ascii_case(OPEN_GOBO))
+            .unwrap_or(0);
+        let others: Vec<&str> = names
+            .iter()
+            .enumerate()
+            .filter(|&(index, _)| index != open)
+            .map(|(_, name)| *name)
+            .collect();
+        let name = if slot == 0 || others.is_empty() {
+            names.get(open)?
+        } else {
+            &others[((slot - 1) % others.len() as u64) as usize]
+        };
+        Some((*name).to_owned())
+    }
+
+    pub fn blend_colour(&self, from: Rgb, to: Rgb, amount: f64) -> Rgb {
+        if !self.wheel_only_colour {
+            from.lerp(to, amount)
+        } else if amount < SNAP_POINT {
+            from
+        } else {
+            to
+        }
+    }
+
+    pub fn wheel_only_colour(&self) -> bool {
+        self.wheel_only_colour
+    }
+
     pub fn has_dark_wheel_slot(&self) -> bool {
         self.channels
             .iter()
@@ -729,8 +806,38 @@ impl GdtfProfile {
             .any(|set| set.colour == Some(BLACK))
     }
 
-    /// A later layer's key replaces every earlier key that addresses one of its channels.
-    pub fn overlay_attributes(
+    pub fn emitted_colour(&self, state: &FixtureState) -> Result<Rgb> {
+        let mut output = vec![0; self.footprint];
+        self.encode(state, &mut output)?;
+        let mixes = self.channels.iter().any(|channel| channel.has_rgb);
+        let mut colour = state.colour;
+        for channel in &self.channels {
+            let value = channel.offsets.iter().fold(0, |value, &offset| {
+                (value << DMX_BYTE_BITS) | u32::from(output[offset])
+            });
+            let slot = channel
+                .functions
+                .iter()
+                .filter(|function| function.attribute.starts_with("Color"))
+                .flat_map(|function| &function.sets)
+                .find(|set| (set.first..=set.last).contains(&value))
+                .and_then(|set| set.colour);
+            if let Some(slot) = slot {
+                colour = if mixes {
+                    Rgb {
+                        red: colour.red * slot.red,
+                        green: colour.green * slot.green,
+                        blue: colour.blue * slot.blue,
+                    }
+                } else {
+                    slot
+                };
+            }
+        }
+        Ok(colour)
+    }
+
+    pub fn replace_attributes(
         &self,
         target: &mut BTreeMap<String, AttributeValue>,
         layer: &BTreeMap<String, AttributeValue>,
@@ -774,6 +881,15 @@ impl GdtfProfile {
 }
 
 impl Channel {
+    fn unconditional_end(&self, position: usize) -> u32 {
+        let function = &self.functions[self.functions_by_dmx_start[position]];
+        self.functions_by_dmx_start[position + 1..]
+            .iter()
+            .map(|&next| self.functions[next].first)
+            .find(|&first| first > function.first)
+            .map_or(function.maximum_dmx_value, |first| first - 1)
+    }
+
     fn active_function_ends(
         &self,
         values: &[u32],
@@ -915,8 +1031,7 @@ fn semantic_value(
     } else {
         0.0
     };
-    let wheel = !function.sets.is_empty() && function.sets.iter().any(|set| set.colour.is_some());
-    if wheel && function.attribute.starts_with("Color") {
+    if is_colour_wheel(function) {
         let dark = state.intensity <= 0.0 || colour_peak(state.colour) <= 0.0;
         let requested = if rgb {
             Rgb::default()
@@ -925,12 +1040,17 @@ fn semantic_value(
         } else {
             normalize(state.colour)
         };
-        return function
+        let slots = function
             .sets
             .iter()
             .rev()
             .filter(|set| set.first <= last)
-            .filter_map(|set| set.colour.map(|colour| (set, colour)))
+            .filter_map(|set| set.colour.map(|colour| (set, colour)));
+        let coloured = slots
+            .clone()
+            .any(|(_, colour)| colour != BLACK && !is_white_slot(colour));
+        return slots
+            .filter(|&(_, colour)| requested == WHITE || !coloured || !is_white_slot(colour))
             .min_by(|(_, left), (_, right)| {
                 colour_distance(*left, requested).total_cmp(&colour_distance(*right, requested))
             })
@@ -961,8 +1081,7 @@ fn semantic_value(
         "ColorSub_C" => 1.0 - state.colour.red * gain,
         "ColorSub_M" => 1.0 - state.colour.green * gain,
         "ColorSub_Y" => 1.0 - state.colour.blue * gain,
-        // Extra emitters require explicit physical attributes; their defaults
-        // must never turn them on during idle, blackout or script failure.
+        // Extra emitters never light by default: not in idle, blackout or script failure.
         attribute if attribute.starts_with("ColorAdd_") => 0.0,
         attribute if attribute.starts_with("ColorSub_") => 1.0,
         "Pan" => state.pan,
@@ -1034,8 +1153,7 @@ fn compile_wire_function(
                 (1..=MAX_CHANNEL_BYTES).contains(&width),
                 "virtual ModeMaster is unsupported"
             );
-            let limit =
-                (u64::from(u32::MAX) >> ((MAX_CHANNEL_BYTES - width) * DMX_BYTE_BITS)) as u32;
+            let limit = max_dmx_value(width);
             ensure!(
                 master.dmx_from <= master.dmx_to && master.dmx_to <= limit,
                 "invalid GDTF ModeMaster interval"
@@ -1095,6 +1213,23 @@ pub fn numbered_attribute(attribute: &str, prefix: &str) -> bool {
     attribute
         .strip_prefix(prefix)
         .is_some_and(|index| !index.is_empty() && index.bytes().all(|byte| byte.is_ascii_digit()))
+}
+
+fn max_dmx_value(width: usize) -> u32 {
+    (u64::from(u32::MAX) >> ((MAX_CHANNEL_BYTES - width) * DMX_BYTE_BITS)) as u32
+}
+
+fn wheel_only_colour(channels: &[Channel]) -> bool {
+    let functions = || channels.iter().flat_map(|channel| &channel.functions);
+    functions().any(is_colour_wheel)
+        && !functions().any(|function| {
+            function.attribute.starts_with("ColorAdd_")
+                || function.attribute.starts_with("ColorSub_")
+        })
+}
+
+fn is_colour_wheel(function: &Function) -> bool {
+    function.attribute.starts_with("Color") && function.sets.iter().any(|set| set.colour.is_some())
 }
 
 fn is_gate_shutter(function: &Function) -> bool {
@@ -1164,6 +1299,12 @@ fn cie_to_rgb(colour: &wire::CieColor) -> Result<Rgb> {
     } else {
         BLACK
     })
+}
+
+fn is_white_slot(colour: Rgb) -> bool {
+    let peak = colour_peak(colour);
+    peak > 0.0
+        && (peak - colour.red.min(colour.green).min(colour.blue)) / peak < WHITE_SLOT_SATURATION
 }
 
 fn colour_peak(colour: Rgb) -> f64 {

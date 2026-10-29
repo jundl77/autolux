@@ -7,7 +7,7 @@ local LOOP_BEATS = 16
 local WASH_LEVEL = 0.16
 local HORIZON_LEVEL = 0.22
 local MOVER_LEVEL = 0.25
-local CENTRE_PAN, PARK_PAN, TILT = 0.5, 0.3, 0.58
+local PARK_DEGREES = 25
 
 return {
     render = function(ctx)
@@ -19,17 +19,13 @@ return {
             sf.dimmer(sf.group("wash"), WASH_LEVEL * level),
             sf.colour(sf.group("strip"), palette.secondary),
             sf.each(sf.group("strip"), function(pixel, index, count)
-                local from_centre = math.abs(2 * (index - 1) / (count - 1) - 1)
+                local from_centre = sf.from_centre(index, count)
                 local band = math.max(0, 1 - 3 * math.abs(from_centre - dusk))
                 return sf.dimmer(pixel, HORIZON_LEVEL * band * level)
             end),
             sf.colour(sf.group("movers"), palette.secondary),
-            sf.each(sf.group("movers"), function(mover, index)
-                return {
-                    sf.pan_tilt(mover, CENTRE_PAN + sf.side(index) * PARK_PAN, TILT),
-                    sf.dimmer(mover, MOVER_LEVEL * level)
-                }
-            end)
+            sf.dimmer(sf.group("movers"), MOVER_LEVEL * level),
+            sf.phaser(sf.group("movers"), ctx, { shape = "fan", size = PARK_DEGREES })
         }
     end
 }

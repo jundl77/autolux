@@ -240,15 +240,25 @@ def test_a_capped_tier_without_loops_falls_back_to_the_nearest_energy():
     assert 'no energy 1 loop, nearest 2' in choice.reason
 
 
-@pytest.mark.parametrize(('intent', 'look'), [(DROP, BREAKDOWN), (BUILDUP, ATMOSPHERIC)])
-def test_calm_plays_drops_and_builds_from_the_quiet_banks_at_energy_one(intent, look):
+def test_calm_plays_drops_from_the_breakdown_bank_at_energy_one():
     for seed in range(20):
         chooser = policy(seed=seed)
-        context = SelectionContext(intent, build_bars=64)
+        context = SelectionContext(DROP, build_bars=64)
         choice = chooser.choose(context, intensity=INTENSITY_CALM)
-        assert (choice.bank, choice.meta.energy, choice.look) == (look.value, 1, look)
-        assert f'calm plays it from the {look.value} bank' in choice.reason
+        assert (choice.bank, choice.meta.energy, choice.look) == ('breakdown', 1, BREAKDOWN)
+        assert 'calm plays it from the breakdown bank' in choice.reason
         chooser.record(context, choice)
+
+
+def test_calm_still_builds_from_the_buildup_bank_at_energy_two():
+    for seed in range(20):
+        chooser = policy(seed=seed)
+        context = SelectionContext(BUILDUP, build_bars=64)
+        choice = chooser.choose(context, intensity=INTENSITY_CALM)
+        assert (choice.bank, choice.meta.energy, choice.look) == ('buildup', 2, BUILDUP)
+        assert 'intensity caps energy at 2' in choice.reason
+        chooser.record(context, choice)
+    assert max_energy_for_intensity(INTENSITY_CALM, BUILDUP) == 2
 
 
 @pytest.mark.parametrize('intent', [BREAKDOWN, ATMOSPHERIC])
@@ -393,20 +403,11 @@ async def test_a_drop_carries_its_arrival_grade_into_the_selection():
     assert light._selection_context(BUILDUP, 'buildup', 1.0).arrival_of_peak is None
 
 
-def test_the_spatial_traverse_is_a_calm_wash_the_policy_picks_and_names_no_accent_group():
-    loop = ('atmospheric', 'traverse')
-    autoloops, meta = discover_autoloops(), read_autoloop_meta()
-    assert loop in autoloops[ATMOSPHERIC]
-    assert meta[loop] == AutoloopMeta(1, 'sweep', 'wash')
-    picked = {
-        pick(AutoloopPolicy(autoloops, meta, random.Random(seed)), ATMOSPHERIC).autoloop
-        for seed in range(80)
-    }
-    assert 'traverse' in picked
+def test_every_shipped_loop_names_only_loop_groups_never_an_accent_group():
     root = Path(__file__).resolve().parents[2]
-    source = (root / 'show/autoloops/atmospheric/traverse.lua').read_text(encoding='utf-8')
-    named = set(re.findall(r'sf\.group\("([^"]+)"\)', source))
-    room = mvr.read((root / 'autolux/tests/data/room.mvr').read_bytes())
-    roles = mvr.group_roles(mvr.patched_fixtures(room))[0]
-    assert named == {'wash', 'strip', 'movers'}
-    assert {roles[group] for group in named} == {mvr.LOOP_ROLE}
+    stage = mvr.read((root / 'autolux/tests/data/generic_rig/stage.mvr').read_bytes())
+    roles = mvr.group_roles(mvr.patched_fixtures(stage))[0]
+    for path in sorted((root / 'show/autoloops').glob('*/*.lua')):
+        named = set(re.findall(r'sf\.group\("([^"]+)"\)', path.read_text(encoding='utf-8')))
+        assert named <= {'wash', 'strip', 'movers'}, path.name
+        assert {roles[group] for group in named} <= {mvr.LOOP_ROLE}, path.name

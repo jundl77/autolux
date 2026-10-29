@@ -24,7 +24,7 @@ fn check(rig: &Path, autoloops: &Path) -> Output {
 fn preflight_renders_every_shipped_autoloop_and_reports_patch_universes() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let output = check(
-        &root.join("../autolux/tests/data/room.rig.pb"),
+        &root.join("../autolux/tests/data/generic_rig/stage.rig.pb"),
         &root.join("../show/autoloops"),
     );
     assert!(
@@ -48,7 +48,7 @@ fn preflight_renders_every_shipped_autoloop_and_reports_patch_universes() {
 fn preflight_warns_about_autoloop_groups_the_rig_lacks() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let directory = tempfile::tempdir().unwrap();
-    let mut rig = support::room_definition();
+    let mut rig = support::stage_definition();
     for group in &mut rig.groups {
         if group.group_id == "strip" {
             group.group_id = "pixels".into();
@@ -76,17 +76,17 @@ fn preflight_executes_render_callbacks_in_every_autoloop() {
     fs::create_dir(&bank).unwrap();
     fs::write(
         bank.join("a_valid.lua"),
-        "return { render = function(ctx) return {} end }",
+        support::base_loop("return { render = function(ctx) return {} end }"),
     )
     .unwrap();
     fs::write(
         bank.join("z_failure.lua"),
-        "return { render = function(ctx) error('render callback failed') end }",
+        support::base_loop("return { render = function(ctx) error('render callback failed') end }"),
     )
     .unwrap();
 
     let output = check(
-        &root.join("../autolux/tests/data/room.rig.pb"),
+        &root.join("../autolux/tests/data/generic_rig/stage.rig.pb"),
         directory.path(),
     );
     let error = String::from_utf8_lossy(&output.stderr);

@@ -1,5 +1,3 @@
-//! Standalone generated messages with bounded, typed stream framing.
-
 use std::io::{Read, Write};
 
 use anyhow::{Context, Result, bail, ensure};
@@ -7,8 +5,9 @@ use prost::Message;
 
 use crate::engine::Engine;
 use crate::model::{
-    AttributeValue, Command, FixturePose, LightingOverride, MovementRange, OverrideLifetime,
-    PropertyValues, Rgb, SpecialFx, Target, Transition,
+    AttributeValue, BeatFeatures, Command, CueSection, Envelope, FixturePose, LightingOverride,
+    MovementRange, Overlay, OverrideLifetime, PropertyValues, Rgb, SectionIntent, SpecialFx, Step,
+    Target, Transition,
 };
 
 pub const MAX_LOGIN_BYTES: usize = 4 * 1024 * 1024;
@@ -35,8 +34,7 @@ fn check_payload_size(kind: wire::MessageType, length: usize, limit: usize) -> R
     Ok(())
 }
 
-// These enums dispatch in-process only. The frame carries the generated message
-// directly, with its generated MessageType; no Protobuf envelope is serialized.
+// The frame carries the generated message itself; no Protobuf envelope is serialized.
 macro_rules! messages {
     ($name:ident { $($variant:ident),+ $(,)? }) => {
         #[derive(Clone, Debug, PartialEq)]
@@ -76,6 +74,8 @@ messages!(ClientMessage {
     UpdateBeat,
     SetParameter,
     DiscardDelayedAudio,
+    CueSection,
+    ClearCues,
     Heartbeat
 });
 messages!(ServerMessage {
@@ -95,6 +95,8 @@ impl ClientMessage {
             Self::UpdateBeat(value) => value.command_id,
             Self::SetParameter(value) => value.command_id,
             Self::DiscardDelayedAudio(value) => value.command_id,
+            Self::CueSection(value) => value.command_id,
+            Self::ClearCues(value) => value.command_id,
             Self::Heartbeat(_) => return None,
         })
     }
@@ -108,6 +110,8 @@ impl ClientMessage {
             Self::UpdateBeat(value) => value.command_id = command_id,
             Self::SetParameter(value) => value.command_id = command_id,
             Self::DiscardDelayedAudio(value) => value.command_id = command_id,
+            Self::CueSection(value) => value.command_id = command_id,
+            Self::ClearCues(value) => value.command_id = command_id,
             Self::Heartbeat(_) => {}
         }
     }
@@ -131,8 +135,7 @@ pub fn error_message(error: &anyhow::Error) -> String {
     message
 }
 
-/// A clean EOF is allowed only between complete frames. Zero-length Protobuf
-/// payloads are valid for default-valued messages, such as server heartbeats.
+/// EOF is clean only between frames; a zero-length payload is a valid default-valued message.
 fn read_frame(
     input: &mut impl Read,
     accepts: impl FnOnce(wire::MessageType) -> bool,
@@ -192,7 +195,68 @@ pub fn read_event(input: &mut impl Read) -> Result<Option<ServerMessage>> {
     Ok(Some(ServerMessage::decode(kind, &payload)?))
 }
 
-/// Validate against the state left by preceding accepted commands.
+fn transition(value: Option<&wire::Transition>) -> Transition {
+    value.map_or(Transition::RendererDefault, |value| {
+        Transition::from_crossfade_beats(value.crossfade_beats)
+    })
+}
+
+fn envelope(value: Option<&wire::Envelope>) -> Envelope {
+    value.map_or_else(Envelope::default, |value| Envelope {
+        attack_beats: value.attack_beats,
+        release_beats: value.release_beats,
+    })
+}
+
+fn cue_section(engine: &Engine, value: &wire::CueSection) -> Result<CueSection> {
+    let intent = match wire::SectionIntent::try_from(value.intent) {
+        Ok(wire::SectionIntent::Atmospheric) => SectionIntent::Atmospheric,
+        Ok(wire::SectionIntent::Breakdown) => SectionIntent::Breakdown,
+        Ok(wire::SectionIntent::Buildup) => SectionIntent::Buildup,
+        Ok(wire::SectionIntent::Drop) => SectionIntent::Drop,
+        _ => bail!("a cue must name its section intent"),
+    };
+    let rotation = value
+        .rotation
+        .iter()
+        .map(|step| {
+            let (bank, autoloop) = engine.resolve_autoloop(&step.autoloop_id)?;
+            Ok(Step {
+                bank,
+                autoloop,
+                bars: step.bars,
+                transition: transition(step.transition.as_ref()),
+            })
+        })
+        .collect::<Result<_>>()?;
+    let overlays = value
+        .overlays
+        .iter()
+        .map(|overlay| {
+            let (bank, autoloop) = engine.resolve_autoloop(&overlay.autoloop_id)?;
+            Ok(Overlay {
+                bank,
+                autoloop,
+                priority: overlay.priority,
+                begin_beats: overlay.begin_beats,
+                duration_beats: overlay.duration_beats,
+                every_bars: overlay.every_bars,
+                envelope: envelope(overlay.envelope.as_ref()),
+                dip: overlay.dip,
+            })
+        })
+        .collect::<Result<_>>()?;
+    Ok(CueSection {
+        start_beat_index: value.start_beat_index,
+        intent,
+        rotation,
+        overlays,
+        palette: value.palette.clone(),
+        drop_strength: value.drop_strength,
+        seed: value.seed,
+    })
+}
+
 pub fn apply_command(engine: &mut Engine, at_seconds: f64, command: &ClientMessage) -> Result<()> {
     match command {
         ClientMessage::Login(_) => bail!("login is handled by the process host"),
@@ -205,8 +269,24 @@ pub fn apply_command(engine: &mut Engine, at_seconds: f64, command: &ClientMessa
                 bar_phase: value.bar_phase,
                 beats_per_bar: value.beats_per_bar,
                 bpm: value.tempo_bpm,
+                features: value.features.map(|features| BeatFeatures {
+                    onset: f64::from(features.onset),
+                    bass: f64::from(features.bass),
+                    mid: f64::from(features.mid),
+                    high: f64::from(features.high),
+                }),
             },
         ),
+        ClientMessage::CueSection(value) => {
+            let cue = cue_section(engine, value)?;
+            engine.apply(
+                at_seconds,
+                &Command::CueSection {
+                    value: Box::new(cue),
+                },
+            )
+        }
+        ClientMessage::ClearCues(_) => engine.apply(at_seconds, &Command::ClearCues),
         ClientMessage::PlayAutoloop(value) => {
             if value.autoloop_id.is_empty() {
                 ensure!(
@@ -221,13 +301,7 @@ pub fn apply_command(engine: &mut Engine, at_seconds: f64, command: &ClientMessa
                 "autoloop {} must name its palette",
                 value.autoloop_id
             );
-            let transition = match &value.transition {
-                None => Transition::RendererDefault,
-                Some(value) => value
-                    .crossfade_beats
-                    .map(|duration_beats| Transition::Crossfade { duration_beats })
-                    .unwrap_or(Transition::Cut),
-            };
+            let transition = transition(value.transition.as_ref());
             engine.play_autoloop(at_seconds, &value.autoloop_id, transition, &value.palette)
         }
         ClientMessage::SetParameter(value) => engine.set_parameter(
@@ -271,9 +345,8 @@ pub fn apply_command(engine: &mut Engine, at_seconds: f64, command: &ClientMessa
                     energy: f64::from(special.energy),
                     speed: f64::from(special.speed),
                     pulse_beats: special.pulse_beats,
-                    attack_beats: f64::from(special.attack_beats),
-                    release_beats: f64::from(special.release_beats),
                     pattern: special.pattern.map(f64::from),
+                    envelope: envelope(special.envelope.as_ref()),
                 })
             });
             ensure!(

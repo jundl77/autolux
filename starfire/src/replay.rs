@@ -1,20 +1,22 @@
-//! Deterministic playback of recorded control input through the real renderer.
-
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs::File;
 use std::io::{Read, Write};
 use std::path::Path;
 
 use anyhow::{Context, Result, ensure};
 use serde::{Deserialize, Serialize};
+use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
 use crate::engine::{Engine, RenderedFrame};
 use crate::fixtures::FixtureRig;
-use crate::model::{DMX_CHANNELS, MAX_FRAME_RATE_HZ, TimedCommand};
+use crate::gdtf::numbered_attribute;
+use crate::model::{
+    AttributeValue, Command, DMX_CHANNELS, FixtureState, MAX_FRAME_RATE_HZ, Rgb, TimedCommand,
+};
 use crate::palette::{PaletteDefinition, PaletteTable};
 use crate::script::AutoloopCatalog;
 
-pub const REPLAY_SCHEMA_VERSION: u32 = 1;
 pub const MAX_REPLAY_INPUT_BYTES: u64 = 8 * 1024 * 1024;
 pub const MAX_REPLAY_EVENTS: usize = 100_000;
 pub const MAX_REPLAY_FRAMES: usize = 100_000;
@@ -27,7 +29,6 @@ const CAPTURE_VERSION: u32 = 1;
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Replay {
-    pub schema_version: u32,
     pub duration_seconds: f64,
     pub frame_rate_hz: u32,
     pub palettes: Vec<PaletteDefinition>,
@@ -51,10 +52,6 @@ impl Replay {
     }
 
     pub fn validate(&self) -> Result<usize> {
-        ensure!(
-            self.schema_version == REPLAY_SCHEMA_VERSION,
-            "unsupported replay schema"
-        );
         ensure!(
             self.duration_seconds.is_finite() && self.duration_seconds >= 0.0,
             "replay duration must be finite and nonnegative"
@@ -107,9 +104,28 @@ pub fn render_replay(
         "replay exceeds DMX memory budget"
     );
     let mut engine = Engine::new(rig, catalog, PaletteTable::new(&replay.palettes)?)?;
-    let mut events = replay.events.iter().peekable();
     let mut frames = Vec::with_capacity(frame_count);
     let mut diagnostic_bytes: usize = 0;
+    render_frames(replay, &mut engine, frame_count, |_, frame, _| {
+        diagnostic_bytes =
+            diagnostic_bytes.saturating_add(frame.script_error.as_ref().map_or(0, String::len));
+        ensure!(
+            diagnostic_bytes <= MAX_REPLAY_DIAGNOSTIC_BYTES,
+            "replay exceeds diagnostic memory budget"
+        );
+        frames.push(frame);
+        Ok(())
+    })?;
+    Ok(frames)
+}
+
+fn render_frames(
+    replay: &Replay,
+    engine: &mut Engine,
+    frame_count: usize,
+    mut each: impl FnMut(usize, RenderedFrame, &Engine) -> Result<()>,
+) -> Result<()> {
+    let mut events = replay.events.iter().peekable();
     for frame_index in 0..frame_count {
         let time_seconds =
             (frame_index as f64 / f64::from(replay.frame_rate_hz)).min(replay.duration_seconds);
@@ -121,18 +137,11 @@ pub fn render_replay(
             engine.apply(event.at_seconds, &event.command)?;
         }
         let frame = engine.render_at(time_seconds)?;
-        diagnostic_bytes =
-            diagnostic_bytes.saturating_add(frame.script_error.as_ref().map_or(0, String::len));
-        ensure!(
-            diagnostic_bytes <= MAX_REPLAY_DIAGNOSTIC_BYTES,
-            "replay exceeds diagnostic memory budget"
-        );
-        frames.push(frame);
+        each(frame_index, frame, engine)?;
     }
-    Ok(frames)
+    Ok(())
 }
 
-/// Hash the actual complete output: supplied frame time, universe and DMX bytes.
 pub fn dmx_digest(frames: &[RenderedFrame]) -> String {
     let mut hash = Sha256::new();
     for frame in frames {
@@ -145,9 +154,8 @@ pub fn dmx_digest(frames: &[RenderedFrame]) -> String {
     format!("{:x}", hash.finalize())
 }
 
-/// Capture format: magic, u32 version, u64 frame count; then each frame's f64
-/// seconds, f64 beat position, u16 universe count and (u16 universe, 512 bytes).
-/// Integer and float fields are little endian. No wall-clock or machine fields.
+/// Little endian: magic, u32 version, u64 frame count, then per frame f64 seconds, f64 beat
+/// position, u16 universe count and that many (u16 universe, 512 bytes).
 pub fn write_capture(path: &Path, frames: &[RenderedFrame]) -> Result<()> {
     let mut output =
         File::create(path).with_context(|| format!("create DMX capture {}", path.display()))?;
@@ -170,4 +178,164 @@ pub fn write_capture(path: &Path, frames: &[RenderedFrame]) -> Result<()> {
     }
     output.flush()?;
     Ok(())
+}
+
+pub const PREVIEW_KIND: &str = "starfire_preview";
+const PREVIEW_DECIMALS: f64 = 1000.0;
+
+pub struct PreviewSummary {
+    pub frames: usize,
+    pub script_errors: BTreeSet<String>,
+}
+
+/// JSON lines: a header, then one line per written frame. Each cell is `[i, r, g, b, strobe_hz,
+/// direction, gobo]` in header order, the tail dropped when absent and a direction before a gobo
+/// null; direction is a unit vector in the MVR scene frame.
+pub fn write_preview(
+    replay: &Replay,
+    rig: FixtureRig,
+    catalog: AutoloopCatalog,
+    rate_hz: u32,
+    output: &mut impl Write,
+) -> Result<PreviewSummary> {
+    ensure!(
+        rate_hz > 0 && replay.frame_rate_hz.is_multiple_of(rate_hz),
+        "preview rate {rate_hz} Hz must divide the replay's {} Hz",
+        replay.frame_rate_hz
+    );
+    // The slew limit and strobe bursts step per rendered frame, so render at the show's rate.
+    let stride = (replay.frame_rate_hz / rate_hz) as usize;
+    let frame_count = replay.validate()?;
+    let cells = rig.cell_ids();
+    let index: BTreeMap<&str, usize> = cells
+        .iter()
+        .enumerate()
+        .map(|(position, id)| (id.as_str(), position))
+        .collect();
+    let beats_per_bar = replay.events.iter().find_map(|event| match event.command {
+        Command::Beat { beats_per_bar, .. } => Some(beats_per_bar),
+        _ => None,
+    });
+    let placed: Vec<Value> = cells
+        .iter()
+        .map(|id| {
+            let [x, y, z] = rig.spatial().position(id).map_or([None; 3], |mm| {
+                mm.map(|mm| Some(preview_round(mm / 1000.0)))
+            });
+            json!({"id": id, "fixture": rig.uuid_of_cell(id), "x": x, "y": y, "z": z})
+        })
+        .collect();
+    let groups: BTreeMap<&str, Vec<usize>> = rig
+        .groups()
+        .iter()
+        .map(|(group, members)| {
+            let members = members.iter().map(|id| index[id.as_str()]).collect();
+            (group.as_str(), members)
+        })
+        .collect();
+    let header = json!({
+        "kind": PREVIEW_KIND, "frame_rate_hz": rate_hz,
+        "duration_seconds": replay.duration_seconds, "frames": frame_count.div_ceil(stride),
+        "beats_per_bar": beats_per_bar, "cells": placed, "groups": groups,
+    });
+    serde_json::to_writer(&mut *output, &header)?;
+    output.write_all(b"\n")?;
+
+    let mut engine = Engine::new(rig.clone(), catalog, PaletteTable::new(&replay.palettes)?)?;
+    let mut script_errors = BTreeSet::new();
+    let mut diagnostic_bytes: usize = 0;
+    let mut unwritten_error = None;
+    render_frames(
+        replay,
+        &mut engine,
+        frame_count,
+        |frame_index, frame, engine| {
+            if let Some(error) = &frame.script_error
+                && !script_errors.contains(error)
+            {
+                diagnostic_bytes = diagnostic_bytes.saturating_add(error.len());
+                ensure!(
+                    diagnostic_bytes <= MAX_REPLAY_DIAGNOSTIC_BYTES,
+                    "preview exceeds diagnostic memory budget"
+                );
+                script_errors.insert(error.clone());
+                unwritten_error = Some(error.clone());
+            }
+            if !frame_index.is_multiple_of(stride) {
+                return Ok(());
+            }
+            let states = &frame.fixture_properties_before_strobe;
+            let values: Vec<Value> = cells
+                .iter()
+                .map(|id| {
+                    let state = &states[id];
+                    let colour = rig
+                        .profile(id)
+                        .and_then(|profile| profile.emitted_colour(state).ok())
+                        .unwrap_or(state.colour);
+                    let direction = rig.beam_direction(id, state.pan, state.tilt);
+                    preview_cell(state, colour, direction)
+                })
+                .collect();
+            let (intent, overlays) = engine.sounding_section()?;
+            let mut line = json!({
+                "t": preview_round(frame.time_seconds),
+                "beat": preview_round(frame.beat_position),
+                "intent": intent,
+                "bank": frame.active_bank,
+                "autoloop": frame.active_autoloop,
+                "c": values,
+            });
+            if !overlays.is_empty() {
+                line["overlays"] = json!(overlays);
+            }
+            if frame.script_error.is_some() {
+                line["fault"] = Value::Bool(true);
+            }
+            if let Some(error) = unwritten_error.take() {
+                line["error"] = Value::String(error);
+            }
+            serde_json::to_writer(&mut *output, &line)?;
+            output.write_all(b"\n")?;
+            Ok(())
+        },
+    )?;
+    output.flush()?;
+    Ok(PreviewSummary {
+        frames: frame_count.div_ceil(stride),
+        script_errors,
+    })
+}
+
+fn preview_cell(state: &FixtureState, colour: Rgb, direction: Option<[f64; 3]>) -> Value {
+    let mut cell = [
+        state.intensity,
+        colour.red,
+        colour.green,
+        colour.blue,
+        state.strobe_hz,
+    ]
+    .map(|value| json!(preview_round(value)))
+    .to_vec();
+    let gobo = state
+        .attributes
+        .iter()
+        .find_map(|(attribute, value)| match value {
+            AttributeValue::Preset(name) if numbered_attribute(attribute, "Gobo") => {
+                Some(name.clone())
+            }
+            _ => None,
+        });
+    if direction.is_some() || gobo.is_some() {
+        cell.push(direction.map_or(Value::Null, |vector| json!(vector.map(preview_round))));
+    }
+    if let Some(gobo) = gobo {
+        cell.push(json!(gobo));
+    }
+    Value::Array(cell)
+}
+
+/// `+ 0.0` writes -0 as 0.
+fn preview_round(value: f64) -> f64 {
+    (value * PREVIEW_DECIMALS).round() / PREVIEW_DECIMALS + 0.0
 }

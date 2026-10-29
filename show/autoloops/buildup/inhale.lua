@@ -1,0 +1,35 @@
+-- 8-beat loop
+-- energy: 2
+-- movement: still
+-- texture: wash
+local palette = sf.palette()
+local BREATH_BEATS, HOLD_BEATS, HOLD_REACH = 8, 16, 4 / 3
+local RISE_DEGREES, FAN_DEGREES = 15, 10
+local WASH_PEAK, STRIP_PEAK, MOVER_PEAK = 0.9, 0.9, 0.85
+
+local function held_breath(ctx, build)
+    local breath = sf.osc.sine(sf.section_beats(ctx), BREATH_BEATS)
+    local hold = math.min(1, HOLD_REACH * sf.approach(build, HOLD_BEATS))
+    return sf.lerp(breath, 1, hold)
+end
+
+return {
+    render = function(ctx)
+        local build = sf.build(ctx)
+        local breath = held_breath(ctx, build)
+        local level = build.drive * sf.lerp(sf.lerp(0.5, 0.15, build.tension), 1, breath)
+        return sf.scene {
+            sf.colour(sf.all(), palette.primary),
+            sf.dimmer(sf.group("wash"), WASH_PEAK * level),
+            sf.each(sf.group("strip"), function(pixel, index, count)
+                local reach = (breath - sf.from_centre(index, count)) * count / 2 + 1
+                local filled = math.max(0, math.min(1, reach))
+                return sf.dimmer(pixel, STRIP_PEAK * build.drive * filled)
+            end),
+            sf.dimmer(sf.group("movers"), MOVER_PEAK * level),
+            sf.phaser(sf.group("movers"), ctx, {
+                shape = "fan", size = FAN_DEGREES, centre_tilt = RISE_DEGREES * breath
+            })
+        }
+    end
+}

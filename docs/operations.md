@@ -37,8 +37,8 @@ proxy would break its CORS check. Transport charts retain five minutes of receiv
 audio level, interruptions, lost/dropped audio frames, scheduling error and DMX
 delivery. Counters appear as rates; missing reports and counter resets leave gaps.
 The section decoder's confidence per section type is under **Section Confidence**;
-**FX Effects** shows when each fixture group and the drop strobe can fire a special again,
-with the row that last fired, readiest first; each bar fills up live between polls as its group recovers.
+**FX Effects** shows when each fixture group, and the drop strobe, can fire again, with the row
+that last fired, readiest first; each bar fills live between polls.
 Link, telemetry and hardware faults appear only when they need attention.
 
 - **No link:** check receiver power, SSH access and TCP 19002. Heartbeats run every
@@ -98,9 +98,8 @@ than relighting it.
 
 A mover's test row also has **Sweep** and **Aim**, which move the head through the same logical
 pan as the show, so yaw, mount and soft limits apply exactly as in a loop. Sweep: the beam should
-trace the arc drawn on the plan, tilted to the focus point's elevation; if it sweeps the other
-way the yaw is wrong. Aim: the beam should pass through the focus point; if it points elsewhere,
-the yaw or mount is wrong.
+pan between the soft limits, tilted to the focus point's elevation. Aim: the beam should pass
+through the focus point; if it points elsewhere, the yaw or mount is wrong.
 
 Focus point: the MVR focus point the fixture aims at; Aim points at it. A mover's Placement has a
 **Focus point (mm)** row in scene coordinates. Until it is edited it shows the default, the
@@ -117,11 +116,12 @@ the universe or overlaps a fixture where the show runs it, a universe the show d
 mode with other cells or fewer attributes is refused in the status line and the previous test
 stays lit. Only the test sees the unsaved pose; the loops keep the rig the show loaded.
 
-Tests pin no geometry from `rig/room.mvr`: they use the frozen copies
-`autolux/tests/data/room.mvr` and `room.rig.pb` (Starfire's tests embed the same `room.rig.pb`),
-so editing the patch never breaks a test. One test checks that the committed `rig/room.rig.pb` is
-the export of `rig/room.mvr`, which a Save keeps true, and `rig/library` still supplies GDTF.
-Refresh the frozen pair, and the goldens built on it, only to change what tests cover.
+Tests pin no geometry from `rig/room.mvr`, so editing the patch never breaks one. Starfire's
+tests use the generic stage `autolux/tests/data/generic_rig/stage.mvr` and `stage.rig.pb`; the
+Python tests use the frozen copies `autolux/tests/data/room.mvr` and `room.rig.pb`. One test
+checks that the committed `rig/room.rig.pb` is the export of `rig/room.mvr`, which a Save keeps
+true, and that `rig/library` still supplies GDTF. Refresh the frozen pair, and the goldens built
+on it, only to change what tests cover.
 
 ## Metrics and logs
 

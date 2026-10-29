@@ -25,10 +25,10 @@ pub struct BeatFact {
     pub bpm: f64,
 }
 
-#[derive(Clone, Copy, Debug)]
-struct ReceivedBeat {
-    beat_index: u64,
-    grid_beat: u64,
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ReceivedBeat {
+    pub beat_index: u64,
+    pub grid_beat: u64,
 }
 
 #[derive(Clone, Debug)]
@@ -152,12 +152,19 @@ impl MusicalClock {
         self.anchor_seconds = time_seconds;
         self.anchor_beat = grid_beat as f64;
         self.anchor_elapsed_musical_beats = before.elapsed_musical_beats;
-        // Beat measurements correct musical phase; integrated animation stays continuous.
         self.anchor_animation_beats = before.animation_beats;
         self.tempo_bpm = beat.bpm;
         self.beats_per_bar = beat.beats_per_bar;
         self.last_received = Some(received);
         Ok(())
+    }
+
+    pub fn last_beat(&self) -> Option<ReceivedBeat> {
+        self.last_received
+    }
+
+    pub fn tempo_bpm(&self) -> f64 {
+        self.tempo_bpm
     }
 
     pub fn beats_per_second(&self) -> f64 {

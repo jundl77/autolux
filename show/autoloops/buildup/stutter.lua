@@ -1,47 +1,40 @@
 -- 8-beat loop
 -- energy: 3
--- movement: sweep
--- texture: mixed
+-- movement: snap
+-- texture: wash
 local palette = sf.palette()
-local LOOP_BEATS = 8
-local RAMP_BEATS = 128
-local RAMP_SHARE = 0.85
-local WASH_FLOOR, WASH_PEAK = 0.06, 0.9
-local CENTRE_PAN, TILT = 0.5, 0.6
-local START_SWING, END_SWING = 0.2, 0.03
+local ROLL_BEATS, PULSE_SHARE, FASTEST_PULSE_BEATS = 8, 0.45, 0.5
+local WASH_PEAK, STRIP_PEAK, MOVER_PEAK = 0.9, 0.9, 0.85
+local WIDE_DEGREES, NARROW_DEGREES, RISE_DEGREES = 20, 6, 15
 
-local function pulse_period_and_width(ramp)
-    if ramp < 0.33 then return 4, 0.4 end
-    if ramp < 0.66 then return 1, 0.4 end
-    return 0.5, 0.25
+local function pulse_period(ctx, build)
+    if sf.drop_within(build, ROLL_BEATS) then return FASTEST_PULSE_BEATS end
+    return ({ ctx.beats_per_bar, ctx.beats_per_bar / 2, 1 })[build.stage + 1]
 end
 
 return {
     render = function(ctx)
-        local beat = ctx.beat_position % LOOP_BEATS
-        local ramp = math.min(ctx.autoloop_elapsed_beats / RAMP_BEATS, 1)
-        local energy = sf.energy(ctx)
-        local drive = ramp * RAMP_SHARE + energy * (1 - RAMP_SHARE)
-        local gain = sf.loudness_gain(ctx.normalized_rms_level)
-        local period, width = pulse_period_and_width(ramp)
-        local pulse = sf.on_beat(beat, width, period)
-        local pulse_index = math.floor(beat / period)
-        local peak = sf.lerp(0.4, WASH_PEAK, drive)
-        local swing = sf.lerp(START_SWING, END_SWING, ramp) * sf.lerp(0.5, 1, energy)
-        local pan = swing * sf.osc.sine(beat, LOOP_BEATS, -1, 1)
-        return sf.scene({
-            sf.colour(sf.group("wash"), palette.secondary),
-            sf.dimmer(sf.group("wash"), sf.lerp(WASH_FLOOR, peak, pulse) * gain),
-            sf.colour(sf.group("strip"), palette.primary),
+        local build = sf.build(ctx)
+        local period = pulse_period(ctx, build)
+        local pulse = sf.on_beat(ctx, PULSE_SHARE * period, period)
+        local count = math.floor(ctx.beat_position / period)
+        local filled = sf.approach(build, ROLL_BEATS)
+        local level = sf.lerp(sf.lerp(0.08, 1, filled), 1, pulse)
+        local look, dark = sf.snap(ctx, ctx.beats_per_bar)
+        local rolling = period < 1
+        local spread = (rolling or look == 1) and NARROW_DEGREES or WIDE_DEGREES
+        local movers_lit = (dark and not rolling) and 0 or 1
+        return sf.scene {
+            sf.colour(sf.all(), palette.primary),
+            sf.dimmer(sf.group("wash"), WASH_PEAK * build.drive * level),
             sf.each(sf.group("strip"), function(pixel, index)
-                local lit = (index + pulse_index) % 2 == 0 and pulse or 0
-                return sf.dimmer(pixel, sf.lerp(0.3, 0.9, drive) * gain * lit)
+                local lit = (index + count) % 2 == 0 and level or level * filled
+                return sf.dimmer(pixel, STRIP_PEAK * build.drive * lit)
             end),
-            sf.colour(sf.group("movers"), palette.cold),
-            sf.dimmer(sf.group("movers"), sf.lerp(0.3, 0.8, drive) * gain),
-            sf.each(sf.group("movers"), function(mover, index)
-                return sf.pan_tilt(mover, CENTRE_PAN + sf.side(index) * pan, TILT)
-            end)
-        })
+            sf.dimmer(sf.group("movers"), MOVER_PEAK * build.drive * level * movers_lit),
+            sf.phaser(sf.group("movers"), ctx, {
+                shape = "fan", size = spread, centre_tilt = RISE_DEGREES * build.drive
+            })
+        }
     end
 }

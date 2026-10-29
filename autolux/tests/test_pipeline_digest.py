@@ -1,5 +1,3 @@
-"""Source-analysis invariants and semantic lighting checks for fast simulation."""
-
 import copy
 import json
 from pathlib import Path
@@ -32,6 +30,7 @@ def _report(beats=(), **over):
         'duration_sec': 10.0,
         'beats': list(beats),
         'effects': [],
+        'cues': [],
         'intents': [],
         'timing_log': [],
         'metrics': {
@@ -118,6 +117,84 @@ def test_reversed_commands_are_rejected():
     assert not relations_digest(_drop_report(), _streams(_accent(), _selection()))[
         'lighting_matches_report'
     ]
+
+
+def _cue(t=1.0, start=8, overlays=('hit/white',)):
+    value = {
+        'start_beat_index': start,
+        'intent': 'drop',
+        'rotation': [{'bank': 'drop', 'autoloop': 'kick', 'bars': 16}],
+        'overlays': [
+            {
+                'bank': name.split('/')[0],
+                'autoloop': name.split('/')[1],
+                'priority': 40,
+                'begin_beats': 0.0,
+                'duration_beats': 2.0,
+                'every_bars': 0,
+                'envelope': {'attack_beats': 0.0, 'release_beats': 2.0},
+                'dip': False,
+            }
+            for name in overlays
+        ],
+        'palette': 'ice_drop',
+        'seed': 1,
+    }
+    return _event(t, kind='cue_section', value=value)
+
+
+def _cued_report(*sent, played_start=8):
+    from autolux.lib.clock import VirtualClock
+    from autolux.lib.engine.event_buffer import EventBuffer
+
+    buffer = EventBuffer(window_sec=float('inf'), clock=VirtualClock())
+    buffer.start()
+    for event in sent:
+        buffer.add_cue(event['command']['value'])
+    buffer.set_intent('drop', song_sec=0.0)
+    buffer.add_effect('drop/kick', 'AUTOLOOP', cue_start_beat_index=played_start)
+    report = _report([_beat()], cues=buffer.to_report()['cues'])
+    report['intents'] = [{'t': 0.0, 'end': 10.0, 'intent': 'drop'}]
+    report['effects'] = buffer.to_report()['effects']
+    return report
+
+
+def test_a_cue_sent_is_recorded_once_and_the_look_it_entered_was_planned():
+    cue = _cue()
+    assert all(relations_digest(_cued_report(cue), _streams(cue)).values())
+    again = _cue(t=2.0)
+    assert relations_digest(_cued_report(cue, again), _streams(cue, again))[
+        'lighting_matches_report'
+    ], 'a re-sent cue is one more send and one more record'
+
+
+def test_an_unrecorded_or_twice_recorded_cue_is_rejected():
+    cue = _cue()
+    assert not relations_digest(_cued_report(), _streams(cue))['lighting_matches_report']
+    assert not relations_digest(_cued_report(cue, cue), _streams(cue))['lighting_matches_report']
+
+
+def test_a_cue_recorded_with_other_rows_is_rejected():
+    recorded, sent = _cue(overlays=('hit/white',)), _cue(overlays=('hit/strobe',))
+    assert not relations_digest(_cued_report(recorded), _streams(sent))['lighting_matches_report']
+
+
+def test_a_cue_recorded_with_another_dip_flag_is_rejected():
+    recorded, sent = _cue(overlays=('dip/last_beat',)), _cue(overlays=('dip/last_beat',))
+    sent['command']['value']['overlays'][0]['dip'] = True
+    assert not relations_digest(_cued_report(recorded), _streams(sent))['lighting_matches_report']
+
+
+def test_a_cued_look_no_cue_planned_is_rejected():
+    cue = _cue(start=8)
+    report = _cued_report(cue, played_start=16)
+    assert not relations_digest(report, _streams(cue))['lighting_matches_report']
+
+
+def test_a_cued_look_never_stands_in_for_a_selection():
+    cue = _cue()
+    report = _cued_report(cue)
+    assert not relations_digest(report, _streams(cue, _selection()))['lighting_matches_report']
 
 
 def test_command_time_must_not_go_backwards():

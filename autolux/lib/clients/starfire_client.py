@@ -1,19 +1,21 @@
-"""Musical lighting commands; process and protobuf ownership stays in the CLI."""
-
 from __future__ import annotations
 
 import math
 from collections.abc import Callable, Sequence
+from typing import TYPE_CHECKING
 
 from autolux.lighting.palettes import DEFAULT_PALETTE
 
+if TYPE_CHECKING:
+    from autolux.lib.engine.cue import CueSection
+
 RMS_LEVEL_FLOOR_DBFS = -48.0
 RMS_LEVEL_CEILING_DBFS = -12.0
+BEAT_FEATURES = ('onset', 'bass', 'mid', 'high')
 WHOLE_RIG = 'all'
 
 
 def rms_to_normalized_level(rms: float) -> float:
-    """Map smoothed signal amplitude to a bounded loudness control, not emotion."""
     if not math.isfinite(rms) or rms < 0:
         raise ValueError('RMS must be finite and nonnegative')
     if rms == 0:
@@ -33,8 +35,6 @@ def special_target(group: str) -> str | dict:
 
 
 class StarfireClient:
-    """Submit commands to a bounded nonblocking transport or simulation recorder."""
-
     def __init__(
         self,
         send_command: Callable[[dict], None],
@@ -45,16 +45,35 @@ class StarfireClient:
         self.selected_autoloop: tuple[str, str] | None = None
         self.palette: str = DEFAULT_PALETTE
 
-    def beat(self, beat_index: int, bar_phase: int | None, beats_per_bar: int, bpm: float) -> None:
-        self._send_command(
-            {
-                'kind': 'beat',
-                'beat_index': beat_index,
-                'bar_phase': bar_phase,
-                'beats_per_bar': beats_per_bar,
-                'bpm': bpm,
-            }
-        )
+    def beat(
+        self,
+        beat_index: int,
+        bar_phase: int | None,
+        beats_per_bar: int,
+        bpm: float,
+        features: dict[str, float] | None = None,
+    ) -> None:
+        command = {
+            'kind': 'beat',
+            'beat_index': beat_index,
+            'bar_phase': bar_phase,
+            'beats_per_bar': beats_per_bar,
+            'bpm': bpm,
+        }
+        if features is not None:
+            if set(features) != set(BEAT_FEATURES):
+                raise ValueError(f'beat features are exactly {BEAT_FEATURES}')
+            command['features'] = dict(features)
+        self._send_command(command)
+
+    def cue_section(self, cue: CueSection) -> dict:
+        # Starfire clears every cue on a selection or a stop, so the engine re-sends after one.
+        command = cue.command()
+        self._send_command(command)
+        return command['value']
+
+    def clear_cues(self) -> None:
+        self._send_command({'kind': 'clear_cues'})
 
     def set_normalized_rms_level(self, level: float) -> None:
         self._send_command({'kind': 'set_normalized_rms_level', 'level': level})
@@ -65,15 +84,15 @@ class StarfireClient:
         autoloop: str,
         *,
         palette: str | None = None,
-        transition: dict | None = None,
+        crossfade_beats: float | None = None,
     ) -> bool:
         identity = bank, autoloop
         palette = palette or self.palette
         if identity == self.selected_autoloop and palette == self.palette:
             return False
         command = {'kind': 'select', 'bank': bank, 'autoloop': autoloop, 'palette': palette}
-        if transition is not None:
-            command['transition'] = transition
+        if crossfade_beats is not None:
+            command['transition'] = {'crossfade_beats': crossfade_beats}
         self._send_command(command)
         self.selected_autoloop = identity
         self.palette = palette

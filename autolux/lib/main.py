@@ -17,6 +17,7 @@ from autolux.lib.engine.effect_definitions import (
     DEFAULT_INTENSITY,
     AutoloopMetaTable,
     AutoloopTable,
+    OverlayMetaTable,
     ShowSettings,
     intensity_level,
 )
@@ -34,14 +35,12 @@ from autolux.lib.ui_bridge import DEFAULT_DASHBOARD_PORT, PALETTE_POLICY
 
 LOGGER = logging.getLogger(__name__)
 
-# Production mode copies this to the native audio sender configuration.
-# simulate/runner.py uses the same delay for replay.
+# Production copies this to the native audio sender; simulate/runner.py replays with it.
 PLAYBACK_DELAY_SEC = 14.0
 _UI_ONLY_WINDOW_SEC = 60.0
 SHOW_CONFIG_PATH = Path(__file__).resolve().parents[2] / '.live' / 'show.json'
 CONTROL_QUEUE_SIZE = 16
 SETTINGS_SAVE_SETTLE_SECONDS = 1.0
-# One Starfire frame at 40 Hz: draining operator commands faster cannot reach the rig sooner.
 STARFIRE_FRAME_PERIOD_SEC = 1.0 / 40.0
 
 
@@ -110,7 +109,6 @@ class ShowControl:
         self._event_buffer = event_buffer
         self._clock = clock
         self._unsaved_change_at: float | None = None
-        # The operator's level, restored when follow-the-music is switched off.
         self._manual_intensity = (
             DEFAULT_INTENSITY if self.settings.intensity_auto else self.settings.intensity
         )
@@ -145,7 +143,6 @@ class ShowControl:
             try:
                 await self._apply(light_engine, command)
             finally:
-                # Releases the bridge request waiting for this hand-off.
                 self.commands.task_done()
         if applied:
             self.publish(light_engine)
@@ -195,7 +192,6 @@ class ShowControl:
                 None if command['name'] == PALETTE_POLICY else command['name']
             )
         elif action == 'intensity':
-            # Picking a level by hand takes the show off follow-the-music.
             self._manual_intensity = command['level']
             self._set_intensity(
                 light_engine,
@@ -211,9 +207,7 @@ class ShowControl:
             if not command['enabled']:
                 light_engine.effect_controller.forget_special(instantaneous=True)
         elif action == 'restart_show':
-            # Starfire reads the rig once per login, so only a new session loads the saved patch.
             if self._restart_show is None:
-                # The bridge answers the waiting request with this, so the panel never holds on a no-op.
                 command['refused'] = 'this show has no restart hook'
                 LOGGER.warning('[main] restart refused: %s', command['refused'])
             else:
@@ -284,6 +278,7 @@ class AutoluxController:
         show_config_path: Path = SHOW_CONFIG_PATH,
         autoloops: AutoloopTable = DEFAULT_AUTOLOOPS,
         autoloop_meta: AutoloopMetaTable = DEFAULT_AUTOLOOP_META,
+        overlay_meta: OverlayMetaTable | None = None,
         selection_seed: int = 0,
         static_rig: StaticRig = StaticRig(),  # noqa: B008
     ):
@@ -350,6 +345,7 @@ class AutoluxController:
             settings=lambda: self.control.settings,
             autoloops=autoloops,
             autoloop_meta=autoloop_meta,
+            overlay_meta=overlay_meta,
             seed=selection_seed,
             specials=discover_specials(),
             venue=read_venue(),
@@ -457,7 +453,7 @@ class AutoluxController:
             # The blocking read never yields; this lets the drain task run once its period is up.
             await asyncio.sleep(0)
             if drain.done():
-                drain.result()  # Surfaces a failed operator command instead of silently ignoring clicks.
+                drain.result()
             await self.light_engine.on_audio(audio_signal)
             new_audio_signal = await self.music_analyser.analyse(audio_signal)
             await self.command_queue.drain()
@@ -504,6 +500,5 @@ class AutoluxController:
 
     def stop(self):
         self._stop_requested = True
-        # Ctrl-C during a restart's teardown ends the show rather than relaunching it.
         self.restart_requested = False
         self.is_running = False

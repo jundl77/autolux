@@ -26,12 +26,10 @@ LONG_SINCE_DROP_SECONDS = 90.0
 ARRIVAL_BEATS = 4
 MAXIMAL_ARRIVAL_OF_PEAK = 0.9
 MAX_ENERGY = 3
-# Calm tranquilises: a drop plays from the breakdown bank and a build from the atmospheric
-# one, so the room never gets a drop look while the operator asked for calm.
 CALM_INTENT_BANKS: dict[LightIntent, LightIntent] = {
     LightIntent.DROP: LightIntent.BREAKDOWN,
-    LightIntent.BUILDUP: LightIntent.ATMOSPHERIC,
 }
+CALM_BUILD_ENERGY = 2
 WILD_MAX_ENERGY_WEIGHT = 3
 
 
@@ -51,8 +49,6 @@ class AutoloopChoice:
     autoloop: str
     meta: AutoloopMeta
     reason: str
-    # The intent whose bank the loop came from; differs from the section's intent when
-    # calm re-maps it. Rotation, palette variant and transition follow the look.
     look: LightIntent
 
 
@@ -78,10 +74,9 @@ TIER_RULES: tuple[tuple[LightIntent, str | None, tuple[int, ...], str], ...] = (
 )
 
 
-def max_energy_for_intensity(intensity: float) -> int:
+def max_energy_for_intensity(intensity: float, look: LightIntent | None = None) -> int:
     if intensity <= INTENSITY_CALM:
-        return 1
-    # Balanced and above get every tier; the renderer's intensity curve restrains them.
+        return CALM_BUILD_ENERGY if look is LightIntent.BUILDUP else 1
     if intensity < INTENSITY_BALANCED:
         return 2
     return MAX_ENERGY
@@ -106,7 +101,6 @@ def arrival_of_peak(
 
 
 def soft_drop(arrival: float | None) -> bool:
-    """A drop known to arrive below MAXIMAL_ARRIVAL_OF_PEAK; an unknown arrival is not soft."""
     return arrival is not None and arrival < MAXIMAL_ARRIVAL_OF_PEAK
 
 
@@ -146,6 +140,7 @@ class AutoloopPolicy:
         context: SelectionContext,
         exclude: tuple[str, str] | None = None,
         intensity: float = INTENSITY_BALANCED,
+        contrast: AutoloopMeta | None = None,
     ) -> AutoloopChoice:
         look = look_intent(context.intent, intensity)
         wild = intensity_level(intensity) == WILD
@@ -153,14 +148,13 @@ class AutoloopPolicy:
         if not loops:
             raise ValueError(f'{look.name} has no other autoloop')
         tiers, reason = self._tiers(context, wild)
-        max_energy = max_energy_for_intensity(intensity)
+        max_energy = max_energy_for_intensity(intensity, look)
         if max(tiers) > max_energy:
             tiers = tuple(sorted({min(tier, max_energy) for tier in tiers}))
             reason = f'{reason}; intensity caps energy at {max_energy}'
         if look != context.intent:
             reason = f'{reason}; calm plays it from the {look.value} bank'
         if wild and MAX_ENERGY not in tiers:
-            # Weights alone cannot reach energy 3 when the tier rule excluded it.
             tiers = (*tiers, MAX_ENERGY)
             reason = f'{reason}; wild adds energy {MAX_ENERGY}'
         candidates, exact = self._nearest_tier(loops, tiers)
@@ -170,6 +164,8 @@ class AutoloopPolicy:
                 f'{reason}; no energy {"/".join(map(str, tiers))} loop, '
                 f'nearest {"/".join(map(str, energies))}'
             )
+        if contrast is not None:
+            candidates, reason = self._contrasting(loops, candidates, tiers, contrast, reason)
         candidates = self._narrowed(candidates, look)
         bank, name = self._weighted_pick(candidates, look, wild)
         return AutoloopChoice(bank, name, self._meta[(bank, name)], reason, look)
@@ -215,6 +211,32 @@ class AutoloopPolicy:
 
         nearest = min(distance(loop) for loop in loops)
         return [loop for loop in loops if distance(loop) == nearest], nearest == 0
+
+    def _contrasting(
+        self, loops, candidates, tiers, contrast: AutoloopMeta, reason: str
+    ) -> tuple[list[tuple[str, str]], str]:
+
+        def differs_in(loop) -> int:
+            meta = self._meta[loop]
+            return (meta.movement != contrast.movement) + (meta.texture != contrast.texture)
+
+        def strongest(pool):
+            best = max((differs_in(loop) for loop in pool), default=0)
+            return [loop for loop in pool if differs_in(loop) == best] if best else []
+
+        against = f'{contrast.movement}/{contrast.texture}'
+        within = strongest(candidates)
+        if within:
+            return within, f'{reason}; contrasts {against}'
+        others = [loop for loop in loops if differs_in(loop)]
+        if not others:
+            return candidates, f'{reason}; nothing contrasts {against}'
+        neighbours, _ = self._nearest_tier(others, tiers)
+        neighbours = strongest(neighbours)
+        energies = '/'.join(
+            str(e) for e in sorted({self._meta[loop].energy for loop in neighbours})
+        )
+        return neighbours, f'{reason}; contrasts {against} from energy {energies}'
 
     def _narrowed(self, candidates, intent: LightIntent) -> list[tuple[str, str]]:
         last = self._last_by_intent.get(intent)

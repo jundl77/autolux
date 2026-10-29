@@ -1,14 +1,4 @@
-"""Drive the Dash control panel in headless Chrome against a stub show that echoes commands.
-
-    uv run --no-sync python tools/gui_check.py [--only NAME] [--shots DIR]
-
-The stub is the real SnapshotServer over a fake engine: each command it takes changes the
-snapshot ECHO_SECONDS later, as the engine does. tools/gui_check.mjs clicks every control
-over the Chrome DevTools protocol and checks one bridge command per operator action, no
-command from polls, and no flip-back. The Config tab saves to a scratch store whose repo
-mirror is a scratch rig/ (never the tracked one); /_harness/rig restores, bumps and reads it.
-Needs node (>= 22, for its WebSocket) and Chrome.
-"""
+"""Drive the Dash control panel in headless Chrome against a stub show that echoes commands."""
 
 import argparse
 import copy
@@ -48,17 +38,15 @@ GROUPS = {'pars': ['colour', 'dimmer'], 'spots': ['pan', 'tilt']}
 FX_ROWS = {ALL_FIXTURES: ['strobe_chase'], 'pars': ['colour_chase', 'strobe_chase'], 'spots': []}
 ROOM = ROOT / 'autolux/tests/data/room.mvr'
 SCENE_XML = 'GeneralSceneDescription.xml'
-# group -> (cooldown total, seconds since it last fired at start, last row)
+IDLE_PRIORITY_CLASS = 0x40
 COOLDOWNS = {'pars': (8.0, 3.0, 'colour_chase'), 'spots': (6.0, 60.0, 'pan_sweep')}
 
 
 def running_rig(path: Path) -> tuple[str, dict]:
-    """What a show booted on the store at `path` reports: its revision and Starfire's rig."""
     return rig_revision(path.read_bytes()), static_rig(path).published()
 
 
 def _autoloop(intensity: float) -> dict:
-    # Calm under a DROP plays a breakdown loop, as the engine's intensity remap does.
     level = intensity_level(intensity)
     bank, loop = ('breakdown', 'afterglow') if level == 'calm' else ('drop', 'chase')
     selection = {'intent': 'drop', 'look': bank, 'level': level}
@@ -66,17 +54,13 @@ def _autoloop(intensity: float) -> dict:
 
 
 class StubShow:
-    """The engine's side of the bridge: fixed data, a monotonic clock for cooldowns.
-
-    It boots on the store at `rig_path`; restart_show reboots it on whatever the store holds
-    then, as a real show's next session would.
-    """
-
     def __init__(self, rig_path: Path, clock=time.monotonic):
         self._clock = clock
         self._lock = threading.Lock()
         self._base = EventBuffer().snapshot()
         self.rig_path = Path(rig_path)
+        self._due = queue.Queue()
+        threading.Thread(target=self._apply_in_order, daemon=True).start()
         self.reset()
 
     def reset(self) -> None:
@@ -85,8 +69,6 @@ class StubShow:
             self.commands = []
             self.blank = False
             self.down = False
-            # The bridge reads the show paused while the snapshot still says playing: a pause
-            # that lands between the page's poll and its command.
             self.refuse_paused = False
             revision, rig = running_rig(self.rig_path)
             self.state = {
@@ -158,7 +140,13 @@ class StubShow:
     def take(self, command: dict) -> None:
         with self._lock:
             self.commands.append({'t': time.time(), 'cmd': command})
-        threading.Timer(ECHO_SECONDS, self._apply, args=(command,)).start()
+        self._due.put((time.monotonic() + ECHO_SECONDS, command))
+
+    def _apply_in_order(self) -> None:
+        while True:
+            due, command = self._due.get()
+            time.sleep(max(0.0, due - time.monotonic()))
+            self._apply(command)
 
     def _apply(self, c: dict) -> None:
         with self._lock:
@@ -172,7 +160,6 @@ class StubShow:
                 s['master_brightness'] = c['level']
             elif a == 'intensity':
                 settings.update(intensity=c['level'], intensity_auto=False)
-                # A level change reselects the loop, as the engine's intensity remap does.
                 s['current_effect'] = _autoloop(c['level'])
             elif a in ('intensity_auto', 'fx_auto'):
                 settings[a] = c['enabled']
@@ -189,7 +176,6 @@ class StubShow:
                     key: c[key] for key in ('target', 'colour', 'sweep', 'aim')
                 }
             elif a == 'restart_show':
-                # A new session and Starfire login: the test is gone and the rig is the store's.
                 s['rig_revision'], s['rig'] = running_rig(self.rig_path)
                 s['session'] = uuid.uuid4().hex
                 s['highlight'] = None
@@ -218,7 +204,6 @@ class StubShow:
             }
 
     def control(self, payload: dict) -> None:
-        """Harness-only changes the engine would make on its own."""
         now = self._clock()
         with self._lock:
             if 'blank' in payload:
@@ -234,7 +219,6 @@ class StubShow:
             if 'special' in payload:
                 self.state['special'] = payload['special']
             if 'paused' in payload:
-                # As a pause from the engine: it drops any test.
                 self.state['paused'] = bool(payload['paused'])
                 if self.state['paused']:
                     self.state['highlight'] = None
@@ -256,8 +240,6 @@ def engine(show: StubShow, commands: queue.Queue) -> None:
 
 
 class RigFiles:
-    """The store the panel saves to and its repo mirror, both in the harness's scratch directory."""
-
     def __init__(self, scratch: Path):
         self.store = scratch / 'store.mvr'
         self.repo = scratch / 'repo/rig/room.mvr'
@@ -271,7 +253,6 @@ class RigFiles:
         self.repo_pb.write_bytes(ROOM.with_suffix('.rig.pb').read_bytes())
 
     def bump(self) -> None:
-        """Changes the store's bytes (a zip comment) behind the page, as another save would."""
         staged = self.store.with_suffix('.bump')
         with zipfile.ZipFile(self.store) as source, zipfile.ZipFile(staged, 'w') as target:
             for info in source.infolist():
@@ -281,7 +262,6 @@ class RigFiles:
 
     @staticmethod
     def _entries(path: Path) -> dict:
-        # The scene XML as text for the page to diff; every other entry by its hash.
         with zipfile.ZipFile(path) as archive:
             return {
                 name: archive.read(name).decode('utf-8')
@@ -317,7 +297,6 @@ class RigFiles:
             'repo': self._entries(self.repo),
             'repo_same_as_store': self.repo.read_bytes() == store,
             'repo_pb': rig_revision(self.repo_pb.read_bytes()),
-            # The pb Starfire would accept for the store as it is now.
             'pb_of_store': rig_revision(rig_bytes(self.store)),
             'original_pb': rig_revision(ROOM.with_suffix('.rig.pb').read_bytes()),
             'original': self._entries(ROOM),
@@ -358,12 +337,11 @@ def add_harness_routes(app, show: StubShow, files: RigFiles) -> None:
 
 
 def run_idle() -> None:
-    # Chrome and node inherit the class, so a live show on this machine keeps the CPU.
     if os.name == 'nt':
         import ctypes
 
         kernel = ctypes.windll.kernel32
-        kernel.SetPriorityClass(kernel.GetCurrentProcess(), 0x40)  # IDLE_PRIORITY_CLASS
+        kernel.SetPriorityClass(kernel.GetCurrentProcess(), IDLE_PRIORITY_CLASS)
 
 
 def main(argv=None) -> int:
@@ -406,7 +384,6 @@ def main(argv=None) -> int:
         finally:
             server.shutdown()
             bridge.stop()
-            # Chrome can hold its profile for a moment after exit.
             time.sleep(1)
     return result.returncode
 

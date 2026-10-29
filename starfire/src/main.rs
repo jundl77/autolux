@@ -15,11 +15,12 @@ use starfire::engine::{Engine, RenderedFrame, extinguish};
 use starfire::fixtures::FixtureRig;
 use starfire::model::{Command, Transition};
 use starfire::palette::PaletteTable;
-use starfire::replay::{Replay, dmx_digest, render_replay, write_capture};
+use starfire::replay::{Replay, dmx_digest, render_replay, write_capture, write_preview};
 use starfire::script::{AutoloopCatalog, missing_groups_warning};
 
 const DEFAULT_RIG: &str = "rig/room.rig.pb";
 const DEFAULT_AUTOLOOPS: &str = "show/autoloops";
+const DEFAULT_PREVIEW_RATE_HZ: u32 = 10;
 const STOP_POLL_INTERVAL: Duration = Duration::from_millis(20);
 const MIN_STROBE_SAMPLES_PER_CYCLE: f64 = 4.0;
 
@@ -66,6 +67,19 @@ enum Action {
         /// Stop paced output when this path appears; owned by the launching CLI.
         #[arg(long, requires = "artnet")]
         stop_file: Option<PathBuf>,
+    },
+    /// Render recorded input to per-fixture preview frames (JSON lines) for the Config plan.
+    Preview {
+        #[arg(long)]
+        input: PathBuf,
+        #[arg(long, default_value = DEFAULT_RIG)]
+        rig: PathBuf,
+        #[arg(long, default_value = DEFAULT_AUTOLOOPS)]
+        autoloops: PathBuf,
+        #[arg(long)]
+        output: PathBuf,
+        #[arg(long, default_value_t = DEFAULT_PREVIEW_RATE_HZ)]
+        rate: u32,
     },
     /// List registered bank/autoloop identities.
     List {
@@ -141,6 +155,35 @@ fn run(arguments: Arguments) -> Result<()> {
             ctrlc::set_handler(move || handler_stop.store(true, Ordering::Relaxed))
                 .context("install live stop handler")?;
             starfire::live::run_live(std::io::stdin(), std::io::stdout(), &stop)?;
+        }
+        Action::Preview {
+            input,
+            rig,
+            autoloops,
+            output,
+            rate,
+        } => {
+            validate_output_paths(&input, &rig, Some(&output), None)?;
+            let replay = Replay::load(&input)?;
+            let rig = FixtureRig::load(&rig)?;
+            let catalogue = AutoloopCatalog::load(&autoloops)?;
+            let file = std::fs::File::create(&output)
+                .with_context(|| format!("create preview {}", output.display()))?;
+            let summary = write_preview(
+                &replay,
+                rig,
+                catalogue,
+                rate,
+                &mut std::io::BufWriter::new(file),
+            )?;
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&json!({
+                    "frames": summary.frames, "frame_rate_hz": rate,
+                    "duration_seconds": replay.duration_seconds,
+                    "script_errors": summary.script_errors,
+                }))?
+            );
         }
         Action::List { autoloops } => {
             println!(
@@ -354,13 +397,16 @@ mod tests {
             _ => unreachable!(),
         };
         let mut sender = ArtNetOutput::bind("127.0.0.1:0".parse().unwrap(), destination).unwrap();
-        let rig =
-            FixtureRig::decode(include_bytes!("../../autolux/tests/data/room.rig.pb")).unwrap();
+        let rig = FixtureRig::decode(include_bytes!(
+            "../../autolux/tests/data/generic_rig/stage.rig.pb"
+        ))
+        .unwrap();
         play_frames(&[], &rig, &mut sender, &AtomicBool::new(true), None).unwrap();
         let mut packet = [0; 1024];
         let count = listener.recv(&mut packet).unwrap();
         assert_eq!(count, 530);
-        for dimmer in [7, 19, 68, 76, 84, 92] {
+        let stage_dimmer_channels = [4, 12, 20, 28, 39, 51];
+        for dimmer in stage_dimmer_channels {
             assert_eq!(packet[18 + dimmer], 0);
         }
     }

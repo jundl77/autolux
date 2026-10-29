@@ -89,7 +89,14 @@ async def test_report_conversion_writes_native_input_without_modifying_report(tm
     args = argparse.Namespace(input=source, output=output, frame_rate_hz=40)
     await starfire.convert_report(args)
     replay = json.loads(output.read_text())
-    assert replay['events'][0]['at_seconds'] == replay['events'][1]['at_seconds'] == 1.0
+    assert [(event['at_seconds'], event['command']['kind']) for event in replay['events']] == [
+        (0.0, 'cue_section'),
+        (1.0, 'beat'),
+        (20.0, 'stop'),
+    ]
+    cue = replay['events'][0]['command']['value']
+    assert (cue['start_beat_index'], cue['intent']) == (0, 'drop')
+    assert replay['events'][1]['command']['beat_index'] == 0
     assert json.loads(source.read_text()) == report
     args.output = source
     with pytest.raises(ValueError, match='must differ'):
@@ -121,7 +128,6 @@ async def test_next_replay_loads_saved_fixture_patch_unless_operator_selects_ano
         rig=None,
     )
     await starfire.run_native(args)
-    # A real patch: every start refreshes the saved store's profiles from the library.
     saved.write_bytes((starfire.ROOT / 'autolux/tests/data/room.mvr').read_bytes())
     await starfire.run_native(args)
     args.rig = explicit
@@ -231,7 +237,6 @@ def test_save_refuses_a_patch_the_show_start_would_refuse(tmp_path):
     validate = starfire.patch_validator(binary, starfire.DEFAULT_AUTOLOOPS, expected_universe=0)
     store = FixtureStore(rig, starfire.FIXTURE_LIBRARY, validate)
     draft, revision = store.load()
-    # What the raw inspector's set-address writes for universe 2, address 89.
     wash = next(
         node
         for node in mvr._nodes(draft['scene'])

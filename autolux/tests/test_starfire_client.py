@@ -118,7 +118,7 @@ def test_renderer_settings_and_a_default_transition_use_the_replay_command_shape
     calls = []
     client = StarfireClient(calls.append)
     client.select_autoloop('breakdown', 'wide_space')
-    client.select_autoloop('drop', 'kick', transition={'kind': 'cut'})
+    client.select_autoloop('drop', 'kick', crossfade_beats=0.0)
     client.set_paused(True)
     client.set_default_crossfade_beats(2.0)
     client.set_strobe_limits(6.0, 3.0)
@@ -129,7 +129,7 @@ def test_renderer_settings_and_a_default_transition_use_the_replay_command_shape
             'bank': 'drop',
             'autoloop': 'kick',
             'palette': 'techno',
-            'transition': {'kind': 'cut'},
+            'transition': {'crossfade_beats': 0.0},
         },
         {'kind': 'set_paused', 'paused': True},
         {'kind': 'set_default_crossfade_beats', 'beats': 2.0},

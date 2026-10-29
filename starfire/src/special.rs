@@ -6,12 +6,11 @@ use anyhow::{Result, ensure};
 
 use crate::fixtures::FixtureRig;
 use crate::gdtf::{FunctionInfo, GdtfProfile, numbered_attribute as numbered};
-use crate::model::{AttributeValue, FixtureState, SpecialFx, lerp};
+use crate::model::{AttributeValue, FixtureState, MAX_SPAN_BEATS, SpecialFx, lerp};
 use crate::palette::PaletteSlots;
 use crate::protocol::wire;
 use crate::spatial::MM_PER_METRE;
 
-pub const MAX_ENVELOPE_BEATS: f64 = 1_024.0;
 pub const MAX_PULSE_BEATS: u32 = 64;
 pub const MAX_SCAN_CYCLES_PER_BEAT: f64 = 0.5;
 const PULSE_OPEN_FRACTION: f64 = 0.5;
@@ -236,15 +235,10 @@ pub fn validate(special: &SpecialFx) -> Result<()> {
             "special {name} must be between zero and one"
         );
     }
-    for (name, value) in [
-        ("attack", special.attack_beats),
-        ("release", special.release_beats),
-    ] {
-        ensure!(
-            value.is_finite() && (0.0..=MAX_ENVELOPE_BEATS).contains(&value),
-            "special {name} must be 0..{MAX_ENVELOPE_BEATS} beats"
-        );
-    }
+    ensure!(
+        special.envelope.is_valid(),
+        "special attack and release must be 0..{MAX_SPAN_BEATS} beats"
+    );
     ensure!(
         special
             .pulse_beats
@@ -301,22 +295,6 @@ pub fn capped_pulse_beats(
     } else {
         beats
     })
-}
-
-pub fn attack_level(special: &SpecialFx, elapsed_beats: f64) -> f64 {
-    if special.attack_beats > 0.0 {
-        (elapsed_beats / special.attack_beats).clamp(0.0, 1.0)
-    } else {
-        1.0
-    }
-}
-
-pub fn release_level(special: &SpecialFx, from_level: f64, elapsed_beats: f64) -> f64 {
-    if special.release_beats > 0.0 {
-        from_level * (1.0 - elapsed_beats / special.release_beats).clamp(0.0, 1.0)
-    } else {
-        0.0
-    }
 }
 
 /// Musical time and session state one special renders against.

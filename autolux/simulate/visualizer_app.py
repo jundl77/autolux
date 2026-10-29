@@ -1,11 +1,16 @@
 import argparse
+import base64
 import http.client
 import itertools
 import json
 import logging
+import os
 import re
+import subprocess
+import tempfile
 import threading
 import time
+from pathlib import Path
 from statistics import median
 
 import dash
@@ -39,6 +44,13 @@ from autolux.lib.ui_bridge import (
 )
 from autolux.lighting.fixture_setup import FixtureStore
 from autolux.lighting.palettes import PALETTES, base_palette_name
+from autolux.lighting.starfire_replay import (
+    bar_starts,
+    is_preview,
+    load_preview,
+    preview_overview,
+    report_to_replay,
+)
 from autolux.simulate import system_metrics
 from autolux.simulate.fixture_panel import FIXTURE_CSS, build_fixture_panel
 from autolux.simulate.runner import TIMING_TOLERANCE_SEC
@@ -47,17 +59,12 @@ LOGGER = logging.getLogger(__name__)
 TITLE = 'Autolux'
 TIMELINE_WINDOW_SEC = 30.0
 TIMELINE_LEAD_SEC = 0.5
-# Drawn past the lead so the strip the browser translates in from the right is
-# always future the audience has not reached, never a gap in the show.
 TIMELINE_PAD_SEC = 1.0
 TIMELINE_FULL_SEC = TIMELINE_WINDOW_SEC + TIMELINE_LEAD_SEC + TIMELINE_PAD_SEC
 NOW_CURSOR_X = TIMELINE_WINDOW_SEC / TIMELINE_FULL_SEC
 TIMELINE_MARGIN_L_PX = 8
 TIMELINE_MARGIN_R_PX = 8
-# The cursor's fraction is of the AXIS, not of the container: ignoring the
-# figure margins parked it a constant ~7 px right of the axis' now, which at
-# this scale is ~150 ms of claimed future -- measured as a -146 ms crossing
-# bias on every marker, and worse the narrower the window.
+# Of the axis, not the container: the figure margins once biased every marker by -146 ms.
 NOW_CURSOR_LEFT = (
     f'calc({TIMELINE_MARGIN_L_PX}px + {NOW_CURSOR_X * 100:.4f}% - '
     f'{NOW_CURSOR_X:.6f} * {TIMELINE_MARGIN_L_PX + TIMELINE_MARGIN_R_PX}px)'
@@ -153,10 +160,6 @@ def _room_sound_events(snapshot: dict) -> list:
 
 
 def _room_markers(snapshot: dict) -> list:
-    # Heard boundaries, plus the stop still travelling: that one rides the lead
-    # strip and crosses the cursor at exactly its room instant -- the instant
-    # the display ends the song, so afterwards there is no axis to draw it on.
-    # A resume inside the window elides it before the room ever reaches it.
     now = snapshot.get('now', 0.0)
     heard = [(event['t'], event['playing']) for event in _room_sound_events(snapshot)]
     pending = [(stop, False) for stop in _room_stops(snapshot) if stop > now]
@@ -225,9 +228,6 @@ def _song_and_room(snapshot: dict) -> tuple:
 
 
 def _anchor(snapshot: dict) -> dict:
-    # Every beat is stamped one look-ahead before the room hears it, so the
-    # whole drawable window -- the lead included -- is known in advance and the
-    # browser can land each marker at exactly its room instant.
     origin = _song_origin(snapshot)
     now = _display_now(snapshot, origin)
     beats = (
@@ -392,9 +392,6 @@ def _build_timeline(snapshot: dict) -> go.Figure:
                 }
             )
 
-    # Beats are deliberately NOT drawn here: a figure push arrives most of a
-    # second after the beat it carries, so the browser owns the markers (see
-    # ANIMATION_JS) and this figure carries everything that is known ahead.
     fig = go.Figure()
     fig.update_layout(
         shapes=shapes,
@@ -504,7 +501,6 @@ def _fx_text(snapshot: dict) -> str | None:
     special = snapshot.get('special')
     if special:
         return f'{fx_row_label(special["name"])} · {special["group"]}'
-    # The operator's held row reads apart from the show's own pick.
     held = (snapshot.get('static') or {}).get('special_fx')
     if held:
         return f'Static · {fx_row_label(held["name"])} · {held["group"]}'
@@ -523,7 +519,6 @@ MISSED_RATE = 'starfire_missed_render_deadlines_per_second'
 
 
 def render_window(history: list, now: float) -> tuple[float | None, int]:
-    """Rendered frames per second and missed deadlines over the last few seconds of samples."""
     if not history or not 0 <= now - history[-1]['at'] < TELEMETRY_STALE_SECONDS:
         return None, 0
     recent = [sample for sample in history if now - sample['at'] <= RENDER_WINDOW_SECONDS]
@@ -555,7 +550,6 @@ def _track_status(snapshot: dict) -> list:
     if len(text) <= TRACK_TITLE_CHARS:
         value = text
     else:
-        # Two copies scroll by half their width, so the loop has no seam.
         value = html.Span(
             [html.Span(text), html.Span(text, **{'aria-hidden': 'true'})],
             className='marquee',
@@ -572,7 +566,6 @@ def _autoloop_status(snapshot: dict, cfg: dict, name: str | None, detail: str):
     tag = selection.get('intent') or cfg['label'].lower()
     if selection.get('look') not in (None, selection.get('intent')):
         tag = f'{tag} · {selection.get("level")}'
-    # The dot is the loop's own bank: a level remap can play a breakdown loop under a DROP.
     bank = name.split('/', 1)[0] if name else None
     value = [
         _dot(INTENT_CONFIG.get(bank, cfg)['primary']),
@@ -665,7 +658,6 @@ SETTINGS_ORDER = (
     'strobe_burst_seconds',
     'drop_strobe_cooldown_seconds',
 )
-# FX chips: automatic specials on or off.
 FX_AUTO_IDS = {'control-fx-auto': True, 'control-fx-off': False}
 INTENSITY_LEVELS = (
     (CALM, INTENSITY_CALM),
@@ -718,8 +710,6 @@ def group_master_rows(groups, settings: dict | None, *, disabled: bool) -> list:
     ]
 
 
-# Sends only group_masters, with the one group changed: the engine merges it, so a stale
-# poll of any other setting is never sent back.
 GROUP_MASTER_JS = '''function(level, state) {
     if (level === null || level === undefined) {
         return '—';
@@ -794,9 +784,6 @@ _SETTING_LIMITS = [
     for low, high in [SHOW_SETTING_RANGES[name]]
 ]
 
-# Validates every field and sends the edited one, alone: the show keeps every other setting
-# as it has it, never a stale poll's copy. A field the poll filled reads exactly the show's
-# own text, so it sends nothing.
 SETTINGS_FORM_JS = (
     r'''function(...values) {
         const state = window.autoluxControl.view(values.pop()) || {};
@@ -860,17 +847,13 @@ def _with_base_palette(snapshot: dict) -> dict:
     palette = snapshot.get('palette') or {}
     if not palette.get('name'):
         return snapshot
-    # The show reports the section's variant (ice_breakdown); the dropdown and the pin speak base names.
     return {
         **snapshot,
         'palette': {**palette, 'name': base_palette_name(palette['name'])},
     }
 
 
-# The dropdown is the operator's: a poll writes it only when the show reports a different pin
-# than the last poll did, so a pick survives the stale polls before its pin lands.
-# Poll-driven writes to operator controls go through set_props rather than Outputs: an Output
-# would make the control's own callback wait for every in-flight poll before it may run.
+# set_props, not an Output: an Output would make the operator's callback wait for each poll.
 PALETTE_SYNC_JS = (
     """function(state) {
     const palette = state && state.palette;
@@ -982,7 +965,6 @@ def _build_control_card() -> list:
                         html.Div(
                             [
                                 html.Span('Intensity', className='control-label'),
-                                # Auto and the levels read as one joined control.
                                 html.Div(
                                     [
                                         html.Button(
@@ -1065,8 +1047,6 @@ STATIC_PRESETS = {
     'off': 'Off',
 }
 STATIC_PRESET_IDS = {f'static-preset-{name}': name for name in STATIC_PRESETS}
-# Targets and UV come from the rig the show published; a rig without UV fixtures
-# greys the UV chip rather than offering commands the show would refuse.
 STATIC_TARGETS_JS = (
     '''function(state) {
     const all = '''
@@ -1104,7 +1084,6 @@ STATIC_SELECTED_TAB_STYLE = {
 
 
 def _build_static_fx():
-    # Catalogue rows that fit the chosen target; picking one holds it until Clear FX.
     return html.Div(
         [
             html.Div(
@@ -1142,7 +1121,6 @@ def _build_static_panel():
                         type='color',
                         value=colour_hex(PRESET_COLOURS['warm']),
                         debounce=0.3,
-                        # Restoring the last chosen colour sends nothing: the callback skips initial calls.
                         persistence=True,
                         persistence_type='local',
                     ),
@@ -1187,7 +1165,6 @@ OVERLAY_BANNER_JS = (
 )
 
 
-# Clear all has nothing to remove once the show is back on auto.
 CLEAR_GATE_JS = '''function(state) {
     state = window.autoluxControl.view(state);
     return !(state && state.mode === 'static');
@@ -1206,7 +1183,6 @@ def _build_overlay_banner():
     )
 
 
-# Before the first poll neither FX chip is lit, as the show's choice is not known yet.
 CHIPS_SYNC_JS = '''function(state) {
     const settings = (window.autoluxControl.view(state) || {}).settings;
     window.autoluxControl.paintFx(settings ? settings.fx_auto !== false : null);
@@ -1214,7 +1190,6 @@ CHIPS_SYNC_JS = '''function(state) {
 }'''
 
 
-# The Auto tab's clicks flip their own look at once; the bridge round trip never gates it.
 AUTO_CONTROLS_JS = (
     """function(toggles, nexts, palette, intensity, follows, fxOn, fxOff, state) {
             const control = window.autoluxControl;
@@ -1328,7 +1303,6 @@ def _register_static_controls(app) -> None:
             });
             return presets.map((id) => id === chip ? 'active' : '');
         }""",
-        # The clear buttons keep their own ghost-button class.
         *[Output(name, 'className') for name in STATIC_PRESET_IDS],
         *[Input(name, 'n_clicks') for name in STATIC_CHIP_IDS],
         Input('static-colour', 'value'),
@@ -1338,9 +1312,6 @@ def _register_static_controls(app) -> None:
     )
 
 
-# The picker lists the rows that fit the target and shows the one held there. It writes the
-# picker's value only when that changes, through set_props: an Output would make the pick's own
-# callback wait for every in-flight poll.
 FX_ROWS_JS = (
     """function(target, state) {
     state = window.autoluxControl.view(state);
@@ -1548,7 +1519,6 @@ def _cooldown_bar(row: dict):
     label = row.get('label') or row['group']
     if row['last']:
         label += ' · ' + fx_row_label(row['last'])
-    # control.js draws the fill, the caption and the ready look from the data attributes.
     return html.Div(
         [
             html.Div(
@@ -1561,7 +1531,6 @@ def _cooldown_bar(row: dict):
             html.Div(html.Div(className='cooldown-fill'), className='cooldown-track'),
         ],
         className='cooldown-row',
-        # group and last let the ticker spot a fire even when Dash reuses this element.
         **{
             'data-group': row['group'],
             'data-last': row['last'] or '',
@@ -1864,7 +1833,7 @@ CALLBACK_RESOLVED_JS = (
 )
 
 GATE_JS = (
-    'function(n, selected, control) {'
+    'function(n, selected) {'
     + _GATE_STATE_JS
     + '''
     const changed = gate.tab !== selected || gate.hidden;
@@ -1894,10 +1863,11 @@ GATE_JS = (
     + ''';
     if (timeline) gate.viewAt = now;
     if (metrics) gate.metricsAt = now;
-    // The rig changes only on a show restart, so it is fetched once per rig revision.
-    if (control && 'rig' in control) gate.rig = control.rig_revision;
+    // The rig changes only on a show restart, so a request names the revision the Config page
+    // holds and the show sends the rig until the page has taken it: a control state that
+    // carried it but was overtaken before the page saw it cannot lose it.
     const request = {tick: n, tab: selected, timeline: timeline, metrics: metrics};
-    if ('rig' in gate) request.rig = gate.rig;
+    if (ds.fixture_rig_revision !== undefined) request.rig = ds.fixture_rig_revision;
     return request;
 }'''
 )
@@ -1925,8 +1895,6 @@ POLL_TIMEOUT_SEC = 1.0
 
 
 class SnapshotPoller:
-    """The show over a socket, in place of the EventBuffer this used to hold."""
-
     def __init__(
         self,
         host: str = SNAPSHOT_HOST,
@@ -1971,6 +1939,252 @@ class SnapshotPoller:
             self._lock.release()
 
 
+PREVIEW_UPLOAD_MAX_BYTES = 32 * 1024 * 1024
+PREVIEW_RENDER_TIMEOUT_SEC = 300
+PREVIEW_FRAMES_PATH = '/preview/frames'
+PREVIEW_BAR_LABELS = 12
+PREVIEW_CSS = '''
+.preview-card {margin-top:16px;}
+.preview-card .patch-heading {margin-bottom:10px;}
+.preview-label {min-height:16px;margin-bottom:6px;font-size:12px;color:var(--muted);}
+.preview-scrub,.preview-overview {display:grid;grid-template-columns:110px minmax(0,1fr);gap:2px 8px;}
+.preview-scrub {align-items:center;}
+.preview-transport {display:flex;align-items:center;gap:12px;}
+.preview-beat {width:12px;height:12px;border-radius:50%;background:#1d2733;flex:none;}
+.preview-beat.on {background:#73b6ff;}
+.preview-beat.bar {background:#e6edf3;box-shadow:0 0 6px #e6edf3;}
+.preview-overview {position:relative;font-size:11px;color:var(--muted);margin-top:6px;}
+.preview-overview {cursor:pointer;}
+.preview-overview:focus-visible {outline:1px solid var(--accent);}
+.preview-overview svg {display:block;width:100%;height:12px;background:#0b121c;}
+.preview-overview svg.band {height:22px;}
+.preview-overview .preview-headroom {stroke:#e5534b;stroke-width:1;stroke-dasharray:3 3;}
+.preview-banks {position:relative;height:14px;}
+.preview-banks span {position:absolute;top:0;overflow:hidden;white-space:nowrap;}
+.preview-banks .drop {color:#f0c674;font-weight:600;}
+.preview-overview .preview-cursor,.preview-overview .preview-phrase {position:absolute;top:0;bottom:0;width:1px;pointer-events:none;}
+.preview-overview .preview-cursor {background:#e6edf3;}
+.preview-overview .preview-phrase {background:#5d6d80;opacity:.7;}
+#mvr-plan:has(svg.elevation) {display:grid;grid-template-columns:3fr 2fr;gap:8px;}
+#mvr-plan:has(svg.elevation) .plan-legend {grid-column:1 / -1;}
+#mvr-plan svg.elevation {display:block;width:100%;height:max(480px,55vh);background:#0b121c;border:1px solid #273345;border-radius:4px;}
+#mvr-plan .plan-strobe {fill:none;stroke:#f5f7fa;}
+#mvr-plan svg circle.preview-cell {stroke:var(--group);}
+#mvr-plan svg.elevation .selected circle:not(.plan-strobe) {stroke:var(--accent);}
+#mvr-plan svg.elevation text {fill:var(--muted);}
+@media (max-width:700px) {#mvr-plan:has(svg.elevation) {grid-template-columns:1fr;}}
+'''
+
+
+def render_recording(report: dict, rig_path: Path) -> str:
+    from cli.starfire import DEFAULT_AUTOLOOPS, DEFAULT_BINARY
+    from cli.starfire_assets import native_rig
+
+    if not DEFAULT_BINARY.is_file():
+        raise ValueError(f'the Starfire binary is missing: {DEFAULT_BINARY}; build it first')
+    replay = report_to_replay(report, autoloops=DEFAULT_AUTOLOOPS)
+    with (
+        tempfile.TemporaryDirectory(prefix='autolux-preview-') as directory,
+        native_rig(rig_path) as rig,
+    ):
+        source, target = Path(directory) / 'replay.json', Path(directory) / 'preview.jsonl'
+        source.write_text(json.dumps(replay, allow_nan=False), encoding='utf-8')
+        subprocess.run(
+            [
+                str(DEFAULT_BINARY),
+                'preview',
+                '--input',
+                str(source),
+                '--rig',
+                str(rig),
+                '--autoloops',
+                str(DEFAULT_AUTOLOOPS),
+                '--output',
+                str(target),
+            ],
+            check=True,
+            capture_output=True,
+            encoding='utf-8',
+            errors='replace',
+            timeout=PREVIEW_RENDER_TIMEOUT_SEC,
+            stdin=subprocess.DEVNULL,
+            creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0,
+        )
+        if target.stat().st_size > PREVIEW_UPLOAD_MAX_BYTES:
+            raise ValueError(f'the preview exceeds {PREVIEW_UPLOAD_MAX_BYTES} bytes')
+        return target.read_text(encoding='utf-8')
+
+
+def preview_marks(preview) -> dict:
+    starts = bar_starts(preview)
+    step = 1
+    while len(starts) > PREVIEW_BAR_LABELS * step:
+        step *= 2
+    return {frame: str(bar) for bar, frame in starts if (bar - 1) % step == 0}
+
+
+def _build_preview_card():
+    return html.Div(
+        [
+            html.Div(
+                [
+                    html.H3('Preview recording'),
+                    html.Span(
+                        'Load a session report (rendered on the saved patch) or a starfire '
+                        'preview file.',
+                        id='preview-status',
+                        className='patch-muted',
+                        role='status',
+                    ),
+                    dcc.Upload(
+                        html.Button('Load recording', type='button'),
+                        id='preview-upload',
+                        accept='.json,.jsonl',
+                        max_size=PREVIEW_UPLOAD_MAX_BYTES,
+                    ),
+                ],
+                className='patch-heading',
+            ),
+            html.Div(id='preview-label', className='preview-label'),
+            html.Div(
+                [
+                    html.Div(
+                        [
+                            html.Button('Play', id='preview-play', type='button', disabled=True),
+                            html.Span(id='preview-beat', className='preview-beat'),
+                        ],
+                        className='preview-transport',
+                    ),
+                    dcc.Slider(
+                        id='preview-frame',
+                        min=0,
+                        max=0,
+                        step=1,
+                        value=0,
+                        marks=None,
+                        updatemode='drag',
+                        allow_direct_input=False,
+                        disabled=True,
+                    ),
+                ],
+                className='preview-scrub',
+            ),
+            html.Div(
+                id='preview-overview',
+                className='preview-overview',
+                tabIndex='0',
+                title='Click to seek; arrows step a beat, Shift+arrows a bar, PgUp/PgDn a section',
+            ),
+            dcc.Interval(id='preview-clock', interval=100, disabled=True),
+            dcc.Store(id='preview-source'),
+            dcc.Store(id='preview-ready'),
+        ],
+        id='preview-card',
+        className='patch-card preview-card',
+    )
+
+
+def _register_preview(app, fixture_store: FixtureStore) -> None:
+    from flask import Response
+
+    lock = threading.Lock()
+    loaded = {'text': None, 'revision': 0}
+
+    @app.server.route(PREVIEW_FRAMES_PATH)
+    def preview_frames():
+        with lock:
+            text = loaded['text']
+        if text is None:
+            return Response('no recording loaded', status=404)
+        return Response(
+            text, mimetype='application/x-ndjson', headers={'Cache-Control': 'no-store'}
+        )
+
+    @app.callback(
+        Output('preview-source', 'data'),
+        Output('preview-frame', 'max'),
+        Output('preview-frame', 'marks'),
+        Output('preview-frame', 'disabled'),
+        Output('preview-play', 'disabled'),
+        Output('preview-clock', 'interval'),
+        Output('preview-status', 'children'),
+        Input('preview-upload', 'contents'),
+        State('preview-upload', 'filename'),
+        prevent_initial_call=True,
+    )
+    def load_recording(contents, filename):
+        unchanged = [dash.no_update] * 6
+        try:
+            text = base64.b64decode(contents.split(',', 1)[1]).decode('utf-8')
+            if not is_preview(text):
+                text = render_recording(json.loads(text), fixture_store.rig_path)
+            preview = load_preview(text)
+        except subprocess.CalledProcessError as error:
+            reason = (error.stderr or '').strip().splitlines()[-1:] or [f'exit {error.returncode}']
+            return [*unchanged, f'{filename}: Starfire refused it: {reason[0]}']
+        except (ValueError, TypeError, KeyError, OSError, subprocess.TimeoutExpired) as error:
+            return [*unchanged, f'{filename}: not loaded: {error}']
+        with lock:
+            loaded['text'] = text
+            loaded['revision'] += 1
+            revision = loaded['revision']
+        rate = preview.rate_hz
+        faults = sum(1 for frame in preview.frames if frame.get('fault'))
+        first_error = next(
+            (str(frame['error']) for frame in preview.frames if 'error' in frame), ''
+        )
+        status = (
+            f'{filename}: {preview.header["duration_seconds"]:.0f} s, '
+            f'{len(bar_starts(preview))} bars, {len(preview.frames)} frames at {rate} Hz'
+            + (f'; {faults} frames dark from a script fault' if faults else '')
+            + (f': {first_error.strip().splitlines()[0]}' if first_error.strip() else '')
+        )
+        source = {
+            'url': f'{PREVIEW_FRAMES_PATH}?v={revision}',
+            'overview': preview_overview(preview),
+        }
+        return [
+            source,
+            len(preview.frames) - 1,
+            preview_marks(preview),
+            False,
+            False,
+            1000 / rate,
+            status,
+        ]
+
+    for function, outputs, inputs, states in (
+        ('loadPreview', [Output('preview-ready', 'data')], [Input('preview-source', 'data')], []),
+        (
+            'showPreviewFrame',
+            [Output('preview-label', 'children'), Output('preview-beat', 'className')],
+            [Input('preview-frame', 'value'), Input('preview-ready', 'data')],
+            [],
+        ),
+        (
+            'stepPreview',
+            [
+                Output('preview-frame', 'value'),
+                Output('preview-clock', 'disabled'),
+                Output('preview-play', 'children'),
+            ],
+            [Input('preview-play', 'n_clicks'), Input('preview-clock', 'n_intervals')],
+            [
+                State('preview-frame', 'value'),
+                State('preview-frame', 'max'),
+                State('preview-clock', 'disabled'),
+            ],
+        ),
+    ):
+        app.clientside_callback(
+            dash.ClientsideFunction(namespace='fixture_patch', function_name=function),
+            *outputs,
+            *inputs,
+            *states,
+            prevent_initial_call=True,
+        )
+
+
 def control_page_config(snapshot_source) -> dict:
     return {
         'bridgePort': getattr(snapshot_source, 'port', None),
@@ -1987,7 +2201,9 @@ def build_app(snapshot_source, fixture_store: FixtureStore | None = None) -> das
         eager_loading=True,
         hooks={'request_pre': REQUEST_PRE_JS, 'callback_resolved': CALLBACK_RESOLVED_JS},
     )
-    app.index_string = INDEX_TEMPLATE.replace('</style>', FIXTURE_CSS + '</style>').replace(
+    app.index_string = INDEX_TEMPLATE.replace(
+        '</style>', FIXTURE_CSS + PREVIEW_CSS + '</style>'
+    ).replace(
         '{%css%}',
         '{%css%}<script>window.autoluxControlConfig = '
         + json.dumps(control_page_config(snapshot_source))
@@ -2024,10 +2240,17 @@ def build_app(snapshot_source, fixture_store: FixtureStore | None = None) -> das
         'flex': 'none',
     }
     selected_tab_style = {**tab_style, 'color': '#e6edf3', 'borderBottomColor': '#73b6ff'}
-    config_panel = (
-        build_fixture_panel(app, fixture_store)
-        if fixture_store is not None
-        else html.Section(
+    if fixture_store is not None:
+        config_panel = build_fixture_panel(app, fixture_store)
+        workspace = next(
+            index
+            for index, child in enumerate(config_panel.children)
+            if getattr(child, 'id', None) == 'fixture-workspace'
+        )
+        config_panel.children.insert(workspace + 1, _build_preview_card())
+        _register_preview(app, fixture_store)
+    else:
+        config_panel = html.Section(
             [
                 html.Div(html.H2('Fixture setup'), className='section-heading'),
                 html.P('Fixture setup is unavailable in this session.', className='subtitle'),
@@ -2035,7 +2258,6 @@ def build_app(snapshot_source, fixture_store: FixtureStore | None = None) -> das
             id='config-panel',
             style={'display': 'none'},
         )
-    )
     app.layout = html.Div(
         [
             html.Header(
@@ -2188,13 +2410,11 @@ def build_app(snapshot_source, fixture_store: FixtureStore | None = None) -> das
     layout = app.layout
 
     def serve_layout():
-        # The first poll filling these would push the controls below them down under a
-        # pointer already aimed at them: a click in that first moment hit the master fader.
+        # Filled before serving: the first poll filling them would shift controls under a click.
         snap, now = _with_base_palette(snapshot_source.snapshot()), time.time()
         layout['show-status'].children = _build_show_status(snap, now)
         layout['telemetry-alerts'].children = system_metrics.build_telemetry_notices(snap, now=now)
         if fixture_store is not None:
-            # A browser reload after Save must open the saved patch, not the one loaded at start.
             layout['fixture-draft'].data, layout['fixture-revision'].data = fixture_store.load()
         return layout
 
@@ -2242,7 +2462,6 @@ def build_app(snapshot_source, fixture_store: FixtureStore | None = None) -> das
         Output('gate', 'data'),
         Input('tick', 'n_intervals'),
         Input('dashboard-tab', 'value'),
-        State('control-state', 'data'),
     )
 
     @app.callback(
@@ -2272,7 +2491,6 @@ def build_app(snapshot_source, fixture_store: FixtureStore | None = None) -> das
         notices = performance = renderer = control = charts = dash.no_update
         on_control = requested['tab'] == 'control'
         due = requested.get('metrics')
-        # The Config tab's fixture test reads only the control state (highlight, paused, blackout).
         if on_control or due or requested['tab'] == 'config':
             control = {
                 key: snap.get(key)
@@ -2296,7 +2514,6 @@ def build_app(snapshot_source, fixture_store: FixtureStore | None = None) -> das
                 target: [{'label': fx_row_label(row), 'value': row} for row in rows]
                 for target, rows in fx_rows.items()
             }
-            # Only the test's Cells list needs the running rig's names.
             if requested['tab'] == 'config' and requested.get('rig', ...) != snap.get(
                 'rig_revision'
             ):
@@ -2434,7 +2651,6 @@ def build_app(snapshot_source, fixture_store: FixtureStore | None = None) -> das
 
     _register_settings_drawer(app)
 
-    # Groups come from the rig Starfire logged in with; the faders are drawn as the drawer opens.
     @app.callback(
         Output('group-masters', 'children'),
         Input('settings-toggle', 'n_clicks'),

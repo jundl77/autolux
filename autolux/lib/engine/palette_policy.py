@@ -5,7 +5,7 @@ import random
 from collections.abc import Sequence
 
 from autolux.lib.engine.effect_definitions import LightIntent
-from autolux.lighting.palettes import BREAKDOWN_SUFFIX, DROP_SUFFIX, Mood, Palette
+from autolux.lighting.palettes import BREAKDOWN_SUFFIX, DROP_SUFFIX, MONO_SUFFIX, Mood, Palette
 
 RECENCY_CAP_TRACKS = 4
 FINALISTS = 3
@@ -15,6 +15,15 @@ VARIANT_SUFFIXES = {LightIntent.BREAKDOWN: BREAKDOWN_SUFFIX, LightIntent.DROP: D
 
 def palette_variant(base: str, intent: LightIntent) -> str:
     return base + VARIANT_SUFFIXES.get(intent, '')
+
+
+def section_palette(
+    base: str, look: LightIntent, intent: LightIntent, *, after_first_drop: bool
+) -> str:
+    if look is LightIntent.DROP or intent is LightIntent.DROP:
+        return palette_variant(base, look)
+    mono = intent in (LightIntent.BREAKDOWN, LightIntent.BUILDUP) or not after_first_drop
+    return palette_variant(base, look) + (MONO_SUFFIX if mono else '')
 
 
 def mood_closeness(first: Mood, second: Mood) -> float:

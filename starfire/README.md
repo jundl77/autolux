@@ -22,9 +22,9 @@ named groups and helpers in `src/lua/lighting.lua`; never depend on render count
 `ctx.normalized_rms_level` is measured audio RMS normalized to 0..1, or `nil` until
 measured. Bundled autoloops keep their baseline brightness when it is unknown.
 The supplied autoloops expect `wash`, `movers` and `strip` groups in the rig.
-Selecting the current autoloop ID keeps it running. Overrides affect only their
-properties; clearing reveals the continuing baseline. Global brightness,
-animation speed, blackout and measured audio level use typed parameters.
+Overrides affect only their properties; clearing reveals the continuing
+baseline. Global brightness, animation speed, blackout and measured audio level
+use typed parameters.
 
 Every autoloop has a checked full-DMX replay plus behavior assertions. Run
 `cargo test --locked --manifest-path starfire/Cargo.toml`. The build also runs
@@ -34,7 +34,7 @@ the repository root.
 Replay reports `render_elapsed_seconds` and `render_realtime_factor`: a factor
 of 20 means 20 seconds of show rendered per wall-clock second. This includes
 Lua and fixture encoding, excluding file output and network pacing. Performance
-tests require 10x for the room rig and 2x for 64 fixtures over a 90-second show.
+tests require 10x for the generic stage rig and 2x for 64 fixtures over a 90-second show.
 
 Live mode starts without output resources. Autolux supplies the complete typed
 fixture patch, profiles, banked Lua sources, Radius transport settings and

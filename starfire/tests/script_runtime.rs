@@ -26,7 +26,11 @@ fn rig() -> FixtureRig {
 fn catalog(source: &str) -> AutoloopCatalog {
     let directory = tempfile::tempdir().unwrap();
     fs::create_dir(directory.path().join("test")).unwrap();
-    fs::write(directory.path().join("test/autoloop.lua"), source).unwrap();
+    fs::write(
+        directory.path().join("test/autoloop.lua"),
+        support::base_loop(source),
+    )
+    .unwrap();
     AutoloopCatalog::load(directory.path()).unwrap()
 }
 
@@ -227,16 +231,11 @@ fn side_without_a_count_parks_each_half_of_a_mover_row_on_its_own_side() {
     assert_eq!(pans, [0.25, 0.25, 0.75, 0.75]);
 }
 
-/// `area` is a StageArea name without its prefix, as Autolux would derive it.
 fn placed_in(id: &str, address: u32, x: f64, y: f64, area: &str) -> String {
     let fixture = placed(id, address, x, y);
     format!(r#"{},"area":"{area}"}}"#, &fixture[..fixture.len() - 1])
 }
 
-/// Uneven spacing: the house-left members sit 100 mm off the house-right ones, the middle
-/// 40 mm off the centreline, and two rows of different depth interleave in X, so rank would
-/// pair across rows.
-/// Areas are the thirds of the box X -1000..1000, Y -2000..0.
 fn uneven_rig() -> FixtureRig {
     support::rig(
         serde_json::from_str(&format!(
@@ -275,7 +274,6 @@ fn mirror_pairs_by_reflection_about_the_centreline_not_by_rank() {
         .map(|effect| (effect.target.clone(), effect.values.intensity.unwrap()))
         .collect();
     let fixture = |id: &str| Target::Fixture(id.into());
-    // Outermost first: a↔c and b↔d both reach 1000 mm, broken by the left member's rank.
     assert_eq!(
         pairs,
         [
@@ -572,26 +570,29 @@ fn an_unknown_fixture_is_still_an_error() {
 
 #[test]
 fn loops_name_a_fixture_by_label_and_render_it_by_uuid() {
-    let room = FixtureRig::from_wire(&support::room_definition_as_loops()).unwrap();
-    let spot = room.uuid_of_label("spot_left").unwrap();
+    let stage = FixtureRig::from_wire(&support::stage_definition_as_loops()).unwrap();
+    let mover = stage.uuid_of_label("mover_left").unwrap();
     let source = format!(
         r#"return {{render = function(ctx)
-          assert(sf.fixture_of("spot_left") == "{spot}")
-          assert(sf.position("spot_left") == sf.position("{spot}"))
-          assert(sf.members(sf.fixture("spot_left"))[1] == "{spot}")
-          return {{sf.dimmer(sf.fixture("spot_left"), 1), sf.dimmer({{ fixture = "kinta" }}, 1)}}
+          assert(sf.fixture_of("mover_left") == "{mover}")
+          assert(sf.position("mover_left") == sf.position("{mover}"))
+          assert(sf.members(sf.fixture("mover_left"))[1] == "{mover}")
+          return {{sf.dimmer(sf.fixture("mover_left"), 1), sf.dimmer({{ fixture = "accent_centre" }}, 1)}}
         end}}"#
     );
     let effects = catalog(&source)
-        .instantiate("test", "autoloop", &room, &support::palettes())
+        .instantiate("test", "autoloop", &stage, &support::palettes())
         .unwrap()
         .render(&snapshot(0.0), &techno())
         .unwrap();
     let targets: Vec<_> = effects.into_iter().map(|effect| effect.target).collect();
-    let kinta = room.uuid_of_label("kinta").unwrap();
+    let accent = stage.uuid_of_label("accent_centre").unwrap();
     assert_eq!(
         targets,
-        [Target::Fixture(spot.into()), Target::Fixture(kinta.into())]
+        [
+            Target::Fixture(mover.into()),
+            Target::Fixture(accent.into())
+        ]
     );
 }
 
@@ -620,16 +621,16 @@ fn missing_groups_lists_exactly_the_referenced_groups_the_rig_lacks() {
 
 #[test]
 fn a_loop_naming_an_accent_group_or_fixture_by_any_route_is_refused() {
-    let room = FixtureRig::from_wire(&support::room_definition()).unwrap();
-    assert!(room.is_accent("fx"));
+    let stage = FixtureRig::from_wire(&support::stage_definition()).unwrap();
+    assert!(stage.is_accent("fx"));
     for body in [
         r#"return {sf.dimmer({ group = "fx" }, 1)}"#,
         r#"local g = "fx"; return sf.each(sf.group(g), function(cell) return sf.dimmer(cell, 1) end)"#,
         r#"return {sf.dimmer(sf.mirror({ group = "fx" })[1][1], 1)}"#,
-        r#"return {sf.dimmer(sf.fixture("kinta"), 1)}"#,
+        r#"return {sf.dimmer(sf.fixture("accent_centre"), 1)}"#,
     ] {
         let error = catalog(&format!("return {{render = function(ctx) {body} end}}"))
-            .instantiate("test", "autoloop", &room, &support::palettes())
+            .instantiate("test", "autoloop", &stage, &support::palettes())
             .unwrap()
             .render(&snapshot(0.0), &techno())
             .unwrap_err();

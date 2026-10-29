@@ -1,5 +1,3 @@
-//! Owned rendering sessions and paced process I/O. Login acquires output resources.
-
 use std::collections::BTreeMap;
 use std::io::{Read, Write};
 use std::net::{Ipv4Addr, SocketAddrV4};
@@ -33,7 +31,6 @@ const METRICS_INTERVAL: Duration = Duration::from_secs(1);
 const STOP_POLL_INTERVAL: Duration = Duration::from_millis(10);
 const NANOSECONDS_PER_SECOND: u128 = 1_000_000_000;
 pub const PROTOCOL_MAJOR: u32 = wire::ProtocolVersion::ProtocolMajor as u32;
-pub const PROTOCOL_MINOR: u32 = wire::ProtocolVersion::ProtocolMinor as u32;
 
 type SharedFailure = Arc<Mutex<Option<String>>>;
 
@@ -174,7 +171,6 @@ impl LiveSession {
             frame_rate_hz: DEFAULT_FRAME_RATE_HZ,
             max_message_bytes: MAX_MESSAGE_BYTES as u32,
             protocol_major: PROTOCOL_MAJOR,
-            protocol_minor: login.protocol_minor.min(PROTOCOL_MINOR),
             groups: special::capabilities(&rig),
         };
         ensure!(
@@ -208,6 +204,7 @@ impl LiveSession {
                 bail!(error);
             }
         }
+        probe.check_scripts_pure()?;
         drop(probe);
         // Probing must not carry fixture positions or script state into playback.
         let mut engine = Engine::new(rig.clone(), catalog, palettes)?;
@@ -257,6 +254,9 @@ impl LiveSession {
             script_error: frame.script_error.unwrap_or_default(),
             runtime_error: String::new(),
             last_processed_command_id,
+            pending_cues: self.engine.pending_cue_count() as u32,
+            overlay_error: self.engine.overlay_error().unwrap_or_default().to_owned(),
+            active_overlay_count: self.engine.active_overlay_count() as u32,
         })
     }
 
@@ -560,7 +560,6 @@ mod tests {
         let login = wire::Login {
             run_id: 1,
             protocol_major: PROTOCOL_MAJOR,
-            protocol_minor: PROTOCOL_MINOR,
             rig: Some(wire::RigDefinition {
                 fixtures: vec![wire::Fixture {
                     area: wire::StageArea::Centre as i32,
@@ -593,6 +592,7 @@ mod tests {
                 lua_source:
                     "return {render=function(ctx) return sf.scene {sf.dimmer(sf.all(),1), sf.pan_tilt(sf.all(),0.2,0.8)} end}"
                         .into(),
+                intensity_htp: false,
             }],
             output: Some(wire::login::Output::ArtnetDestination(listener.local_addr().unwrap().to_string())),
             palettes: vec![wire::Palette {

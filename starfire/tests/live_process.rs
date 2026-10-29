@@ -92,7 +92,6 @@ impl Renderer {
             run_id: u64::MAX,
             command_id: 0,
             protocol_major: starfire::live::PROTOCOL_MAJOR,
-            protocol_minor: starfire::live::PROTOCOL_MINOR,
             rig: Some(wire::RigDefinition {
                 fixtures: vec![wire::Fixture {
                     area: wire::StageArea::Centre as i32,
@@ -105,8 +104,8 @@ impl Renderer {
                 }],
             }),
             autoloops: vec![
-                wire::AutoloopDefinition { autoloop_id: "energy".into(), bank: "test".into(), lua_source: "return {render=function(ctx) return sf.scene {sf.colour(sf.all(), sf.rgb(1,0,0)), sf.dimmer(sf.all(), (ctx.normalized_rms_level or 1) * 0.5)} end}".into() },
-                wire::AutoloopDefinition { autoloop_id: "fault".into(), bank: "test".into(), lua_source: "return {render=function(ctx) if ctx.time_seconds > 0 then error('test script fault') end return sf.scene {} end}".into() },
+                wire::AutoloopDefinition { autoloop_id: "energy".into(), bank: "test".into(), lua_source: "return {render=function(ctx) return sf.scene {sf.colour(sf.all(), sf.rgb(1,0,0)), sf.dimmer(sf.all(), (ctx.normalized_rms_level or 1) * 0.5)} end}".into(), intensity_htp: false },
+                wire::AutoloopDefinition { autoloop_id: "fault".into(), bank: "test".into(), lua_source: "return {render=function(ctx) if ctx.time_seconds > 0 then error('test script fault') end return sf.scene {} end}".into(), intensity_htp: false },
             ],
             output: Some(wire::login::Output::ArtnetDestination(socket.local_addr().unwrap().to_string())),
             parameters: vec![],
@@ -342,7 +341,7 @@ fn login_rejects_a_capability_reply_over_the_real_time_cap() {
 }
 
 #[test]
-fn login_rejects_incompatible_major_and_negotiates_compatible_minor_before_output() {
+fn login_rejects_an_incompatible_major_before_output() {
     let mut renderer = Renderer::start();
     let mut login = renderer.login.clone();
     login.protocol_major += 1;
@@ -351,13 +350,11 @@ fn login_rejects_incompatible_major_and_negotiates_compatible_minor_before_outpu
         Event::ErrorReply(value) if value.message.contains("protocol major")
     ));
     renderer.assert_no_output();
-    let mut login = renderer.login.clone();
-    login.protocol_minor += 1;
+    let login = renderer.login.clone();
     let Event::LoginReply(reply) = renderer.reply(Operation::Login(login)) else {
         panic!("compatible client did not become ready");
     };
     assert_eq!(reply.protocol_major, starfire::live::PROTOCOL_MAJOR);
-    assert_eq!(reply.protocol_minor, starfire::live::PROTOCOL_MINOR);
 }
 
 #[test]

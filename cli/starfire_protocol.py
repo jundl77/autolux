@@ -1,5 +1,3 @@
-"""Bounded renderer pipes and the adapter from recorded musical commands."""
-
 import math
 import struct
 
@@ -39,6 +37,8 @@ COMMAND_MESSAGES = {
     wire.UPDATE_BEAT: wire.UpdateBeat,
     wire.SET_PARAMETER: wire.SetParameter,
     wire.DISCARD_DELAYED_AUDIO: wire.DiscardDelayedAudio,
+    wire.CUE_SECTION: wire.CueSection,
+    wire.CLEAR_CUES: wire.ClearCues,
     wire.HEARTBEAT: wire.Heartbeat,
 }
 EVENT_MESSAGES = {
@@ -80,7 +80,6 @@ PARAMETERS = {
 
 
 def build_command(command: dict | Message) -> Message:
-    """Copy a generated command, or adapt the application's replay command shape."""
     if isinstance(command, Message):
         if type(command) not in COMMAND_MESSAGES.values():
             raise ValueError('Expected a Starfire client command')
@@ -95,6 +94,8 @@ def build_command(command: dict | Message) -> Message:
             kind = value.pop('kind')
             if kind == 'beat':
                 bar_phase = value.pop('bar_phase', None)
+                if (features := value.pop('features', None)) is not None:
+                    value['features'] = wire.BeatFeatures(**features)
                 message = wire.UpdateBeat(
                     beat_index=value.pop('beat_index'),
                     beats_per_bar=value.pop('beats_per_bar'),
@@ -104,8 +105,6 @@ def build_command(command: dict | Message) -> Message:
                 if bar_phase is not None:
                     message.bar_phase = bar_phase
             elif kind == 'select':
-                if 'transition' in value:
-                    value['transition'] = _transition(value['transition'])
                 message = wire.PlayAutoloop(
                     autoloop_id=f'{value.pop("bank")}/{value.pop("autoloop")}',
                     **value,
@@ -131,6 +130,15 @@ def build_command(command: dict | Message) -> Message:
                 if value:
                     raise ValueError('Idle playback command contains unexpected fields')
                 message = wire.PlayAutoloop()
+            elif kind == 'cue_section':
+                cue = value.pop('value')
+                if value:
+                    raise ValueError('cue_section requires exactly one value')
+                message = _cue_section(cue)
+            elif kind == 'clear_cues':
+                if value:
+                    raise ValueError('Clearing cues takes no fields')
+                message = wire.ClearCues()
             elif kind == 'discard_delayed_audio':
                 if value:
                     raise ValueError('Discarding delayed audio takes no fields')
@@ -144,16 +152,24 @@ def build_command(command: dict | Message) -> Message:
     return message
 
 
-def _transition(value):
+def _cue_section(value):
     value = dict(value)
-    kind = value.pop('kind')
-    if kind == 'cut':
-        if value:
-            raise ValueError('Cut transition contains unexpected fields')
-        return wire.PlayAutoloop.Transition()
-    if kind == 'crossfade':
-        return wire.PlayAutoloop.Transition(crossfade_beats=value.pop('duration_beats'), **value)
-    raise ValueError('Invalid Starfire transition')
+    rotation = [
+        wire.CueSection.Step(autoloop_id=f'{step.pop("bank")}/{step.pop("autoloop")}', **step)
+        for step in map(dict, value.pop('rotation'))
+    ]
+    overlays = [
+        wire.CueSection.Overlay(
+            autoloop_id=f'{overlay.pop("bank")}/{overlay.pop("autoloop")}', **overlay
+        )
+        for overlay in map(dict, value.pop('overlays', ()))
+    ]
+    return wire.CueSection(
+        intent=wire.SectionIntent.Value(value.pop('intent').upper()),
+        rotation=rotation,
+        overlays=overlays,
+        **value,
+    )
 
 
 def profile_id(spec: str, mode: str) -> str:
@@ -220,15 +236,7 @@ def _active_effect(value):
     )
 
 
-SPECIAL_FX_FIELDS = {
-    'colour_slot',
-    'energy',
-    'speed',
-    'pulse_beats',
-    'attack_beats',
-    'release_beats',
-    'pattern',
-}
+SPECIAL_FX_FIELDS = {'colour_slot', 'energy', 'speed', 'pulse_beats', 'pattern', 'envelope'}
 
 
 def _special_fx(value):
@@ -242,7 +250,6 @@ def _special_fx(value):
 def login_groups(reply) -> list[dict]:
     groups = []
     for group in reply.groups:
-        # An absent area (the members' areas differ) reads as UNSPECIFIED, which has no place.
         zone, depth = AREA_PLACES.get(group.area, (None, None))
         groups.append(
             {

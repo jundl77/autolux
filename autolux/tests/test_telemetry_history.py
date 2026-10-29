@@ -70,7 +70,15 @@ def test_history_is_bounded_by_both_time_and_number_of_samples():
 
 def test_offline_report_omits_unmeasured_hardware_telemetry():
     report = EventBuffer().to_report()
-    assert set(report) == {'duration_sec', 'beats', 'effects', 'intents', 'timing_log', 'metrics'}
+    assert set(report) == {
+        'duration_sec',
+        'beats',
+        'effects',
+        'cues',
+        'intents',
+        'timing_log',
+        'metrics',
+    }
 
 
 def test_session_report_retains_health_history_without_exposing_mutable_state():
@@ -149,7 +157,6 @@ def test_renderer_rates_use_elapsed_counter_deltas_and_hold_identical_reports():
     assert history.snapshot()[-1]['starfire_measured_render_frames_per_second'] is None
     history.append(renderer_report(109, 0, 1, age=9), {})
     assert history.snapshot()[-1]['starfire_measured_render_frames_per_second'] is None
-    # Wall-time observations are uneven; the renderer measured exactly ten seconds.
     history.append(renderer_report(111, 10, 399, skipped=2), {})
     measured = history.snapshot()[-1]
     assert measured['starfire_measured_render_frames_per_second'] == pytest.approx(39.8)

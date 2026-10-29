@@ -6,6 +6,8 @@ pub const DMX_CHANNELS: usize = 512;
 pub const DEFAULT_FRAME_RATE_HZ: u32 = 40;
 pub const MAX_FRAME_RATE_HZ: u32 = 100;
 pub const MAX_STROBE_HZ: f64 = DEFAULT_FRAME_RATE_HZ as f64 / 4.0;
+/// Bounds every envelope, transition and overlay span a command names.
+pub const MAX_SPAN_BEATS: f64 = 1_024.0;
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -108,6 +110,25 @@ fn unit_brightness() -> f64 {
 
 pub type FixtureStates = BTreeMap<String, FixtureState>;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SectionIntent {
+    Atmospheric,
+    Breakdown,
+    Buildup,
+    Drop,
+}
+
+/// Each 0..1.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BeatFeatures {
+    pub onset: f64,
+    pub bass: f64,
+    pub mid: f64,
+    pub high: f64,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct RenderContext {
     pub time_seconds: f64,
@@ -119,6 +140,22 @@ pub struct RenderContext {
     pub autoloop_speed_scaled_elapsed_beats: f64,
     pub normalized_rms_level: Option<f64>,
     pub intensity: f64,
+    pub bpm: f64,
+    pub strobe_max_hz: f64,
+    pub section_intent: Option<SectionIntent>,
+    pub section_elapsed_beats: Option<f64>,
+    pub next_intent: Option<SectionIntent>,
+    pub beats_until_next: Option<f64>,
+    pub beats_until_dip: Option<f64>,
+    pub next_known_at: Option<f64>,
+    pub drop_strength: Option<f64>,
+    pub next_drop_strength: Option<f64>,
+    pub seed: u32,
+    pub onset: Option<f64>,
+    pub bass: Option<f64>,
+    pub mid: Option<f64>,
+    pub high: Option<f64>,
+    pub overlay_duration_beats: Option<f64>,
 }
 
 impl Default for RenderContext {
@@ -133,12 +170,105 @@ impl Default for RenderContext {
             autoloop_speed_scaled_elapsed_beats: 0.0,
             normalized_rms_level: None,
             intensity: 1.0,
+            bpm: 0.0,
+            strobe_max_hz: 0.0,
+            section_intent: None,
+            section_elapsed_beats: None,
+            next_intent: None,
+            beats_until_next: None,
+            beats_until_dip: None,
+            next_known_at: None,
+            drop_strength: None,
+            next_drop_strength: None,
+            seed: 0,
+            onset: None,
+            bass: None,
+            mid: None,
+            high: None,
+            overlay_duration_beats: None,
         }
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CueSection {
+    pub start_beat_index: u64,
+    pub intent: SectionIntent,
+    pub rotation: Vec<Step>,
+    #[serde(default)]
+    pub overlays: Vec<Overlay>,
+    pub palette: String,
+    #[serde(default)]
+    pub drop_strength: Option<f64>,
+    #[serde(default)]
+    pub seed: u32,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Step {
+    pub bank: String,
+    pub autoloop: String,
+    pub bars: u32,
+    #[serde(default)]
+    pub transition: Transition,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Overlay {
+    pub bank: String,
+    pub autoloop: String,
+    #[serde(default)]
+    pub priority: i32,
+    pub begin_beats: f64,
+    pub duration_beats: f64,
+    #[serde(default)]
+    pub every_bars: u32,
+    #[serde(default)]
+    pub envelope: Envelope,
+    #[serde(default)]
+    pub dip: bool,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Envelope {
+    pub attack_beats: f64,
+    pub release_beats: f64,
+}
+
+impl Envelope {
+    pub fn is_valid(&self) -> bool {
+        [self.attack_beats, self.release_beats]
+            .iter()
+            .all(|beats| beats.is_finite() && (0.0..=MAX_SPAN_BEATS).contains(beats))
+    }
+
+    /// All three in elapsed musical beats.
+    pub fn level(&self, started: f64, released_at: Option<f64>, now: f64) -> f64 {
+        let attack = |at: f64| {
+            if self.attack_beats > 0.0 {
+                ((at - started) / self.attack_beats).clamp(0.0, 1.0)
+            } else {
+                1.0
+            }
+        };
+        match released_at {
+            None => attack(now),
+            Some(released_at) if self.release_beats > 0.0 => {
+                attack(released_at)
+                    * (1.0 - (now - released_at) / self.release_beats).clamp(0.0, 1.0)
+            }
+            Some(_) => 0.0,
+        }
+    }
+}
+
+/// Serialized as the proto's Transition: null or absent is the renderer default.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+#[serde(from = "Option<CrossfadeBeats>", into = "Option<CrossfadeBeats>")]
 pub enum Transition {
     #[default]
     RendererDefault,
@@ -146,6 +276,47 @@ pub enum Transition {
     Crossfade {
         duration_beats: f64,
     },
+}
+
+impl Transition {
+    pub fn from_crossfade_beats(beats: f64) -> Self {
+        if beats == 0.0 {
+            Self::Cut
+        } else {
+            Self::Crossfade {
+                duration_beats: beats,
+            }
+        }
+    }
+
+    pub fn crossfade_beats(&self) -> f64 {
+        match self {
+            Self::Crossfade { duration_beats } => *duration_beats,
+            Self::Cut | Self::RendererDefault => 0.0,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CrossfadeBeats {
+    crossfade_beats: f64,
+}
+
+impl From<Option<CrossfadeBeats>> for Transition {
+    fn from(value: Option<CrossfadeBeats>) -> Self {
+        value.map_or(Self::RendererDefault, |value| {
+            Self::from_crossfade_beats(value.crossfade_beats)
+        })
+    }
+}
+
+impl From<Transition> for Option<CrossfadeBeats> {
+    fn from(value: Transition) -> Self {
+        (value != Transition::RendererDefault).then(|| CrossfadeBeats {
+            crossfade_beats: value.crossfade_beats(),
+        })
+    }
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -161,7 +332,6 @@ pub enum OverrideLifetime {
     },
 }
 
-/// Fixture-agnostic accent vocabulary; the renderer maps each axis onto GDTF attribute families.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct SpecialFx {
@@ -169,9 +339,8 @@ pub struct SpecialFx {
     pub energy: f64,
     pub speed: f64,
     pub pulse_beats: Option<u32>,
-    pub attack_beats: f64,
-    pub release_beats: f64,
     pub pattern: Option<f64>,
+    pub envelope: Envelope,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -187,21 +356,15 @@ pub struct LightingOverride {
     #[serde(default)]
     pub priority: i32,
     pub special_fx: Option<Box<SpecialFx>>,
-    /// Pan runs the whole logical range, low soft limit to high and back, and tilt reaches the
-    /// focus point's elevation, in place of `pan` and `tilt`.
     #[serde(default)]
     pub pan_sweep: bool,
-    /// Pan and tilt throw the beam through the fixture's focus point, in place of `pan` and
-    /// `tilt`.
     #[serde(default)]
     pub aim_focus: bool,
-    /// The target fixture encodes with this in place of its loaded placement.
     #[serde(default)]
     pub pose: Option<Box<FixturePose>>,
 }
 
-/// A rig fixture's placement and patch fields: MVR Matrix, soft limits, focus point position
-/// (mm), Art-Net universe, DMX start address and profile (its GDTF mode).
+/// `focus` in millimetres.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct FixturePose {
@@ -240,7 +403,15 @@ pub enum Command {
         bar_phase: Option<u32>,
         beats_per_bar: u32,
         bpm: f64,
+        #[serde(default)]
+        features: Option<BeatFeatures>,
     },
+    /// A re-sent cue's rows that are already playing carry on.
+    CueSection {
+        value: Box<CueSection>,
+    },
+    /// Overlays release; the base look plays on.
+    ClearCues,
     Select {
         bank: String,
         autoloop: String,
@@ -288,7 +459,6 @@ pub enum Command {
     SetIntensity {
         level: f64,
     },
-    /// An inhibitive submaster: scales the group's rendered output, never raises it.
     SetGroupMaster {
         group: String,
         level: f64,

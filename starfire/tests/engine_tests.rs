@@ -32,7 +32,7 @@ fn engine(scripts: &[(&str, &str)]) -> Engine {
     for (name, source) in scripts {
         fs::write(
             directory.path().join("test").join(format!("{name}.lua")),
-            source,
+            support::base_loop(source),
         )
         .unwrap();
     }
@@ -47,6 +47,7 @@ fn engine(scripts: &[(&str, &str)]) -> Engine {
                 bar_phase: None,
                 beats_per_bar: 4,
                 bpm: 120.0,
+                features: None,
             },
         )
         .unwrap();
@@ -962,6 +963,7 @@ fn crossfade_progress_uses_elapsed_beats_instead_of_corrected_phase() {
                 bar_phase: None,
                 beats_per_bar: 4,
                 bpm: 60.0,
+                features: None,
             },
         )
         .unwrap();
@@ -1124,6 +1126,7 @@ fn pause_goes_dark_holds_the_beat_and_resume_continues_from_the_held_position() 
                 bar_phase: None,
                 beats_per_bar: 4,
                 bpm: 120.0,
+                features: None,
             },
         )
         .unwrap();
@@ -1145,6 +1148,7 @@ fn pause_goes_dark_holds_the_beat_and_resume_continues_from_the_held_position() 
                 bar_phase: None,
                 beats_per_bar: 4,
                 bpm: 120.0,
+                features: None,
             },
         )
         .unwrap();
@@ -1305,8 +1309,8 @@ fn the_burst_cap_releases_a_timed_strobe_override_before_its_own_lifetime() {
     near(rate(&mut engine, 5.0), 0.0);
 }
 
-fn room_engine(scripts: &[(&str, &str)]) -> Engine {
-    engine_on(support::room(), scripts)
+fn stage_engine(scripts: &[(&str, &str)]) -> Engine {
+    engine_on(support::stage(), scripts)
 }
 
 fn engine_on(rig: FixtureRig, scripts: &[(&str, &str)]) -> Engine {
@@ -1315,7 +1319,7 @@ fn engine_on(rig: FixtureRig, scripts: &[(&str, &str)]) -> Engine {
     for (name, source) in scripts {
         fs::write(
             directory.path().join("test").join(format!("{name}.lua")),
-            source,
+            support::base_loop(source),
         )
         .unwrap();
     }
@@ -1329,6 +1333,7 @@ fn engine_on(rig: FixtureRig, scripts: &[(&str, &str)]) -> Engine {
                 bar_phase: None,
                 beats_per_bar: 4,
                 bpm: 120.0,
+                features: None,
             },
         )
         .unwrap();
@@ -1337,8 +1342,8 @@ fn engine_on(rig: FixtureRig, scripts: &[(&str, &str)]) -> Engine {
 
 #[test]
 fn a_loop_on_all_leaves_the_accent_fixtures_dark() {
-    let room = support::room();
-    let mut engine = room_engine(&[(
+    let stage = support::stage();
+    let mut engine = stage_engine(&[(
         "lit",
         "return {render=function(ctx) return {sf.dimmer(sf.all(), 1)} end}",
     )]);
@@ -1347,16 +1352,16 @@ fn a_loop_on_all_leaves_the_accent_fixtures_dark() {
         .render_at(0.0)
         .unwrap()
         .fixture_properties_before_strobe;
-    assert_eq!(states[&room.groups()["wash"][0]].intensity, 1.0);
-    for cell in &room.groups()["fx"] {
+    assert_eq!(states[&stage.groups()["wash"][0]].intensity, 1.0);
+    for cell in &stage.groups()["fx"] {
         assert_eq!(states[cell].intensity, 0.0, "{cell}");
     }
 }
 
 #[test]
-fn a_crossfade_takes_the_target_preset_from_its_start_and_ramps_numeric_attributes() {
+fn a_crossfade_takes_the_target_preset_half_way_and_ramps_numeric_attributes() {
     use starfire::model::AttributeValue;
-    let rig = FixtureRig::from_wire(&support::room_definition_as_loops()).unwrap();
+    let rig = FixtureRig::from_wire(&support::stage_definition_as_loops()).unwrap();
     let fx_fixture = rig.groups()["fx"][0].clone();
     let mut engine = engine_on(
         rig,
@@ -1382,13 +1387,18 @@ fn a_crossfade_takes_the_target_preset_from_its_start_and_ramps_numeric_attribut
             duration_beats: 4.0,
         },
     );
-    for time in [0.0, 1.0, 1.9] {
+    for (time, preset) in [
+        (0.0, None),
+        (0.9, None),
+        (1.0, Some(&red)),
+        (1.9, Some(&red)),
+    ] {
         let attributes = &engine
             .render_at(time)
             .unwrap()
             .fixture_properties_before_strobe[&fx_fixture]
             .attributes;
-        assert_eq!(attributes.get("Color1"), Some(&red), "{time}");
+        assert_eq!(attributes.get("Color1"), preset, "{time}");
         assert_eq!(
             attributes.get("Effects1PosRotate"),
             Some(&AttributeValue::Number(160.0)),
@@ -1404,13 +1414,17 @@ fn a_crossfade_takes_the_target_preset_from_its_start_and_ramps_numeric_attribut
             duration_beats: 4.0,
         },
     );
-    for (time, expected) in [(2.0, 0.0), (3.0, 80.0), (4.0, 160.0)] {
+    for (time, expected, preset) in [
+        (2.0, 0.0, None),
+        (3.0, 80.0, Some(&red)),
+        (4.0, 160.0, Some(&red)),
+    ] {
         let attributes = &engine
             .render_at(time)
             .unwrap()
             .fixture_properties_before_strobe[&fx_fixture]
             .attributes;
-        assert_eq!(attributes.get("Color1"), Some(&red), "{time}");
+        assert_eq!(attributes.get("Color1"), preset, "{time}");
         let AttributeValue::Number(rotation) = attributes["Effects1PosRotate"] else {
             panic!("{time}: {attributes:?}");
         };
@@ -1712,7 +1726,6 @@ fn pan_after_snap(intensity: f64) -> Vec<f64> {
             },
         ),
     );
-    // Three seconds: calm's glide needs under one to cross half the range.
     (1..=120)
         .map(|frame| {
             let state = &engine
@@ -1752,7 +1765,6 @@ fn low_and_mid_intensity_move_at_clearly_different_speeds() {
             + 1
     };
     let (low, mid) = (frames_to_target(0.3), frames_to_target(0.7));
-    // Calm moves at 0.3 of full and balanced at 0.7: 7/3 as many frames.
     assert!(low > 2 * mid, "0.3 took {low} frames, 0.7 took {mid}");
 }
 
@@ -1796,7 +1808,7 @@ fn group_master(group: &str, level: f64) -> starfire::protocol::wire::Parameter 
 
 #[test]
 fn a_half_group_master_dims_only_that_groups_output_on_the_master_curve() {
-    let mut engine = room_engine(&[(
+    let mut engine = stage_engine(&[(
         "lit",
         "return {render=function(ctx) return sf.scene {sf.dimmer(sf.all(), 0.8), sf.colour(sf.all(), sf.rgb(1, 0.5, 0))} end}",
     )]);
@@ -1807,7 +1819,7 @@ fn a_half_group_master_dims_only_that_groups_output_on_the_master_curve() {
         .set_parameter(0.0, &group_master("wash", 0.5))
         .unwrap();
     let capped = engine.render_at(0.0).unwrap();
-    let wash = support::room().groups()["wash"].clone();
+    let wash = support::stage().groups()["wash"].clone();
     for (cell, state) in &before.fixture_properties_before_strobe {
         let expected = if wash.contains(cell) {
             state.intensity * perceptual_to_linear_master(0.5)
@@ -1837,7 +1849,7 @@ fn a_half_group_master_dims_only_that_groups_output_on_the_master_curve() {
 #[test]
 fn group_masters_reject_unknown_groups_values_outside_unit_and_stray_groups() {
     use starfire::protocol::wire;
-    let mut engine = room_engine(&[("empty", "return {render=function(ctx) return {} end}")]);
+    let mut engine = stage_engine(&[("empty", "return {render=function(ctx) return {} end}")]);
     assert!(
         engine
             .set_parameter(0.0, &group_master("ceiling", 0.5))

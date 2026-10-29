@@ -3,7 +3,7 @@ number = 3
 [slots]
 primary = "#4080ff"
 secondary = "#00d9ff"
-accent = "#ffffff"
+accent = "#b366ff"
 cold = "#d9ebff"
 black = "#000000"
 
@@ -13,7 +13,7 @@ drive = 0.0
 
 [breakdown]
 primary = "#8cb2ff"
-accent = "#cce6ff"
+accent = "#d9b3ff"
 
 [drop]
-accent = "#66e6ff"
+accent = "#9933ff"

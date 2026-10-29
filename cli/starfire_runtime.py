@@ -1,5 +1,3 @@
-"""Own the live renderer and supervise its bounded protobuf control channel."""
-
 import json
 import logging
 import os
@@ -72,12 +70,10 @@ def selected_rig(path=None, library=None):
 def fixture_setup(args, rig, expected_universe=None):
     return {
         'binary': Path(args.starfire_binary).resolve(),
-        # Save runs the start check with these, so it refuses what this show would refuse.
         'autoloops': Path(args.autoloops).resolve(),
         'expected_universe': expected_universe,
         'rig_store': Path(args.rig).resolve() if args.rig else DEFAULT_FIXTURE_STORE,
         'library': Path(args.library).resolve(),
-        # Hashed before the renderer reads the rig: a later edit can only show as stale.
         'rig_revision': rig_revision(read_bounded(Path(rig), mvr.MAX_MVR_BYTES)),
     }
 
@@ -282,6 +278,9 @@ class StarfireRuntime:
                         'active_bank': metrics.active_bank,
                         'active_autoloop': metrics.active_autoloop,
                         'script_error': metrics.script_error,
+                        'overlay_error': metrics.overlay_error,
+                        'active_overlay_count': metrics.active_overlay_count,
+                        'pending_cues': metrics.pending_cues,
                         'last_processed_command_id': metrics.last_processed_command_id,
                     }
                     self._health_at = time.monotonic()
@@ -302,7 +301,6 @@ class StarfireRuntime:
                         or event.frame_rate_hz != DEFAULT_FRAME_RATE_HZ
                         or event.max_message_bytes != MAX_MESSAGE_BYTES
                         or event.protocol_major != wire.PROTOCOL_MAJOR
-                        or event.protocol_minor > wire.PROTOCOL_MINOR
                         or event.run_id != self.run_id
                     ):
                         raise ValueError('Unexpected Starfire login reply')
@@ -359,7 +357,6 @@ class StarfireRuntime:
         if isinstance(message, wire.Heartbeat):
             self._write(encode_command(message))
             return
-        # Only the writer assigns command IDs; heartbeats are independent.
         with self._command_lock:
             message.command_id = self._last_sent_id + 1
             encoded = encode_command(message)
@@ -425,7 +422,6 @@ class StarfireRuntime:
                 try:
                     child.wait(timeout=self.stop_timeout)
                 except subprocess.TimeoutExpired:
-                    # The job close below still ends it; a relaunch meets any survivor as a conflict.
                     LOGGER.error('[prod] Starfire survived its kill')
             for thread in self._threads:
                 if thread.ident is not None:

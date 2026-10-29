@@ -19,9 +19,10 @@ typed `DmxMode` as profiles. Login
 carries it; the offline `starfire check`, `rig` and `replay` commands read the same
 message serialized to a file (`autolux starfire export-rig rig.mvr rig.rig.pb`; the
 Autolux CLI exports to a temporary file automatically). `FixtureRig::from_wire` is the
-single native validator. `rig/room.rig.pb` and the synthetic sample rig
-`autolux/tests/data/generic_rig/generic.rig.pb` are the exports the Rust tests and goldens use; `cli/tests/test_starfire_assets.py` checks they equal
-the Login rig of their MVR.
+single native validator. The Rust tests and goldens use the synthetic rigs
+`autolux/tests/data/generic_rig/stage.rig.pb` and `generic.rig.pb`;
+`cli/tests/test_starfire_assets.py` checks that they and `rig/room.rig.pb` equal the Login rig of
+their MVR.
 
 Identity is the MVR Fixture `uuid`; `name` is a label; `FixtureID`/`FixtureIDNumeric` are the
 console patch numbers and identify nothing. The uuid is `Fixture.fixture_uuid`, every cell id

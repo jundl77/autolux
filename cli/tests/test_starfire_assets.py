@@ -46,7 +46,6 @@ def test_login_carries_embedded_gdtf_inversion_class_and_scene_matrix(login_asse
     assert login.run_id == (1 << 64) - 1
     assert login.command_id == 0
     assert login.protocol_major == wire.PROTOCOL_MAJOR
-    assert login.protocol_minor == wire.PROTOCOL_MINOR
     assert login.artnet_destination == '127.0.0.1:6454'
     assert login.parameters == [parameter]
     fixture = login.rig.fixtures[0]
@@ -129,6 +128,28 @@ def test_full_autoloop_library_fits_one_login(login_assets):
     assert len(login.autoloops) == 41
 
 
+def test_overlay_intensity_composition_comes_from_the_loop_header(login_assets):
+    rig, autoloops = login_assets
+    (autoloops / 'hit').mkdir()
+    body = 'return {render=function(ctx) return {} end}\n'
+    (autoloops / 'hit/blinder.lua').write_text(
+        '-- 1-beat hit\n-- strobe: no\n-- intensity: htp\n-- movement: still\n-- texture: wash\n'
+        + body
+    )
+    login = assets.load_login(rig, autoloops, '127.0.0.1:6454', run_id=1)
+    htp = {script.autoloop_id: script.intensity_htp for script in login.autoloops}
+    assert htp == {'atmospheric/blue': False, 'hit/blinder': True}
+
+
+def test_a_bad_overlay_header_fails_login(login_assets):
+    rig, autoloops = login_assets
+    (autoloops / 'hit').mkdir()
+    body = 'return {render=function(ctx) return {} end}\n'
+    (autoloops / 'hit/later.lua').write_text('-- x\nlocal y = 1\n-- intensity: htp\n' + body)
+    with pytest.raises(ValueError, match='hit/later: missing strobe, intensity'):
+        assets.load_login(rig, autoloops, '127.0.0.1:6454', run_id=1)
+
+
 def test_single_autoloop_over_its_cap_is_rejected(login_assets):
     rig, autoloops = login_assets
     _fill_bank(autoloops, 1, assets.MAX_SCRIPT_BYTES + 1)
@@ -154,9 +175,13 @@ def test_invalid_autoloop_name_is_rejected(login_assets):
 
 
 @pytest.mark.parametrize(
-    # The repo rig stays here: Save and export-rig must keep its committed rig.pb in step.
     'rig',
-    [DEFAULT_RIG, ROOM, ROOT / 'autolux/tests/data/generic_rig/generic.mvr'],
+    [
+        DEFAULT_RIG,
+        ROOM,
+        ROOT / 'autolux/tests/data/generic_rig/generic.mvr',
+        ROOT / 'autolux/tests/data/generic_rig/stage.mvr',
+    ],
 )
 def test_committed_native_rig_is_the_exported_login_rig(rig):
     login = assets.load_login(rig, DEFAULT_AUTOLOOPS, '127.0.0.1:6454', run_id=1)
@@ -170,8 +195,6 @@ def test_committed_native_rig_is_the_exported_login_rig(rig):
 
 
 def test_stage_areas_cut_the_rigs_bounding_box_into_thirds():
-    # Box X 1000..4000, Y -500..2500: cuts at X 2000 / 3000 and Y 500 / 1500; the origin is
-    # outside the rig and plays no part.
     areas = assets.stage_areas([(1000, -500), (2500, 1000), (4000, 2500), (1100, 2400)])
     assert [rig_wire.StageArea.Name(area) for area in areas] == [
         'STAGE_AREA_DOWN_LEFT',
@@ -203,17 +226,15 @@ def test_an_axis_without_extent_puts_every_fixture_in_its_centre():
 
 
 def test_the_room_rig_fixtures_lie_in_their_stage_areas():
-    # The frozen room: X -900..900 cuts at -300 / 300 (the spots and mid washes sit on them),
-    # Y -2000..0 at -1333 / -667.
     expected = {
-        'spot_left': 'STAGE_AREA_UP_CENTRE',  # (-300, 0)
-        'spot_right': 'STAGE_AREA_UP_CENTRE',  # (300, 0)
-        'wash_left': 'STAGE_AREA_CENTRE_LEFT',  # (-900, -1000)
-        'wash_mid_left': 'STAGE_AREA_CENTRE',  # (-300, -1000)
-        'wash_mid_right': 'STAGE_AREA_CENTRE',  # (300, -1000)
-        'wash_right': 'STAGE_AREA_CENTRE_RIGHT',  # (900, -1000)
-        'zq06017': 'STAGE_AREA_DOWN_CENTRE',  # (0, -2000), the strip bar
-        'kinta': 'STAGE_AREA_UP_CENTRE',  # (0, -500)
+        'spot_left': 'STAGE_AREA_UP_CENTRE',
+        'spot_right': 'STAGE_AREA_UP_CENTRE',
+        'wash_left': 'STAGE_AREA_CENTRE_LEFT',
+        'wash_mid_left': 'STAGE_AREA_CENTRE',
+        'wash_mid_right': 'STAGE_AREA_CENTRE',
+        'wash_right': 'STAGE_AREA_CENTRE_RIGHT',
+        'zq06017': 'STAGE_AREA_DOWN_CENTRE',
+        'kinta': 'STAGE_AREA_UP_CENTRE',
     }
     rig = assets.rig_definition(ROOM)
     assert {
@@ -225,7 +246,6 @@ def test_login_carries_the_palette_table_and_palette_commands_round_trip():
     login = assets.load_login(ROOM, DEFAULT_AUTOLOOPS, '127.0.0.1:6454', run_id=1)
     assert [palette.name for palette in login.palettes][:2] == ['techno', 'techno_breakdown']
     techno = login.palettes[0]
-    # show/palettes/techno.toml: secondary = "#ff8c1a".
     assert (techno.secondary.red, techno.secondary.green, techno.secondary.blue) == (
         1.0,
         140 / 255,
@@ -307,7 +327,6 @@ def test_the_room_rig_names_every_fixture_and_cell_and_a_highlight_encodes_for_s
     )
     moved = (sweep.pan_sweep, sweep.HasField('pan'), sweep.HasField('tilt'), aim.aim_focus)
     assert moved == (True, False, False, True)
-    # The pose reaches Starfire in the rig's own Fixture terms.
     assert (list(aim.pose.matrix), list(aim.pose.focus), aim.HasField('tilt')) == (
         pose['matrix'],
         pose['focus'],
@@ -318,7 +337,6 @@ def test_the_room_rig_names_every_fixture_and_cell_and_a_highlight_encodes_for_s
         True,
         False,
     )
-    # The mode reaches Starfire as the profile the login compiled for it.
     assert (aim.pose.universe, aim.pose.address, aim.pose.profile_id) == (
         0,
         300,
@@ -345,6 +363,7 @@ SAMPLE_RIG = ROOT / 'autolux/tests/data/generic_rig'
     [
         (ROOM.parent, 'room', [ROOT / 'rig/library']),
         (SAMPLE_RIG, 'generic', [ROOT / 'rig/library', SAMPLE_RIG]),
+        (SAMPLE_RIG, 'stage', [ROOT / 'rig/library']),
     ],
 )
 def test_a_rig_rebuilt_from_the_library_exports_the_committed_rig_definition(
@@ -359,9 +378,11 @@ def test_a_rig_rebuilt_from_the_library_exports_the_committed_rig_definition(
     library = {spec: entry for path in libraries for spec, entry in fixture_library(path).items()}
     rebuilt = tmp_path / f'{name}.mvr'
     rebuilt.write_bytes(mvr.write(mvr.apply_draft(bare, mvr.draft(scene), library)))
-    assert rebuilt.read_bytes() == shipped.read_bytes()
+    committed = folder / f'{name}.rig.pb'
+    hint = f'Regenerate with: uv run autolux starfire export-rig {shipped} {committed}'
+    assert rebuilt.read_bytes() == shipped.read_bytes(), hint
     exported = assets.rig_definition(rebuilt).SerializeToString()
-    assert exported == (folder / f'{name}.rig.pb').read_bytes()
+    assert exported == committed.read_bytes(), hint
 
 
 def test_the_room_bar_is_one_fixture_whose_eight_cells_are_the_strip():

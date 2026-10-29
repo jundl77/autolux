@@ -52,6 +52,7 @@ fn engine(rig: &FixtureRig) -> Engine {
         bank: "standby".into(),
         lua_source: "return { render = function() return sf.scene { sf.dimmer(sf.all(), 0) } end }"
             .into(),
+        intensity_htp: false,
     }])
     .unwrap();
     let mut engine = Engine::new(rig.clone(), catalog, support::palettes()).unwrap();
@@ -62,11 +63,12 @@ fn engine(rig: &FixtureRig) -> Engine {
             beat_index: 1,
             bar_phase: Some(0),
             beats_per_bar: 4,
+            features: None,
         }),
         ClientMessage::PlayAutoloop(wire::PlayAutoloop {
             command_id: 1,
             autoloop_id: DARK_LOOK.into(),
-            transition: Some(wire::play_autoloop::Transition::default()),
+            transition: Some(wire::Transition::default()),
             palette: "techno".into(),
         }),
     ] {
@@ -81,7 +83,7 @@ fn special(group: &str, value: wire::SpecialFx) -> ClientMessage {
         effect_id: "special".into(),
         target: Some(wire::set_active_effect::Target::Group(group.into())),
         priority: 100,
-        special_fx: Some(value),
+        special_fx: Some(Box::new(value)),
         ..Default::default()
     })
 }
@@ -92,6 +94,13 @@ fn steady(colour_slot: &str, energy: f32, speed: f32) -> wire::SpecialFx {
         energy,
         speed,
         ..Default::default()
+    }
+}
+
+fn released_over(release_beats: f64) -> wire::Envelope {
+    wire::Envelope {
+        attack_beats: 0.0,
+        release_beats,
     }
 }
 
@@ -147,7 +156,6 @@ fn capabilities_follow_each_profiles_attribute_families() {
         speed,
         pulse,
         pattern,
-        // Every synthetic fixture lies in the centre area.
         area: Some(wire::StageArea::Centre as i32),
         ..Default::default()
     };
@@ -162,8 +170,8 @@ fn capabilities_follow_each_profiles_attribute_families() {
 }
 
 #[test]
-fn the_real_rig_reports_what_its_profiles_declare() {
-    let rig = support::room();
+fn the_stage_reports_what_its_profiles_declare() {
+    let rig = support::stage();
     let report: Vec<_> = capabilities(&rig)
         .into_iter()
         .map(|group| {
@@ -183,7 +191,6 @@ fn the_real_rig_reports_what_its_profiles_declare() {
             ("wash".to_owned(), 4, [true, false, false, false]),
         ]
     );
-    // The washes span three areas (CENTRE_LEFT, CENTRE, CENTRE_RIGHT), so they report none.
     let places: Vec<_> = capabilities(&rig)
         .into_iter()
         .map(|group| (group.area.map(|_| group.area()), group.centre_x_metres))
@@ -192,9 +199,9 @@ fn the_real_rig_reports_what_its_profiles_declare() {
     assert_eq!(
         places,
         [
+            (Some(A::Centre), 0.0),
+            (None, 0.0),
             (Some(A::UpCentre), 0.0),
-            (Some(A::UpCentre), 0.0),
-            (Some(A::DownCentre), 0.0),
             (None, 0.0),
         ]
     );
@@ -290,8 +297,10 @@ fn attack_and_release_follow_the_musical_clock_without_snapping() {
     let rig = FixtureRig::from_wire(&synthetic_rig()).unwrap();
     let mut engine = engine(&rig);
     let eased = wire::SpecialFx {
-        attack_beats: 4.0,
-        release_beats: 4.0,
+        envelope: Some(wire::Envelope {
+            attack_beats: 4.0,
+            release_beats: 4.0,
+        }),
         ..steady("primary", 1.0, 0.0)
     };
     fire(&mut engine, 0.0, &special("scanners", eased));
@@ -313,7 +322,7 @@ fn an_operator_cut_drops_the_special_this_frame_off_the_beat() {
     let red = SCANNER.start + 2;
     let mut engine = engine(&rig);
     let texture = wire::SpecialFx {
-        release_beats: 64.0,
+        envelope: Some(released_over(64.0)),
         ..steady("primary", 1.0, 0.0)
     };
     fire(&mut engine, 0.0, &special("scanners", texture));
@@ -327,10 +336,9 @@ fn a_cut_also_drops_a_special_already_fading_under_its_id() {
     let rig = FixtureRig::from_wire(&synthetic_rig()).unwrap();
     let red = SCANNER.start + 2;
     let texture = wire::SpecialFx {
-        release_beats: 64.0,
+        envelope: Some(released_over(64.0)),
         ..steady("primary", 1.0, 0.0)
     };
-    // A plain release, and a replacement that leaves the first special fading beneath it.
     for replace in [false, true] {
         let mut engine = engine(&rig);
         fire(&mut engine, 0.0, &special("scanners", texture.clone()));
@@ -362,12 +370,15 @@ fn a_replacement_crossfades_through_the_releasing_special() {
     let rig = FixtureRig::from_wire(&synthetic_rig()).unwrap();
     let mut engine = engine(&rig);
     let first = wire::SpecialFx {
-        release_beats: 2.0,
+        envelope: Some(released_over(2.0)),
         ..steady("primary", 1.0, 0.0)
     };
     fire(&mut engine, 0.0, &special("scanners", first));
     let second = wire::SpecialFx {
-        attack_beats: 2.0,
+        envelope: Some(wire::Envelope {
+            attack_beats: 2.0,
+            release_beats: 0.0,
+        }),
         ..steady("primary", 0.0, 0.0)
     };
     fire(&mut engine, 1.0, &special("scanners", second));
@@ -464,7 +475,10 @@ fn invalid_specials_are_rejected() {
             ..steady("primary", 1.0, 0.0)
         },
         wire::SpecialFx {
-            attack_beats: -1.0,
+            envelope: Some(wire::Envelope {
+                attack_beats: -1.0,
+                release_beats: 0.0,
+            }),
             ..steady("primary", 1.0, 0.0)
         },
         wire::SpecialFx {
@@ -477,9 +491,9 @@ fn invalid_specials_are_rejected() {
 }
 
 #[test]
-fn the_real_rig_fx_group_spins_colours_and_gates_to_its_dark_slot() {
-    let definition = support::room_definition();
-    let rig = support::room();
+fn the_stage_fx_group_spins_colours_and_gates_to_its_dark_slot() {
+    let definition = support::stage_definition();
+    let rig = support::stage();
     let member = &rig.groups()["fx"][0];
     let address = definition
         .fixtures
@@ -497,11 +511,12 @@ fn the_real_rig_fx_group_spins_colours_and_gates_to_its_dark_slot() {
             beat_index: 1,
             bar_phase: Some(0),
             beats_per_bar: 4,
+            features: None,
         }),
         ClientMessage::PlayAutoloop(wire::PlayAutoloop {
             command_id: 1,
-            autoloop_id: "standby/warm_white".into(),
-            transition: Some(wire::play_autoloop::Transition::default()),
+            autoloop_id: "standby/white".into(),
+            transition: Some(wire::Transition::default()),
             palette: "techno".into(),
         }),
     ] {
@@ -555,8 +570,8 @@ fn the_real_rig_fx_group_spins_colours_and_gates_to_its_dark_slot() {
 
 #[test]
 fn pause_homes_the_dimmerless_fx_fixture_to_its_gdtf_defaults_and_play_resumes_its_render() {
-    let definition = support::room_definition();
-    let rig = support::room();
+    let definition = support::stage_definition();
+    let rig = support::stage();
     let member = &rig.groups()["fx"][0];
     let address = definition
         .fixtures
@@ -576,7 +591,6 @@ fn pause_homes_the_dimmerless_fx_fixture_to_its_gdtf_defaults_and_play_resumes_i
     let mut idle = rig.empty_states();
     idle.get_mut(member.as_str()).unwrap().output_blackout = true;
     let defaults = rig.encode(&idle).unwrap()[&0][fixture.clone()].to_vec();
-    // The Kinta manual's 0 rows: no colour, no strobe, motor indexed, no auto/sound program.
     assert_eq!(defaults, [0, 0, 0, 0]);
     assert_ne!(spinning, defaults);
 

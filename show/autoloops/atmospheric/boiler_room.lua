@@ -7,7 +7,7 @@ local LOOP_BEATS = 16
 local WASH_LOW, WASH_HIGH = 0.14, 0.26
 local EMBER_LOW, EMBER_HIGH = 0.04, 0.24
 local MOVER_LEVEL = 0.22
-local CENTRE_PAN, PARK_PAN, TILT = 0.5, 0.1, 0.68
+local PARK_DEGREES = 8
 local EMBER_SLOW, EMBER_FAST = LOOP_BEATS / 2, LOOP_BEATS / 3
 
 return {
@@ -27,12 +27,8 @@ return {
                 return sf.dimmer(pixel, sf.lerp(EMBER_LOW, EMBER_HIGH, ember) * level)
             end),
             sf.colour(sf.group("movers"), palette.primary),
-            sf.each(sf.group("movers"), function(mover, index)
-                return {
-                    sf.pan_tilt(mover, CENTRE_PAN + sf.side(index) * PARK_PAN, TILT),
-                    sf.dimmer(mover, MOVER_LEVEL * level)
-                }
-            end)
+            sf.dimmer(sf.group("movers"), MOVER_LEVEL * level),
+            sf.phaser(sf.group("movers"), ctx, { shape = "fan", size = PARK_DEGREES })
         }
     end
 }

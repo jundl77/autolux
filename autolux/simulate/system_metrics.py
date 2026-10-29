@@ -1,5 +1,3 @@
-"""Time-series panels for the existing Autolux dashboard."""
-
 import math
 import time
 from datetime import UTC, datetime
@@ -101,7 +99,6 @@ PANELS = (
 
 
 def build_metric_series(history, key, *, rate=False):
-    """Preserve gaps and counter resets; never interpolate an unknown interval."""
     x, y = [], []
     previous = None
     for sample in history:
@@ -227,7 +224,6 @@ def build_system_health_panels():
 def build_telemetry_notices(snapshot, *, now=None):
     now = time.time() if now is None else now
     system = snapshot.get('system') or {}
-    # Most severe first: the line ellipsises, and a routine link notice must not hide a fault.
     messages = []
     shed = snapshot.get('shed') or {}
     fault = shed.get('fault')
@@ -252,6 +248,8 @@ def build_telemetry_notices(snapshot, *, now=None):
             history = snapshot.get('system_history') or []
             if not history or history[-1].get('starfire_measured_render_frames_per_second') is None:
                 messages.append('Waiting for two renderer reports to measure Starfire FPS.')
+            if renderer.get('overlay_error'):
+                messages.append(f'Starfire skipped an overlay: {renderer["overlay_error"]}')
         for node, name in [('tx', 'Transmitter'), ('rx', 'Receiver')]:
             measured_age = system.get(f'{node}_age_seconds')
             info = system.get(node) or {}
@@ -278,10 +276,8 @@ def build_telemetry_notices(snapshot, *, now=None):
             and (not finite(dmx_age) or dmx_age + age >= DMX_INPUT_STALE_SECONDS)
         ):
             messages.append('No recent lighting input from Starfire.')
-    # One line, however many: the line sits above the show controls and must never grow.
     if not messages:
         return []
     text = ' · '.join(messages)
-    # The count tells the operator the ellipsis may hide more than the first notice.
     count = [html.Span(f'{len(messages)} ·', className='notice-count')] if len(messages) > 1 else []
     return [html.Div([*count, text], title=text, className='telemetry-notice', role='status')]
