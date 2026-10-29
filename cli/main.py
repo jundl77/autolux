@@ -26,7 +26,11 @@ async def run_cmd(args: argparse.Namespace):
     import uuid
 
     from autolux.lib.clients.starfire_client import StarfireClient
-    from autolux.lighting.autoloop_catalogue import discover_autoloops, read_autoloop_meta
+    from autolux.lighting.autoloop_catalogue import (
+        discover_autoloops,
+        read_autoloop_meta,
+        read_overlay_meta,
+    )
     from cli.starfire import ROOT
     from cli.starfire_assets import static_rig
     from cli.starfire_runtime import StarfireRuntime, fixture_setup, selected_rig
@@ -56,6 +60,7 @@ async def run_cmd(args: argparse.Namespace):
             fixture_setup=setup,
             autoloops=discover_autoloops(args.autoloops),
             autoloop_meta=read_autoloop_meta(args.autoloops),
+            overlay_meta=read_overlay_meta(args.autoloops),
             selection_seed=run_id,
             static_rig=static_rig(rig),
         )

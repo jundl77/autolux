@@ -401,7 +401,11 @@ async def _run_session(args, *, checking=False, number=1, deadline=None):
             renderer.send_command(command)
 
         from autolux.lib.clients.starfire_client import StarfireClient
-        from autolux.lighting.autoloop_catalogue import discover_autoloops, read_autoloop_meta
+        from autolux.lighting.autoloop_catalogue import (
+            discover_autoloops,
+            read_autoloop_meta,
+            read_overlay_meta,
+        )
 
         LOGGER.info('[prod] preparing analysis models before starting audio')
         app = main.AutoluxController(
@@ -414,6 +418,7 @@ async def _run_session(args, *, checking=False, number=1, deadline=None):
             fixture_setup=fixture_setup(args, rig, tx['dmx_universe']),
             autoloops=discover_autoloops(args.autoloops),
             autoloop_meta=read_autoloop_meta(args.autoloops),
+            overlay_meta=read_overlay_meta(args.autoloops),
             selection_seed=tx['run_id'],
             static_rig=static_rig(rig),
         )
