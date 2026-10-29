@@ -4,7 +4,7 @@
 -- texture: pixel
 local palette = sf.palette()
 local COUNT_BEATS = 8
-local STRIP_TOP, MOVER_LOW, MOVER_TOP = 0.9, 0.6, 0.85
+local STRIP_TOP = 0.9
 local FAN_DEGREES, LIFT_DEGREES = 15, 35
 
 local function filled(build)
@@ -30,7 +30,7 @@ return {
                 return sf.dimmer(pixel, STRIP_TOP * math.max(0, math.min(1, fill * ranks - from_end)))
             end),
             sf.colour(movers, roll.mover_colour),
-            sf.dimmer(movers, roll.movers or MOVER_TOP * sf.lerp(MOVER_LOW, 1, roll.climb)),
+            sf.dimmer(movers, roll.movers),
             sf.phaser(movers, ctx, {
                 shape = "fan", size = FAN_DEGREES, measure = build.measure, centre_tilt = LIFT_DEGREES * roll.climb
             })

@@ -5,8 +5,8 @@
 local palette = sf.palette()
 local HOLD_UNTIL = 0.5
 local NARROW_DEGREES, WIDE_DEGREES, RISE_DEGREES = 8, 45, 15
-local STRIP_TOP, MOVER_LOW, MOVER_TOP = 0.9, 0.6, 0.85
-local LAP_BEATS, TAIL_SHARE, STRIP_START = 2, 0.5, 0.2
+local STRIP_TOP = 0.9
+local LAP_BEATS, TAIL_SHARE, STRIP_START = 2, 1, 0.2
 
 local function letting_go(build)
     local open = math.max(0, (build.tension - HOLD_UNTIL) / (1 - HOLD_UNTIL))
@@ -29,7 +29,7 @@ return {
                 return sf.dimmer(pixel, STRIP_TOP * sf.lerp(STRIP_START, 1, roll.climb) * sf.lerp(dot, chase, open))
             end),
             sf.colour(movers, roll.mover_colour),
-            sf.dimmer(movers, roll.movers or MOVER_TOP * sf.lerp(MOVER_LOW, 1, roll.climb)),
+            sf.dimmer(movers, roll.movers),
             sf.phaser(movers, ctx, {
                 shape = "fan", size = sf.lerp(NARROW_DEGREES, WIDE_DEGREES, roll.climb), measure = build.measure,
                 centre_tilt = RISE_DEGREES * roll.climb
