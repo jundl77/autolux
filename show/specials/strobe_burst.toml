@@ -1,0 +1,6 @@
+name = "strobe_burst"
+intents = ["drop"]
+group = "all"
+
+[effect]
+form = { strobe_hz = 8.0 }

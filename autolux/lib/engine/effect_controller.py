@@ -7,7 +7,7 @@ import random
 from collections.abc import Callable, Hashable, Sequence
 from typing import TYPE_CHECKING
 
-from autolux.lib.clients.starfire_client import StarfireClient
+from autolux.lib.clients.starfire_client import StarfireClient, special_target
 from autolux.lib.clock import SYSTEM_CLOCK, Clock
 from autolux.lib.engine.autoloop_policy import (
     MAXIMAL_ARRIVAL_OF_PEAK,
@@ -27,6 +27,7 @@ from autolux.lib.engine.effect_definitions import (
     MAX_STROBE_COOLDOWN_SECONDS,
     STANDBY_AUTOLOOP,
     STANDBY_CROSSFADE_SECONDS,
+    STROBE_BURST_BARS,
     STROBE_GATE_INTENSITY,
     AutoloopMetaTable,
     AutoloopTable,
@@ -53,7 +54,30 @@ LOGGER = logging.getLogger(__name__)
 
 SPECIAL_PRIORITY = 100
 SPECIAL_ID = 'special'
+DROP_ACCENT_ID = 'drop_arrival'
 OPERATOR_FADE_SECONDS = 0.1
+
+
+def strobe_burst_seconds(
+    bpm: float | None, settings: ShowSettings, beats_per_bar: int | None
+) -> float:
+    # Starfire scales its burst cap by intensity and holds a longer strobe dark, never steady.
+    duration = settings.strobe_max_burst_seconds * settings.intensity
+    if bpm and bpm > 0 and beats_per_bar:
+        duration = min(duration, STROBE_BURST_BARS * beats_per_bar * 60.0 / bpm)
+    return duration
+
+
+def strobe_override(special: Special, duration_seconds: float, settings: ShowSettings) -> dict:
+    # The rate ctx.strobe_max_hz gives the overlays: the rate cap scaled by intensity.
+    rate = min(special.strobe_hz, settings.strobe_max_rate_hz) * settings.intensity
+    return {
+        'id': DROP_ACCENT_ID,
+        'target': special_target(special.group),
+        'values': {'strobe_hz': rate},
+        'priority': SPECIAL_PRIORITY,
+        'lifetime': {'kind': 'seconds', 'duration_seconds': duration_seconds},
+    }
 
 
 def drop_strobe_cooldown_seconds(settings: ShowSettings) -> float:
@@ -314,7 +338,9 @@ class EffectController:
         self._publish_palette()
         self._announce('[lighting] cue |', intent, choice, plan.cue.palette, plan.cue)
         if fresh:
-            self._enter_special(intent, bpm, context.arrival_of_peak, moment)
+            self._enter_special(
+                intent, bpm, context.arrival_of_peak, moment, plan.request.beats_per_bar
+            )
         else:
             self._restore_special()
         return True
@@ -409,6 +435,7 @@ class EffectController:
         )
 
     def enter_standby(self, bpm: float | None) -> None:
+        self.lighting_client.clear_override(DROP_ACCENT_ID)
         self.forget_special(instantaneous=True)
         bank, autoloop = STANDBY_AUTOLOOP
         crossfade_beats = bpm / 60.0 * STANDBY_CROSSFADE_SECONDS if bpm and bpm > 0 else 0.0
@@ -447,6 +474,7 @@ class EffectController:
         bpm: float | None,
         arrival_of_peak: float | None = None,
         moment: Hashable = None,
+        beats_per_bar: int | None = None,
     ) -> None:
         settings = self._settings()
         now = self.clock.monotonic()
@@ -462,9 +490,10 @@ class EffectController:
             ),
             now=now,
             moment=moment,
+            drop_strength=arrival_of_peak,
         )
         if not settings.fx_auto:
-            choice = dataclasses.replace(choice, special=None)
+            choice = dataclasses.replace(choice, special=None, strobes=())
         if choice.suppressed:
             LOGGER.info('[lighting] intense special suppressed | %s', choice.suppressed)
         if choice.intense:
@@ -475,6 +504,21 @@ class EffectController:
         else:
             self._special_policy.record(choice.special, now, self._capabilities, moment)
             self._fire_special(choice.special)
+        for strobe in choice.strobes:
+            self._strobe(strobe, bpm, settings, beats_per_bar)
+
+    def _strobe(
+        self, special: Special, bpm: float | None, settings: ShowSettings, beats_per_bar: int | None
+    ) -> None:
+        duration = strobe_burst_seconds(bpm, settings, beats_per_bar)
+        self.lighting_client.set_override(strobe_override(special, duration, settings))
+        if self.event_buffer:
+            self.event_buffer.add_effect(DROP_ACCENT_ID, 'ACCENT', duration_seconds=duration)
+            if not self._special_on:
+                self.event_buffer.set_special(
+                    special.name, special.group, duration_seconds=duration
+                )
+        LOGGER.info('[lighting] drop strobe %s | duration=%.1fs', special.name, duration)
 
     def _fire_special(self, special: Special) -> None:
         self.lighting_client.set_special(

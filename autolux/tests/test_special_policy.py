@@ -24,6 +24,8 @@ FX = {
     'role': 'accent',
 }
 
+STROBE = Special('strobe_burst', (DROP,), 'all', strobe_hz=8.0)
+
 
 def row(name, intent=DROP, *, group='fx', speed=0.3, pulse=None, pattern=None, cooldown=0.0):
     return Special(
@@ -61,19 +63,33 @@ def test_an_empty_capability_list_leaves_only_whole_rig_rows():
     assert policy.choose(DROP, SpecialCapabilities()).special == whole_rig
 
 
-def test_a_blocked_drop_keeps_a_calm_row():
-    policy = SpecialPolicy([row('calm'), row('spin', pulse=1)], random.Random(0))
+def test_a_blocked_drop_drops_the_strobe_and_keeps_a_calm_row():
+    policy = SpecialPolicy([row('calm'), row('spin', pulse=1), STROBE], random.Random(0))
     choice = policy.choose(DROP, SpecialCapabilities.from_groups([FX]), 'cooldown')
-    assert (choice.special.name, choice.suppressed) == ('calm', 'cooldown')
+    assert (choice.special.name, choice.strobes, choice.suppressed) == ('calm', (), 'cooldown')
     assert not choice.intense
 
 
-def test_the_strobe_burst_special_is_gone():
-    from autolux.lib.engine import special_policy
+def test_the_strobe_burst_joins_the_chosen_row_and_is_never_selected():
+    policy = SpecialPolicy([row('spin', pulse=1), STROBE], random.Random(0))
+    for _ in range(3):
+        choice = policy.choose(DROP, SpecialCapabilities.from_groups([FX]))
+        policy.record(choice.special)
+        assert (choice.special.name, choice.strobes) == ('spin', (STROBE,))
+        assert choice.intense
 
-    assert not hasattr(special_policy, 'DROP_STROBE')
-    assert 'strobe_hz' not in {field.name for field in dataclasses.fields(Special)}
-    assert all(not hasattr(special, 'strobe_hz') for special in discover_specials())
+
+@pytest.mark.parametrize(
+    ('strength', 'fires'), [(None, True), (0.5, True), (1.0, True), (0.4, False)]
+)
+def test_the_strobe_burst_needs_a_drop_of_at_least_half_strength(strength, fires):
+    policy = SpecialPolicy([STROBE], random.Random(0))
+    choice = policy.choose(DROP, SpecialCapabilities(), drop_strength=strength)
+    assert choice.strobes == ((STROBE,) if fires else ())
+
+
+def test_the_shipped_strobe_burst_is_the_drops_whole_rig_strobe():
+    assert [s for s in discover_specials() if s.strobe_hz is not None] == [STROBE]
 
 
 def test_every_row_plays_before_any_repeats_and_the_seed_fixes_the_order():
