@@ -208,6 +208,7 @@ impl LiveSession {
                 bail!(error);
             }
         }
+        probe.check_scripts_pure()?;
         drop(probe);
         // Probing must not carry fixture positions or script state into playback.
         let mut engine = Engine::new(rig.clone(), catalog, palettes)?;

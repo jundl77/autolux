@@ -257,7 +257,9 @@ message CueSection {
   }
 
   // A scheduled Lua layer above the base look and below every SetActiveEffect. Whether its
-  // intensity is HTP is the autoloop's own Login metadata.
+  // intensity is HTP is the autoloop's own Login metadata. A pre-roll row from the "dip" bank is
+  // the blackout before the section: Starfire derives ctx.beats_until_dip and the move in black
+  // from that bank name, so the director plans the dip in that bank only.
   message Overlay {
     string autoloop_id = 1;
     sint32 priority = 2;  // Higher composes later; ties keep list order.
