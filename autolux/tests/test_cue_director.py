@@ -5,6 +5,7 @@ import pytest
 
 from autolux.lib.clock import VirtualClock
 from autolux.lib.engine.autoloop_policy import AutoloopPolicy, SelectionContext
+from autolux.lib.engine.cue import MAX_PREROLL_BEATS
 from autolux.lib.engine.cue_director import (
     CueDirector,
     SectionRequest,
@@ -93,10 +94,12 @@ def director(seed=0, overlays=OVERLAYS, meta=META):
     return CueDirector(AutoloopPolicy(table(meta), meta, random.Random(seed)), overlays, seed)
 
 
-def request(intent, start, *, new_track=False, levels=LOUD_BUILD, arrival=None, lead=LEAD_BEATS):
+def request(
+    intent, start, *, new_track=False, levels=LOUD_BUILD, arrival=None, lead=LEAD_BEATS, bar=4
+):
     context = SelectionContext(intent, new_track=new_track, arrival_of_peak=arrival)
     return SectionRequest(
-        start, intent, context, start * BEAT_SEC, BPM, levels, lead, beats_per_bar=4
+        start, intent, context, start * BEAT_SEC, BPM, levels, lead, beats_per_bar=bar
     )
 
 
@@ -126,9 +129,11 @@ def drop_after_build(build_beats=64, *, level='balanced', **drop):
 
 def entry_of(cue):
     hits = {o.autoloop for o in cue.overlays if o.bank == 'hit'}
-    if 'strobe' in hits:
-        return 'strobe'
     return 'colour' if hits == {'colour_bump'} else 'white'
+
+
+def strobing(cue):
+    return any(OVERLAYS[o.bank, o.autoloop].strobe for o in cue.overlays)
 
 
 def rows(plan):
@@ -275,7 +280,6 @@ def test_mono_until_the_first_drop_and_in_every_breakdown_and_buildup():
                 'dip/last_beat',
                 'riser/strobe_ramp',
                 'hit/white',
-                'hit/strobe',
                 'fill/wipe',
                 'fill/turnaround',
                 'accent/mover_shapes',
@@ -313,9 +317,8 @@ def test_mono_until_the_first_drop_and_in_every_breakdown_and_buildup():
 def test_the_drop_entry_per_venue_setting(level, gate, expected):
     drop = play(SET[:3], level=level, gate=gate)[2]
     assert sorted(rows(drop)) == sorted(expected)
-    strobing = any(OVERLAYS[o.bank, o.autoloop].strobe for o in drop.cue.overlays)
-    assert strobing == (level == 'wild' and gate.blocked is None and not gate.crowded)
-    assert drop.events.intense == strobing
+    assert strobing(drop.cue) == (level == 'wild' and gate.blocked is None and not gate.crowded)
+    assert drop.events.intense == strobing(drop.cue)
     assert drop.events.accent == (level != 'calm' and not gate.crowded)
 
 
@@ -325,7 +328,11 @@ def test_the_entry_rows_land_on_the_one():
     assert (dip.begin_beats + dip.duration_beats, dip.envelope.attack_beats) == (0.0, 0.0)
     assert [o.bank for o in drop.cue.overlays if o.dip] == ['dip'], 'the dip blacks out'
     assert riser.begin_beats + riser.duration_beats == dip.begin_beats, 'the riser ends at the dip'
-    assert (riser.duration_beats, riser.every_bars, riser.envelope.release_beats) == (16, 0, 2.0)
+    assert (riser.duration_beats, riser.every_bars, riser.envelope.release_beats) == (
+        LEAD_BEATS - 1,
+        0,
+        2.0,
+    )
     hits = [o for o in drop.cue.overlays if o.bank == 'hit']
     assert [o.autoloop for o in hits] == ['white']
     assert {(o.begin_beats, o.envelope.attack_beats, o.every_bars) for o in hits} == {(0.0, 0.0, 0)}
@@ -334,13 +341,10 @@ def test_the_entry_rows_land_on_the_one():
     assert priorities['riser'] < priorities['hit'] < priorities['dip']
 
 
-def test_the_wild_strobe_hit_is_the_burst_setting_in_beats_and_the_riser_fits_the_cap():
+def test_no_hit_strobes_since_the_special_strobes_the_drop_and_the_riser_fits_the_cap():
     drop = play(SET[:3], level='wild')[2]
-    [strobe] = [o for o in drop.cue.overlays if o.autoloop == 'strobe']
-    assert (strobe.begin_beats, strobe.duration_beats, strobe.envelope.release_beats) == (
-        0.0,
-        2.0,
-        0.0,
+    assert not any(
+        OVERLAYS[o.bank, o.autoloop].strobe for o in drop.cue.overlays if o.bank == 'hit'
     )
     tight = ShowSettings(intensity=INTENSITY_WILD, strobe_max_burst_seconds=3.0)
     cues = director()
@@ -391,17 +395,19 @@ def test_a_riser_only_after_a_buildup():
 @pytest.mark.parametrize(
     ('build_beats', 'levels', 'lead', 'riser_beats'),
     [
-        (64, LOUD_BUILD, 18.0, 16),
+        (64, LOUD_BUILD, 18.0, 17),
+        (64, LOUD_BUILD, 40.0, 32),
         (64, (0.8,) * 12 + (0.0,) * 4, 18.0, 14),
         (64, (0.8,) * 8 + (0.0,) * 8, 16.0, 8),
         (64, LOUD_BUILD, 6.0, 5),
         (64, LOUD_BUILD, 4.0, None),
-        (10, LOUD_BUILD, 18.0, 9.5),
+        (10, LOUD_BUILD, 18.0, 9),
         (128, LOUD_BUILD, 40.0, 32),
         (128, LOUD_BUILD, 24.0, 23),
     ],
     ids=[
-        'usual-16',
+        'usual-lead',
+        'eight-bars-when-the-lead-allows',
         'bar-of-dip',
         'short-lead',
         'late-commit',
@@ -424,6 +430,21 @@ def test_the_riser_starts_after_starfire_has_the_cue_and_inside_the_build(
     assert riser.duration_beats == riser_beats
     assert riser.begin_beats + riser.duration_beats == dip.begin_beats, 'never inside the dip'
     assert -riser.begin_beats <= lead and -riser.begin_beats <= build_beats
+
+
+def test_eight_bars_of_seven_after_a_two_bar_dip_start_inside_the_preroll():
+    drop = drop_after_build(256, levels=(0.9,) * 2 + (0.0,) * 14, lead=200.0, bar=7)
+    assert row(drop, 'dip').begin_beats == -14.0
+    assert row(drop, 'riser').begin_beats == -MAX_PREROLL_BEATS
+
+
+def test_a_balanced_build_rides_white_from_eight_bars_out_into_a_white_hit_and_never_strobes():
+    drop = drop_after_build(level='balanced', lead=40.0)
+    riser = row(drop, 'riser')
+    assert (riser.autoloop, riser.begin_beats) == ('white_rise', -33.0)
+    assert entry_of(drop.cue) == 'white' and row(drop, 'hit').autoloop == 'white'
+    assert not any(OVERLAYS[o.bank, o.autoloop].strobe for o in drop.cue.overlays)
+    assert not drop.events.intense
 
 
 def test_an_overlay_never_fights_its_base_loop():
@@ -473,9 +494,17 @@ def test_a_filtered_build_is_no_gap_and_only_near_silence_earns_two_bars():
     assert dip_beats((), 4) == 0.5, 'nothing measured: the shortest'
 
 
+@pytest.mark.parametrize(('level', 'dip'), [('calm', 0.5), ('balanced', 1.0), ('wild', 1.0)])
+def test_a_drop_with_no_gap_before_it_still_goes_dark(level, dip):
+    drop = drop_after_build(level=level)
+    assert (row(drop, 'dip').begin_beats, row(drop, 'dip').duration_beats) == (-dip, dip)
+    riser = row(drop, 'riser')
+    assert riser.begin_beats + riser.duration_beats == -dip
+
+
 def test_dip_shapes_land_in_the_drop_cue():
     for levels, dip in (
-        (LOUD_BUILD, 0.5),
+        (LOUD_BUILD, 1.0),
         ((0.8,) * 15 + (0.1,), 1.0),
         ((0.7,) * 12 + (0.05,) * 4, 4.0),
         ((0.9,) * 8 + (0.05,) * 8, 8.0),
@@ -578,9 +607,9 @@ def test_a_level_change_refilters_rows_and_keeps_start_seed_and_rotation():
         balanced.cue.seed,
         balanced.cue.rotation,
     )
-    assert entry_of(wild.cue) == 'strobe' and wild.events.intense
+    assert strobing(wild.cue) and wild.events.intense
     calm = cues.revise(128, ShowSettings(intensity=INTENSITY_CALM), Gate(), started=True)
-    assert entry_of(calm.cue) == 'strobe', 'a started section keeps its one-shot rows'
+    assert strobing(calm.cue), 'a started section keeps its one-shot rows'
     assert calm.events == wild.events
     assert [o.every_bars for o in calm.cue.overlays if o.bank == 'fill'] == [16]
 
@@ -616,21 +645,20 @@ def plan_drop(effects, moment, at, start):
         start - 64, B, SelectionContext(B), at - 32.0, BPM, LOUD_BUILD, beats_per_bar=4
     )
     effects.plan_cue((moment, 'build'), build)
-    drop = SectionRequest(start, D, SelectionContext(D), at, BPM, LOUD_BUILD, beats_per_bar=4)
+    drop = SectionRequest(
+        start, D, SelectionContext(D), at, BPM, LOUD_BUILD, LEAD_BEATS, beats_per_bar=4
+    )
     return effects.plan_cue(moment, drop)
 
 
 def test_the_intense_cooldown_blocks_strobe_rows_between_drops():
     effects, _ = controller('wild', venue=Venue(max_accent_events_per_minute=10))
-    assert entry_of(plan_drop(effects, 'one', 100.0, 128)) == 'strobe'
-    second = plan_drop(effects, 'two', 125.0, 384)
-    assert entry_of(second) != 'strobe' and 'strobe_ramp' not in {
-        o.autoloop for o in second.overlays
-    }
-    assert entry_of(plan_drop(effects, 'three', 131.0, 640)) == 'strobe', 'two booked nothing'
+    assert strobing(plan_drop(effects, 'one', 100.0, 128))
+    assert not strobing(plan_drop(effects, 'two', 125.0, 384))
+    assert strobing(plan_drop(effects, 'three', 131.0, 640)), 'two booked nothing'
     effects.drop_cue('one')
     effects.drop_cue('three')
-    assert entry_of(effects.revise_cue('two', started=False)) == 'strobe', 'the slot is free again'
+    assert strobing(effects.revise_cue('two', started=False)), 'the slot is free again'
 
 
 def test_the_drops_special_shares_its_cues_intense_moment():
@@ -670,7 +698,7 @@ def test_a_wild_second_drop_keeps_its_entry_whole_under_the_row_cap():
     second = play(level='wild')[5]
     assert len(second.cue.overlays) <= 8
     banks = [o.bank for o in second.cue.overlays if o.every_bars == 0]
-    assert banks.count('hit') == 2 and 'dip' in banks and 'riser' in banks
+    assert banks.count('hit') == 1 and 'dip' in banks and 'riser' in banks
     assert [o.bank for o in second.cue.overlays if o.every_bars > 0].count('accent') == 2
 
 

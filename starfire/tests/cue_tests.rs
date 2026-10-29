@@ -942,12 +942,15 @@ fn sf_tension_keeps_rising_then_bends_to_the_known_change_without_a_jump() {
         )
         .unwrap()
     };
-    let ease = |e: f64| e / (e + 48.0);
-    assert!((ease(32.0) - 0.4).abs() < 1e-12, "bar 8");
-    assert!((ease(64.0) - 4.0 / 7.0).abs() < 1e-12, "bar 16, about 0.57");
+    let ease = |e: f64| e / (e + 24.0);
+    assert!((ease(32.0) - 4.0 / 7.0).abs() < 1e-12, "bar 8, about 0.57");
     assert!(
-        (ease(128.0) - 8.0 / 11.0).abs() < 1e-12,
-        "bar 32, about 0.73"
+        (ease(64.0) - 8.0 / 11.0).abs() < 1e-12,
+        "bar 16, about 0.73"
+    );
+    assert!(
+        (ease(128.0) - 16.0 / 19.0).abs() < 1e-12,
+        "bar 32, about 0.84"
     );
     let bar_16 = ease(64.0);
     assert_eq!(tension(Some(64.0), 0.0, None, None)[1..], [bar_16, bar_16]);
@@ -970,6 +973,53 @@ fn sf_tension_keeps_rising_then_bends_to_the_known_change_without_a_jump() {
     assert!(level > halfway && stepped == halfway);
     assert_eq!(tension(Some(128.0), 0.0, Some(0.0), Some(96.0))[1], 1.0);
 }
+#[test]
+fn sf_build_climbs_uncued_and_a_cued_drop_holds_full_drive_over_its_last_four_beats() {
+    const DIP: f64 = 127.0;
+    let build = |section: f64, known: Option<f64>| {
+        lua(
+            "sf.build(ctx).drive, sf.build(ctx).finale, sf.build(ctx).measure / 8",
+            with(|context| {
+                context.section_elapsed_beats = Some(section);
+                if let Some(known) = known {
+                    context.next_intent = Some(SectionIntent::Drop);
+                    context.beats_until_next = Some(DIP + 1.0 - section);
+                    context.beats_until_dip = Some(DIP - section);
+                    context.next_known_at = Some(known);
+                }
+            }),
+        )
+        .unwrap()
+    };
+    let drive = |section| build(section, None)[0];
+    assert!((drive(0.0) - 0.35).abs() < 1e-12, "the floor");
+    assert!(drive(28.0) > drive(0.0) + 0.3, "bar 8 clearly above bar 1");
+    assert!((drive(60.0) - 0.8).abs() < 0.03, "bar 16 near 0.8");
+
+    for known in [DIP - 16.0, DIP - 8.0] {
+        let mut previous = 0.0;
+        let mut section = known;
+        while section < DIP {
+            let [drive, finale, measure] = build(section, Some(known));
+            assert!(
+                drive >= previous,
+                "beat {section}: {drive} after {previous}"
+            );
+            assert_eq!(measure, 0.25, "beat {section}: the ladder reaches 2 beats");
+            if DIP - section <= 4.0 {
+                assert_eq!((drive, finale), (1.0, 1.0), "beat {section}");
+            }
+            previous = drive;
+            section += 0.25;
+        }
+    }
+    let [drive, ..] = build(DIP - 8.0, Some(DIP - 16.0));
+    assert!(
+        drive < 1.0,
+        "the hand-over runs over the finale, not in a jump"
+    );
+}
+
 #[test]
 fn next_known_at_is_the_section_time_the_next_cue_arrived() {
     const KNOWN: &str = r#"return {render = function(ctx)

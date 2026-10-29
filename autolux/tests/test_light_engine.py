@@ -2287,7 +2287,7 @@ def sent_hits(lighting):
 async def test_a_running_drop_sent_again_never_fires_its_entry_twice(cause):
     light, lighting, planned = await wild_drop_in_the_room()
     entry = sent_hits(lighting)
-    assert {row['autoloop'] for row in entry} == {'white', 'strobe'}
+    assert {row['autoloop'] for row in entry} == {'white'}
     booked = dict(light.effect_controller._intense_at)
     before = len(cue_events(lighting))
     if cause == 'static':
