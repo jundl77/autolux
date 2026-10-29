@@ -7,6 +7,7 @@ from autolux.lib.clock import VirtualClock
 from autolux.lib.engine.autoloop_policy import AutoloopPolicy, SelectionContext
 from autolux.lib.engine.cue import MAX_PREROLL_BEATS
 from autolux.lib.engine.cue_director import (
+    DROP_DIP_BEATS,
     CueDirector,
     SectionRequest,
     cue_seed,
@@ -17,6 +18,7 @@ from autolux.lib.engine.effect_definitions import (
     INTENSITY_BALANCED,
     INTENSITY_CALM,
     INTENSITY_WILD,
+    STROBE_COOLDOWN_SECONDS,
     AutoloopMeta,
     LightIntent,
     OverlayMeta,
@@ -329,7 +331,7 @@ def test_the_entry_rows_land_on_the_one():
     assert [o.bank for o in drop.cue.overlays if o.dip] == ['dip'], 'the dip blacks out'
     assert riser.begin_beats + riser.duration_beats == dip.begin_beats, 'the riser ends at the dip'
     assert (riser.duration_beats, riser.every_bars, riser.envelope.release_beats) == (
-        LEAD_BEATS - 1,
+        LEAD_BEATS - DROP_DIP_BEATS,
         0,
         2.0,
     )
@@ -395,15 +397,15 @@ def test_a_riser_only_after_a_buildup():
 @pytest.mark.parametrize(
     ('build_beats', 'levels', 'lead', 'riser_beats'),
     [
-        (64, LOUD_BUILD, 18.0, 17),
+        (64, LOUD_BUILD, 18.0, 18.0 - DROP_DIP_BEATS),
         (64, LOUD_BUILD, 40.0, 32),
         (64, (0.8,) * 12 + (0.0,) * 4, 18.0, 14),
         (64, (0.8,) * 8 + (0.0,) * 8, 16.0, 8),
-        (64, LOUD_BUILD, 6.0, 5),
+        (64, LOUD_BUILD, 6.0, 6.0 - DROP_DIP_BEATS),
         (64, LOUD_BUILD, 4.0, None),
-        (10, LOUD_BUILD, 18.0, 9),
+        (10, LOUD_BUILD, 18.0, 10 - DROP_DIP_BEATS),
         (128, LOUD_BUILD, 40.0, 32),
-        (128, LOUD_BUILD, 24.0, 23),
+        (128, LOUD_BUILD, 24.0, 24.0 - DROP_DIP_BEATS),
     ],
     ids=[
         'usual-lead',
@@ -441,7 +443,7 @@ def test_eight_bars_of_seven_after_a_two_bar_dip_start_inside_the_preroll():
 def test_a_balanced_build_rides_white_from_eight_bars_out_into_a_white_hit_and_never_strobes():
     drop = drop_after_build(level='balanced', lead=40.0)
     riser = row(drop, 'riser')
-    assert (riser.autoloop, riser.begin_beats) == ('white_rise', -33.0)
+    assert (riser.autoloop, riser.begin_beats) == ('white_rise', -32.0 - DROP_DIP_BEATS)
     assert entry_of(drop.cue) == 'white' and row(drop, 'hit').autoloop == 'white'
     assert not any(OVERLAYS[o.bank, o.autoloop].strobe for o in drop.cue.overlays)
     assert not drop.events.intense
@@ -494,7 +496,9 @@ def test_a_filtered_build_is_no_gap_and_only_near_silence_earns_two_bars():
     assert dip_beats((), 4) == 0.5, 'nothing measured: the shortest'
 
 
-@pytest.mark.parametrize(('level', 'dip'), [('calm', 0.5), ('balanced', 1.0), ('wild', 1.0)])
+@pytest.mark.parametrize(
+    ('level', 'dip'), [('calm', 0.5), ('balanced', DROP_DIP_BEATS), ('wild', DROP_DIP_BEATS)]
+)
 def test_a_drop_with_no_gap_before_it_still_goes_dark(level, dip):
     drop = drop_after_build(level=level)
     assert (row(drop, 'dip').begin_beats, row(drop, 'dip').duration_beats) == (-dip, dip)
@@ -504,8 +508,8 @@ def test_a_drop_with_no_gap_before_it_still_goes_dark(level, dip):
 
 def test_dip_shapes_land_in_the_drop_cue():
     for levels, dip in (
-        (LOUD_BUILD, 1.0),
-        ((0.8,) * 15 + (0.1,), 1.0),
+        (LOUD_BUILD, DROP_DIP_BEATS),
+        ((0.8,) * 15 + (0.1,), DROP_DIP_BEATS),
         ((0.7,) * 12 + (0.05,) * 4, 4.0),
         ((0.9,) * 8 + (0.05,) * 8, 8.0),
     ):
@@ -655,7 +659,9 @@ def test_the_intense_cooldown_blocks_strobe_rows_between_drops():
     effects, _ = controller('wild', venue=Venue(max_accent_events_per_minute=10))
     assert strobing(plan_drop(effects, 'one', 100.0, 128))
     assert not strobing(plan_drop(effects, 'two', 125.0, 384))
-    assert strobing(plan_drop(effects, 'three', 131.0, 640)), 'two booked nothing'
+    assert strobing(plan_drop(effects, 'three', 100.0 + STROBE_COOLDOWN_SECONDS / 2 + 1, 640)), (
+        'two booked nothing'
+    )
     effects.drop_cue('one')
     effects.drop_cue('three')
     assert strobing(effects.revise_cue('two', started=False)), 'the slot is free again'
@@ -682,7 +688,10 @@ def test_resetting_the_plans_releases_bookings_still_ahead_of_the_room():
     plan_drop(effects, 'ahead', 50.0, 256)
     clock.advance(20.0)
     effects.reset_cues()
-    assert effects.intense_blocked(effects._settings(), 60.0, None) is None
+    assert (
+        effects.intense_blocked(effects._settings(), 10.0 + STROBE_COOLDOWN_SECONDS / 2 + 1, None)
+        is None
+    )
     assert effects.intense_blocked(effects._settings(), 30.0, None) is not None, (
         'the drop the room saw still counts'
     )

@@ -279,7 +279,12 @@ async def test_next_autoloop_switches_at_once_to_another_loop_with_the_default_c
 
 
 @pytest.mark.parametrize(
-    ('intensity', 'cooldown'), [(INTENSITY_WILD, 30.0), (INTENSITY_BALANCED, 60.0), (0.4, 60.0)]
+    ('intensity', 'cooldown'),
+    [
+        (INTENSITY_WILD, STROBE_COOLDOWN_SECONDS / 2),
+        (INTENSITY_BALANCED, STROBE_COOLDOWN_SECONDS),
+        (0.4, STROBE_COOLDOWN_SECONDS),
+    ],
 )
 async def test_the_intense_cooldown_is_as_set_and_halved_when_wild(intensity, cooldown):
     controller, lighting, clock = with_specials([SPIN], settings=ShowSettings(intensity=intensity))
@@ -422,13 +427,17 @@ async def test_a_soft_drop_plays_no_intense_special(caplog):
 async def test_a_drop_special_rests_the_intense_cooldown(caplog):
     controller, lighting, clock = with_specials([SPIN], settings=BALANCED)
     fired = []
-    for wait in (0, 30, 31):
+    half = STROBE_COOLDOWN_SECONDS / 2
+    for wait in (0, half, half + 1):
         start = len(lighting.events)
         with caplog.at_level(logging.INFO):
             await _drop_after(controller, lighting, clock, wait)
         fired.append([c['value']['id'] for c in accents(lighting, start) if 'value' in c])
     assert fired == [[SPECIAL_ID], [], [SPECIAL_ID]]
-    assert 'intense special suppressed | cooldown 30s of 60s left' in caplog.text
+    assert (
+        f'intense special suppressed | cooldown {half:.0f}s of {STROBE_COOLDOWN_SECONDS:.0f}s left'
+        in caplog.text
+    )
 
 
 async def test_capabilities_are_read_when_an_intent_starts_not_when_built():
@@ -571,7 +580,11 @@ async def test_an_intense_special_blocks_a_later_intense_drop_special(caplog):
     with caplog.at_level(logging.INFO):
         await controller.change_effect(LightIntent.DROP)
     assert accents(lighting, start) == [{'kind': 'clear_override', 'id': SPECIAL_ID}]
-    assert 'intense special suppressed | cooldown 50s of 60s left' in caplog.text
+    remaining = STROBE_COOLDOWN_SECONDS - 10
+    assert (
+        f'intense special suppressed | cooldown {remaining:.0f}s of '
+        f'{STROBE_COOLDOWN_SECONDS:.0f}s left' in caplog.text
+    )
 
 
 async def test_a_held_intent_resends_a_released_special_without_choosing_or_charging_again():
@@ -806,16 +819,17 @@ async def test_the_snapshot_carries_each_special_cooldown_on_the_engine_clock():
     assert (first['fx']['last'], first['fx']['ready']) == ('spin', True)
     assert first['all']['last'] == 'strobe'
     assert first['venue']['label'] == 'venue · accents 1/2'
-    assert first['all']['cooldown_seconds'] == pytest.approx(60.0)
-    assert first['all']['remaining_seconds'] == pytest.approx(50.0)
-    assert later['all']['remaining_seconds'] == pytest.approx(20.0)
+    assert first['all']['cooldown_seconds'] == pytest.approx(STROBE_COOLDOWN_SECONDS)
+    assert first['all']['remaining_seconds'] == pytest.approx(STROBE_COOLDOWN_SECONDS - 10.0)
+    assert later['all']['remaining_seconds'] == pytest.approx(STROBE_COOLDOWN_SECONDS - 40.0)
     assert not later['all']['ready']
     await controller.change_effect(LightIntent.ATMOSPHERIC)
     clock.advance(100.0)
     rested = cooldowns()['fx']
     assert (rested['last'], rested['cooldown_seconds']) == ('drift', 240)
     assert rested['remaining_seconds'] == pytest.approx(140.0)
-    clock.advance(140.0)
+    # Clears both fx's 240s cooldown and all's STROBE_COOLDOWN_SECONDS, elapsed since the drop.
+    clock.advance(max(140.0, STROBE_COOLDOWN_SECONDS - 140.0))
     assert all(row['ready'] for row in cooldowns().values())
 
 
