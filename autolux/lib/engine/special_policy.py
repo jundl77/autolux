@@ -125,6 +125,14 @@ class Venue:
     max_accent_events_per_minute: int = 2
 
 
+def moments_near(
+    times: Mapping[Hashable, float], at: float, window: float, *, excluding: Hashable
+) -> dict[Hashable, float]:
+    return {
+        key: when for key, when in times.items() if key != excluding and abs(at - when) < window
+    }
+
+
 class SpecialPolicy:
     def __init__(self, specials: Sequence[Special], rng: random.Random, venue: Venue | None = None):
         self._specials = tuple(specials)
@@ -182,11 +190,7 @@ class SpecialPolicy:
             self.plan_accent(object() if moment is None else moment, now)
 
     def plan_accent(self, moment: Hashable, at: float) -> None:
-        kept = {
-            key: when
-            for key, when in self._accents.items()
-            if abs(at - when) < ACCENT_WINDOW_SECONDS
-        }
+        kept = moments_near(self._accents, at, ACCENT_WINDOW_SECONDS, excluding=moment)
         # Replaced, never mutated, so the dashboard thread reads a whole snapshot.
         self._accents = {**kept, moment: at}
 
@@ -197,11 +201,7 @@ class SpecialPolicy:
         self._accents = {key: at for key, at in self._accents.items() if at <= now}
 
     def accent_crowded(self, at: float, moment: Hashable = None) -> bool:
-        near = [
-            when
-            for key, when in dict(self._accents).items()
-            if key != moment and abs(at - when) < ACCENT_WINDOW_SECONDS
-        ]
+        near = moments_near(self._accents, at, ACCENT_WINDOW_SECONDS, excluding=moment)
         return len(near) >= self._venue.max_accent_events_per_minute
 
     def _recent_accents(self, now: float, moment: Hashable = None) -> list[float]:

@@ -53,6 +53,10 @@ class Overlay:
         }
 
 
+def recurring_rows(overlays: tuple[Overlay, ...]) -> tuple[Overlay, ...]:
+    return tuple(row for row in overlays if row.every_bars > 0)
+
+
 def _check_transition(transition: dict | None) -> None:
     if transition is None or transition == {'kind': 'cut'}:
         return

@@ -18,7 +18,7 @@ from autolux.lib.engine.autoloop_policy import (
     max_energy_for_intensity,
     soft_drop,
 )
-from autolux.lib.engine.cue import Cue
+from autolux.lib.engine.cue import BaseLook, Cue, Overlay
 from autolux.lib.engine.cue_director import CueDirector, SectionPlan, SectionRequest
 from autolux.lib.engine.effect_definitions import (
     DEFAULT_AUTOLOOP_META,
@@ -42,6 +42,7 @@ from autolux.lib.engine.special_policy import (
     SpecialCapabilities,
     SpecialPolicy,
     Venue,
+    moments_near,
 )
 from autolux.lighting.palettes import PALETTE_NAMES, PALETTES, Mood, Palette
 
@@ -64,6 +65,10 @@ def operator_transition(bpm: float | None) -> dict:
     if bpm and bpm > 0:
         return {'kind': 'crossfade', 'duration_beats': bpm / 60.0 * OPERATOR_FADE_SECONDS}
     return {'kind': 'cut'}
+
+
+def _loop_ids(looks: Sequence[BaseLook | Overlay]) -> str:
+    return ','.join(f'{look.bank}/{look.autoloop}' for look in looks)
 
 
 class EffectController:
@@ -126,8 +131,7 @@ class EffectController:
             self.lighting_client.set_palette(palette)
         self._publish_palette()
         LOGGER.info('[lighting] palette %s', f'pinned to {name}' if name else 'follows the policy')
-        if self.palette_listener is not None:
-            self.palette_listener()
+        self._palette_changed()
 
     def choose_track_palette(self, mood: Mood, *, send_now: bool = True) -> str:
         chosen = self._palette_policy.choose_for_track(mood)
@@ -140,9 +144,12 @@ class EffectController:
         if send_now and palette is not None and palette != self.lighting_client.palette:
             self.lighting_client.set_palette(palette)
             self._publish_palette()
+        self._palette_changed()
+        return chosen
+
+    def _palette_changed(self) -> None:
         if self.palette_listener is not None:
             self.palette_listener()
-        return chosen
 
     def _palette_for_current_look(self) -> str | None:
         plan = self._entered_plan()
@@ -180,9 +187,9 @@ class EffectController:
             '[lighting] cue | intent=%s start=%d | looks=%s | palette=%s | overlays=%s',
             request.intent.name,
             request.start_beat_index,
-            ','.join(f'{look.bank}/{look.autoloop}' for look in plan.cue.rotation),
+            _loop_ids(plan.cue.rotation),
             plan.cue.palette,
-            ','.join(f'{row.bank}/{row.autoloop}' for row in plan.cue.overlays) or '-',
+            _loop_ids(plan.cue.overlays) or '-',
         )
         return plan.cue
 
@@ -218,11 +225,7 @@ class EffectController:
 
     def _book(self, moment: Hashable, plan: SectionPlan) -> None:
         at = plan.request.room_sec
-        kept = {
-            key: when
-            for key, when in self._intense_at.items()
-            if key != moment and abs(at - when) < MAX_STROBE_COOLDOWN_SECONDS
-        }
+        kept = moments_near(self._intense_at, at, MAX_STROBE_COOLDOWN_SECONDS, excluding=moment)
         # Replaced, never mutated, so the dashboard thread reads a whole snapshot.
         self._intense_at = {**kept, moment: at} if plan.events.intense else kept
         if plan.events.accent:
@@ -263,12 +266,12 @@ class EffectController:
         moment: Hashable = None,
     ) -> bool:
         context = context or SelectionContext(intent)
+        if context.new_track:
+            self._track_dropped = False
         plan = None if moment is None else self._director.plan_for(moment)
         if plan is not None:
             return self._enter_cue(intent, bpm, context, moment, plan)
         self._entered_moment = None
-        if context.new_track:
-            self._track_dropped = False
         choice, fresh = self._entry_choice(context)
         bank, autoloop = choice.bank, choice.autoloop
         transition = transition_for(choice.look)
@@ -301,8 +304,6 @@ class EffectController:
         plan: SectionPlan,
     ) -> bool:
         fresh = moment is not self._entered_moment
-        if context.new_track:
-            self._track_dropped = False
         self._track_dropped = self._track_dropped or intent is LightIntent.DROP
         choice = plan.choices[0]
         self._entered = intent, choice
