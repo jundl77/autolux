@@ -7,8 +7,9 @@ use prost::Message;
 
 use crate::engine::Engine;
 use crate::model::{
-    AttributeValue, Command, FixturePose, LightingOverride, MovementRange, OverrideLifetime,
-    PropertyValues, Rgb, SpecialFx, Target, Transition,
+    AttributeValue, BeatFeatures, Command, FixturePose, LightingOverride, MovementRange,
+    OverlayCue, OverrideLifetime, PropertyValues, Rgb, RotationEntry, SectionCue, SectionIntent,
+    SpecialFx, Target, Transition,
 };
 
 pub const MAX_LOGIN_BYTES: usize = 4 * 1024 * 1024;
@@ -76,6 +77,8 @@ messages!(ClientMessage {
     UpdateBeat,
     SetParameter,
     DiscardDelayedAudio,
+    CueSection,
+    ClearCues,
     Heartbeat
 });
 messages!(ServerMessage {
@@ -95,6 +98,8 @@ impl ClientMessage {
             Self::UpdateBeat(value) => value.command_id,
             Self::SetParameter(value) => value.command_id,
             Self::DiscardDelayedAudio(value) => value.command_id,
+            Self::CueSection(value) => value.command_id,
+            Self::ClearCues(value) => value.command_id,
             Self::Heartbeat(_) => return None,
         })
     }
@@ -108,6 +113,8 @@ impl ClientMessage {
             Self::UpdateBeat(value) => value.command_id = command_id,
             Self::SetParameter(value) => value.command_id = command_id,
             Self::DiscardDelayedAudio(value) => value.command_id = command_id,
+            Self::CueSection(value) => value.command_id = command_id,
+            Self::ClearCues(value) => value.command_id = command_id,
             Self::Heartbeat(_) => {}
         }
     }
@@ -192,6 +199,65 @@ pub fn read_event(input: &mut impl Read) -> Result<Option<ServerMessage>> {
     Ok(Some(ServerMessage::decode(kind, &payload)?))
 }
 
+fn transition(value: Option<&wire::play_autoloop::Transition>) -> Transition {
+    match value {
+        None => Transition::RendererDefault,
+        Some(value) => value
+            .crossfade_beats
+            .map(|duration_beats| Transition::Crossfade { duration_beats })
+            .unwrap_or(Transition::Cut),
+    }
+}
+
+fn section_cue(engine: &Engine, value: &wire::CueSection) -> Result<SectionCue> {
+    let intent = match wire::SectionIntent::try_from(value.intent) {
+        Ok(wire::SectionIntent::Atmospheric) => SectionIntent::Atmospheric,
+        Ok(wire::SectionIntent::Breakdown) => SectionIntent::Breakdown,
+        Ok(wire::SectionIntent::Buildup) => SectionIntent::Buildup,
+        Ok(wire::SectionIntent::Drop) => SectionIntent::Drop,
+        _ => bail!("a cue must name its section intent"),
+    };
+    let rotation = value
+        .rotation
+        .iter()
+        .map(|entry| {
+            let (bank, autoloop) = engine.resolve_autoloop(&entry.autoloop_id)?;
+            Ok(RotationEntry {
+                bank,
+                autoloop,
+                bars: entry.bars,
+                transition: transition(entry.transition.as_ref()),
+            })
+        })
+        .collect::<Result<_>>()?;
+    let overlays = value
+        .overlays
+        .iter()
+        .map(|overlay| {
+            let (bank, autoloop) = engine.resolve_autoloop(&overlay.autoloop_id)?;
+            Ok(OverlayCue {
+                bank,
+                autoloop,
+                priority: overlay.priority,
+                begin_beats: overlay.begin_beats,
+                length_beats: overlay.length_beats,
+                every_bars: overlay.every_bars,
+                attack_beats: overlay.attack_beats,
+                release_beats: overlay.release_beats,
+            })
+        })
+        .collect::<Result<_>>()?;
+    Ok(SectionCue {
+        start_beat_index: value.start_beat_index,
+        intent,
+        rotation,
+        overlays,
+        palette: value.palette.clone(),
+        drop_strength: value.drop_strength,
+        seed: value.seed,
+    })
+}
+
 /// Validate against the state left by preceding accepted commands.
 pub fn apply_command(engine: &mut Engine, at_seconds: f64, command: &ClientMessage) -> Result<()> {
     match command {
@@ -205,8 +271,24 @@ pub fn apply_command(engine: &mut Engine, at_seconds: f64, command: &ClientMessa
                 bar_phase: value.bar_phase,
                 beats_per_bar: value.beats_per_bar,
                 bpm: value.tempo_bpm,
+                features: value.features.map(|features| BeatFeatures {
+                    onset: f64::from(features.onset),
+                    bass: f64::from(features.bass),
+                    mid: f64::from(features.mid),
+                    high: f64::from(features.high),
+                }),
             },
         ),
+        ClientMessage::CueSection(value) => {
+            let cue = section_cue(engine, value)?;
+            engine.apply(
+                at_seconds,
+                &Command::CueSection {
+                    value: Box::new(cue),
+                },
+            )
+        }
+        ClientMessage::ClearCues(_) => engine.apply(at_seconds, &Command::ClearCues),
         ClientMessage::PlayAutoloop(value) => {
             if value.autoloop_id.is_empty() {
                 ensure!(
@@ -221,13 +303,7 @@ pub fn apply_command(engine: &mut Engine, at_seconds: f64, command: &ClientMessa
                 "autoloop {} must name its palette",
                 value.autoloop_id
             );
-            let transition = match &value.transition {
-                None => Transition::RendererDefault,
-                Some(value) => value
-                    .crossfade_beats
-                    .map(|duration_beats| Transition::Crossfade { duration_beats })
-                    .unwrap_or(Transition::Cut),
-            };
+            let transition = transition(value.transition.as_ref());
             engine.play_autoloop(at_seconds, &value.autoloop_id, transition, &value.palette)
         }
         ClientMessage::SetParameter(value) => engine.set_parameter(

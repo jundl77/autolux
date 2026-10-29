@@ -4,11 +4,19 @@ from __future__ import annotations
 
 import math
 from collections.abc import Callable, Sequence
+from typing import TYPE_CHECKING
 
 from autolux.lighting.palettes import DEFAULT_PALETTE
 
+if TYPE_CHECKING:
+    from autolux.lib.engine.cue import Cue
+
 RMS_LEVEL_FLOOR_DBFS = -48.0
 RMS_LEVEL_CEILING_DBFS = -12.0
+# A band's share of the mix sits well below full-scale RMS, so its range starts lower.
+BAND_LEVEL_FLOOR_DBFS = -60.0
+BAND_LEVEL_CEILING_DBFS = -12.0
+BEAT_FEATURES = ('onset', 'bass', 'mid', 'high')
 WHOLE_RIG = 'all'
 
 
@@ -24,6 +32,19 @@ def rms_to_normalized_level(rms: float) -> float:
         max(
             0.0,
             (dbfs - RMS_LEVEL_FLOOR_DBFS) / (RMS_LEVEL_CEILING_DBFS - RMS_LEVEL_FLOOR_DBFS),
+        ),
+    )
+
+
+def band_to_normalized_level(dbfs: float) -> float:
+    """Map a band's energy in dBFS linearly onto 0..1, as the RMS level is mapped."""
+    if math.isnan(dbfs):
+        raise ValueError('band level must be a number')
+    return min(
+        1.0,
+        max(
+            0.0,
+            (dbfs - BAND_LEVEL_FLOOR_DBFS) / (BAND_LEVEL_CEILING_DBFS - BAND_LEVEL_FLOOR_DBFS),
         ),
     )
 
@@ -45,16 +66,33 @@ class StarfireClient:
         self.selected_autoloop: tuple[str, str] | None = None
         self.palette: str = DEFAULT_PALETTE
 
-    def beat(self, beat_index: int, bar_phase: int | None, beats_per_bar: int, bpm: float) -> None:
-        self._send_command(
-            {
-                'kind': 'beat',
-                'beat_index': beat_index,
-                'bar_phase': bar_phase,
-                'beats_per_bar': beats_per_bar,
-                'bpm': bpm,
-            }
-        )
+    def beat(
+        self,
+        beat_index: int,
+        bar_phase: int | None,
+        beats_per_bar: int,
+        bpm: float,
+        features: dict[str, float] | None = None,
+    ) -> None:
+        command = {
+            'kind': 'beat',
+            'beat_index': beat_index,
+            'bar_phase': bar_phase,
+            'beats_per_bar': beats_per_bar,
+            'bpm': bpm,
+        }
+        if features is not None:
+            if set(features) != set(BEAT_FEATURES):
+                raise ValueError(f'beat features are exactly {BEAT_FEATURES}')
+            command['features'] = dict(features)
+        self._send_command(command)
+
+    def cue_section(self, cue: Cue) -> None:
+        """Starfire starts the cue on its own clock; PlayAutoloop and stop clear it."""
+        self._send_command(cue.command())
+
+    def clear_cues(self) -> None:
+        self._send_command({'kind': 'clear_cues'})
 
     def set_normalized_rms_level(self, level: float) -> None:
         self._send_command({'kind': 'set_normalized_rms_level', 'level': level})

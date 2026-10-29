@@ -47,6 +47,7 @@ fn engine(scripts: &[(&str, &str)]) -> Engine {
                 bar_phase: None,
                 beats_per_bar: 4,
                 bpm: 120.0,
+                features: None,
             },
         )
         .unwrap();
@@ -962,6 +963,7 @@ fn crossfade_progress_uses_elapsed_beats_instead_of_corrected_phase() {
                 bar_phase: None,
                 beats_per_bar: 4,
                 bpm: 60.0,
+                features: None,
             },
         )
         .unwrap();
@@ -1124,6 +1126,7 @@ fn pause_goes_dark_holds_the_beat_and_resume_continues_from_the_held_position() 
                 bar_phase: None,
                 beats_per_bar: 4,
                 bpm: 120.0,
+                features: None,
             },
         )
         .unwrap();
@@ -1145,6 +1148,7 @@ fn pause_goes_dark_holds_the_beat_and_resume_continues_from_the_held_position() 
                 bar_phase: None,
                 beats_per_bar: 4,
                 bpm: 120.0,
+                features: None,
             },
         )
         .unwrap();
@@ -1329,6 +1333,7 @@ fn engine_on(rig: FixtureRig, scripts: &[(&str, &str)]) -> Engine {
                 bar_phase: None,
                 beats_per_bar: 4,
                 bpm: 120.0,
+                features: None,
             },
         )
         .unwrap();

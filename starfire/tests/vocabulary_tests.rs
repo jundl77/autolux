@@ -41,6 +41,7 @@ fn engine(rig: FixtureRig, scripts: &[(&str, &str)]) -> Engine {
                 bar_phase: None,
                 beats_per_bar: 4,
                 bpm: 120.0,
+                features: None,
             },
         )
         .unwrap();

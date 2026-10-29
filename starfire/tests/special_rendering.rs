@@ -52,6 +52,7 @@ fn engine(rig: &FixtureRig) -> Engine {
         bank: "standby".into(),
         lua_source: "return { render = function() return sf.scene { sf.dimmer(sf.all(), 0) } end }"
             .into(),
+        intensity_htp: false,
     }])
     .unwrap();
     let mut engine = Engine::new(rig.clone(), catalog, support::palettes()).unwrap();
@@ -62,6 +63,7 @@ fn engine(rig: &FixtureRig) -> Engine {
             beat_index: 1,
             bar_phase: Some(0),
             beats_per_bar: 4,
+            features: None,
         }),
         ClientMessage::PlayAutoloop(wire::PlayAutoloop {
             command_id: 1,
@@ -497,6 +499,7 @@ fn the_stage_fx_group_spins_colours_and_gates_to_its_dark_slot() {
             beat_index: 1,
             bar_phase: Some(0),
             beats_per_bar: 4,
+            features: None,
         }),
         ClientMessage::PlayAutoloop(wire::PlayAutoloop {
             command_id: 1,

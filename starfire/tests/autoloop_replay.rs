@@ -199,6 +199,7 @@ fn engine_at_intensity(bank: &str, autoloop: &str, select_beat: f64, intensity: 
                 bar_phase: Some((anchor_beat as u32) % 4),
                 beats_per_bar: 4,
                 bpm: REPLAY_BPM,
+                features: None,
             },
         )
         .unwrap();
@@ -607,6 +608,7 @@ fn run_inline(autoloop_id: &str, source: &str) -> RenderedFrame {
         autoloop_id: autoloop_id.into(),
         bank: "test".into(),
         lua_source: source.into(),
+        intensity_htp: false,
     }])
     .unwrap();
     let mut engine = Engine::new(support::stage(), catalog, support::palettes()).unwrap();
