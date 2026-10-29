@@ -259,9 +259,21 @@ fn colour_energy_and_speed_reach_mixing_and_a_centred_pan_scan() {
             scaled(colour.blue)
         ]
     );
-    assert_eq!(dmx(&mut engine, 0.5)[SCANNER.start], 255);
-    assert_eq!(dmx(&mut engine, 1.5)[SCANNER.start], 0);
-    assert_eq!(dmx(&mut engine, 1.5)[SCANNER.end - 1], 0);
+    // Rendered frame by frame as a show is, so each head's pan memory follows the scan out to
+    // the end stops rather than taking a whole-turn alias nearer its last sparse sample.
+    let mut rendered = 0;
+    let mut follow = |until_beat: f64| {
+        let mut frame = Vec::new();
+        while f64::from(rendered) < until_beat * 40.0 {
+            rendered += 1;
+            frame = dmx(&mut engine, f64::from(rendered) / 40.0);
+        }
+        frame
+    };
+    assert_eq!(follow(0.5)[SCANNER.start], 255);
+    let end = follow(1.5);
+    assert_eq!(end[SCANNER.start], 0);
+    assert_eq!(end[SCANNER.end - 1], 0);
 }
 
 #[test]
