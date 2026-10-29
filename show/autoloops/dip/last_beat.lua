@@ -1,6 +1,8 @@
 -- The blackout before the drop: every loop group dark, so the one lands out of nothing.
 -- strobe: no
 -- intensity: ltp
+-- movement: still
+-- texture: mixed
 return {
     render = function()
         return sf.scene {

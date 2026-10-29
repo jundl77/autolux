@@ -12,7 +12,7 @@ local WASH_LEVEL, MOVER_LOW, MOVER_HIGH = 0.2, 0.45, 0.7
 return {
     render = function(ctx)
         local level = sf.loudness_gain(ctx.normalized_rms_level)
-        local swell = sf.osc.sine(ctx.beat_position, CIRCLE_MEASURE)
+        local swell = sf.osc.sine(sf.section_beats(ctx), CIRCLE_MEASURE)
         return sf.scene {
             sf.colour(sf.group("wash"), palette.primary),
             sf.dimmer(sf.group("wash"), WASH_LEVEL * level),

@@ -1,6 +1,8 @@
--- The drop-entry strobe: every loop group flashes white at a beat division of the tempo.
+-- The Wild drop-entry strobe: every loop group flashes white at a beat division of the tempo.
 -- strobe: yes
 -- intensity: htp
+-- movement: still
+-- texture: mixed
 local MAX_STROBE_HZ = 10
 local DIVISIONS = { 4, 2, 1 }
 

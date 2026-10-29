@@ -20,12 +20,12 @@ return {
         return sf.scene {
             sf.colour(sf.group("wash"), palette.primary),
             sf.dimmer(sf.group("wash"), sf.lerp(floor, WASH_PEAK, kick) * gain),
-            sf.colour(sf.group("strip"), palette.secondary),
+            sf.colour(sf.group("strip"), palette.primary),
             sf.each(sf.group("strip"), function(pixel, index)
                 local lit = sf.random(ctx, index, eighth) < SPARK_SHARE and spark or 0
                 return sf.dimmer(pixel, STRIP_PEAK * lit * gain)
             end),
-            sf.colour(sf.group("movers"), palette.primary),
+            sf.colour(sf.group("movers"), palette.secondary),
             sf.dimmer(sf.group("movers"), sf.lerp(MOVER_FLOOR, MOVER_PEAK, spark) * gain),
             sf.phaser(sf.group("movers"), ctx, {
                 shape = "ballyhoo", size = BALLYHOO_DEGREES, tilt_size = BALLYHOO_TILT_DEGREES,

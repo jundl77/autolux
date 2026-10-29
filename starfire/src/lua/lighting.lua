@@ -373,4 +373,55 @@ function sf.phaser(target, ctx, spec)
     return effects
 end
 
+-- ==== W6 show helpers ====
+
+-- Phrase time: beats since the section start (a bar line), else since the layer began.
+function sf.section_beats(ctx)
+    return ctx.section_elapsed_beats or ctx.autoloop_elapsed_beats
+end
+
+-- 0 at the centre of an sf.each row, 1 at either end.
+function sf.from_centre(index, count)
+    return count > 1 and math.abs(2 * (index - 1) / (count - 1) - 1) or 0
+end
+
+-- The mean of the members' focus points as {x, y, z}, where beams sent meet in one spot; nil
+-- without members.
+function sf.shared_focus(target)
+    local members, x, y, z = sf.members(target), 0, 0, 0
+    if #members == 0 then return nil end
+    for _, cell in ipairs(members) do
+        local fx, fy, fz = sf.focus(cell)
+        x, y, z = x + fx, y + fy, z + fz
+    end
+    return { x / #members, y / #members, z / #members }
+end
+
+local BUILD_BEATS, FINALE_BEATS, EASE_BEATS = 128, 16, 8
+local DRIVE_FLOOR, DRIVE_PLATEAU = 0.15, 0.7
+
+-- Every buildup's shared state. drive 0..1: with no drop known it rises with tension to 0.7; a
+-- cued drop hands it over continuously to 1 over the last 16 beats before the dip; a cued
+-- non-drop eases it down by half. finale 0..1 is that hand-over, tension the build's progress,
+-- step the tension at the last downbeat (compare thresholds with it so steps land on the one),
+-- left the beats until a cued drop's dip begins (nil while no drop is cued).
+function sf.build(ctx)
+    local tension, step = sf.tension(ctx, BUILD_BEATS)
+    local drive, finale = sf.lerp(DRIVE_FLOOR, DRIVE_PLATEAU, tension), 0
+    local left = ctx.next_intent == "drop" and (ctx.beats_until_dip or ctx.beats_until_next) or nil
+    if left ~= nil then
+        finale = 1 - math.min(1, left / FINALE_BEATS)
+        drive = drive + (1 - drive) * finale
+    elseif ctx.next_intent ~= nil then
+        drive = drive * (1 - 0.5 * sf.finale(ctx, EASE_BEATS))
+    end
+    return { drive = drive, finale = finale, tension = tension, step = step, left = left }
+end
+
+-- An overlay's progress through its length, 0..1, and the beats it has left.
+function sf.overlay_progress(ctx)
+    local length = ctx.overlay_length_beats or 1
+    return math.min(1, ctx.autoloop_elapsed_beats / length), length - ctx.autoloop_elapsed_beats
+end
+
 return sf, named_palettes, function(palette) active_palette = palette end, use_render_intensity

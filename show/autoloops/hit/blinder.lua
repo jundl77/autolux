@@ -1,11 +1,13 @@
--- White blinder on the drop's one: washes and strip at full, decaying over the hit.
+-- White blinder on the drop's one: washes and strip at full from the first frame, decaying.
 -- strobe: no
 -- intensity: htp
+-- movement: still
+-- texture: wash
 local WASH_PEAK, STRIP_PEAK = 1, 0.9
 
 return {
     render = function(ctx)
-        local progress = math.min(1, ctx.autoloop_elapsed_beats / (ctx.overlay_length_beats or 1))
+        local progress = sf.overlay_progress(ctx)
         local decay = (1 - progress) ^ 2
         return sf.scene {
             sf.colour(sf.group("wash"), sf.white()),

@@ -1,6 +1,8 @@
 -- The bar-16 fill, bigger than bar 8: every group rolls, the strip wipes in, the beams cross.
 -- strobe: no
 -- intensity: ltp
+-- movement: sweep
+-- texture: mixed
 local palette = sf.palette()
 local ROLL_WIDTH_SHARE, WIPE_PIXELS = 0.5, 1.5
 local CROSS_DEGREES = 25
@@ -16,17 +18,15 @@ end
 
 return {
     render = function(ctx)
-        local length = ctx.overlay_length_beats or 1
-        local progress = math.min(1, ctx.autoloop_elapsed_beats / length)
-        local level = roll(ctx, progress, length - ctx.autoloop_elapsed_beats)
+        local progress, left = sf.overlay_progress(ctx)
+        local level = roll(ctx, progress, left)
         local movers = sf.group("movers")
         return sf.scene {
             sf.colour(sf.group("wash"), palette.secondary),
             sf.dimmer(sf.group("wash"), level),
             sf.colour(sf.group("strip"), palette.secondary),
             sf.each(sf.group("strip"), function(pixel, index, count)
-                local from_centre = count > 1 and math.abs(2 * (index - 1) / (count - 1) - 1) or 0
-                local distance = math.abs(from_centre - (1 - progress)) * (count - 1) / 2
+                local distance = math.abs(sf.from_centre(index, count) - (1 - progress)) * (count - 1) / 2
                 return sf.dimmer(pixel, level * math.max(0, 1 - distance / WIPE_PIXELS))
             end),
             sf.colour(movers, palette.secondary),

@@ -1,19 +1,21 @@
--- Seeded sparkle on the strip in the second colour, a fresh scatter every sixteenth.
+-- Seeded sparkle on the strip in the second colour on every off-beat eighth, over the groove.
 -- strobe: no
--- intensity: ltp
+-- intensity: htp
+-- movement: still
+-- texture: pixel
 local palette = sf.palette()
-local SPARK_SHARE, SPARK_WIDTH_BEATS = 0.25, 0.2
-local FLOOR, PEAK = 0.03, 0.9
+local SPARK_SHARE, SPARK_WIDTH_BEATS, PEAK = 0.35, 0.3, 0.9
 
 return {
     render = function(ctx)
-        local sixteenth = math.floor(ctx.beat_position * 4)
-        local spark = sf.on_beat(ctx, SPARK_WIDTH_BEATS, 0.25)
+        local offbeat = ctx.beat_position - 0.5
+        local spark = sf.on_beat(offbeat, SPARK_WIDTH_BEATS)
+        local scatter = math.floor(offbeat)
         return sf.scene {
             sf.colour(sf.group("strip"), palette.secondary),
             sf.each(sf.group("strip"), function(pixel, index)
-                local lit = sf.random(ctx, index, sixteenth) < SPARK_SHARE and spark or 0
-                return sf.dimmer(pixel, sf.lerp(FLOOR, PEAK, lit))
+                local lit = sf.random(ctx, index, scatter) < SPARK_SHARE and spark or 0
+                return sf.dimmer(pixel, PEAK * lit)
             end)
         }
     end

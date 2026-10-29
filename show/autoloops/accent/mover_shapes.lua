@@ -1,6 +1,8 @@
--- The beams trace mirrored figure-eights through a gobo in the second colour, pulsing on the beat.
+-- The beams trace mirrored figure-eights through a gobo in the second colour, pulsing.
 -- strobe: no
 -- intensity: ltp
+-- movement: sweep
+-- texture: beam
 local palette = sf.palette()
 local BREAKUP_SLOT = 2
 local FIGURE_DEGREES, FIGURE_TILT_DEGREES, FIGURE_MEASURE = 20, 14, 8

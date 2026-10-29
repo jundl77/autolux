@@ -1,6 +1,8 @@
 -- Breakdown entry: the room settles to a low glow instead of cutting to black.
 -- strobe: no
 -- intensity: ltp
+-- movement: still
+-- texture: mixed
 local GLOW = 0.15
 
 return {

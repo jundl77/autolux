@@ -9,14 +9,10 @@ local WASH_PEAK, STRIP_PEAK, MOVER_FLOOR, MOVER_PEAK = 0.9, 0.9, 0.35, 0.85
 local CROSS_DEGREES, CROSS_MEASURE = 18, 4
 local OUTER_FROM = 0.5
 
-local function from_centre(index, count)
-    return count > 1 and math.abs(2 * (index - 1) / (count - 1) - 1) or 0
-end
-
 -- Outer members carry the second colour and inner ones the first, so the wall reads as two
 -- layers; the strip wipes outside-in over each bar to tie the halves together.
 local function split(index, count)
-    return from_centre(index, count) > OUTER_FROM and palette.secondary or palette.primary
+    return sf.from_centre(index, count) > OUTER_FROM and palette.secondary or palette.primary
 end
 
 return {
@@ -32,7 +28,7 @@ return {
                 return { sf.colour(wash, split(index, count)), sf.dimmer(wash, level) }
             end),
             sf.each(sf.group("strip"), function(pixel, index, count)
-                local distance = math.abs(from_centre(index, count) - wipe) * (count - 1) / 2
+                local distance = math.abs(sf.from_centre(index, count) - wipe) * (count - 1) / 2
                 local lit = math.max(0, 1 - distance / WIPE_PIXELS)
                 return { sf.colour(pixel, split(index, count)), sf.dimmer(pixel, STRIP_PEAK * lit * gain) }
             end),

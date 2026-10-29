@@ -8,10 +8,6 @@ local KICK_WIDTH_BEATS, WAVE_PIXELS = 0.4, 1.5
 local FLOOR_QUIET, FLOOR_LOUD = 0.05, 0.25
 local WASH_PEAK, STRIP_PEAK, MOVER_FLOOR, MOVER_PEAK = 0.85, 0.9, 0.3, 0.85
 
-local function from_centre(index, count)
-    return count > 1 and math.abs(2 * (index - 1) / (count - 1) - 1) or 0
-end
-
 return {
     render = function(ctx)
         local energy = sf.energy(ctx)
@@ -23,14 +19,14 @@ return {
             sf.colour(sf.group("wash"), palette.primary),
             sf.dimmer(sf.group("wash"), sf.lerp(floor, WASH_PEAK, kick) * gain),
             sf.each(sf.group("strip"), function(pixel, index, count)
-                local distance = math.abs(from_centre(index, count) - wave) * (count - 1) / 2
+                local distance = math.abs(sf.from_centre(index, count) - wave) * (count - 1) / 2
                 local front = math.max(0, 1 - distance / WAVE_PIXELS) * (1 - wave)
                 return {
                     sf.colour(pixel, palette.secondary),
                     sf.dimmer(pixel, STRIP_PEAK * front * gain)
                 }
             end),
-            sf.colour(sf.group("movers"), palette.primary),
+            sf.colour(sf.group("movers"), palette.secondary),
             sf.dimmer(sf.group("movers"), sf.lerp(MOVER_FLOOR, MOVER_PEAK, kick) * gain),
             sf.phaser(sf.group("movers"), ctx, {
                 shape = "fan", size = FAN_DEGREES * sf.lerp(0.6, 1, energy), measure = FAN_MEASURE

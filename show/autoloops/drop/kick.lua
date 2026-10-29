@@ -15,8 +15,8 @@ return {
         local floor = sf.lerp(FLOOR_QUIET, FLOOR_LOUD, energy)
         local gain = sf.loudness_gain(ctx.normalized_rms_level)
         local kick = sf.on_beat(ctx, KICK_WIDTH_BEATS)
-        local peak = WASH_PEAK * sf.lerp(0.75, 1, ctx.onset or 1)
-        local half_bar = math.floor(ctx.beat_position / HALF_BAR_BEATS) % 2
+        local peak = WASH_PEAK * sf.lerp(0.75, 1, sf.onset(ctx))
+        local half_bar = math.floor(sf.section_beats(ctx) / HALF_BAR_BEATS) % 2
         local look = SHAPES[half_bar + 1]
         local reach = sf.lerp(0.5, 1, energy)
         return sf.scene {

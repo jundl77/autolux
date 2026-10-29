@@ -102,7 +102,7 @@ def test_all_four_intents_map_to_authored_autoloops_in_stable_order():
     ] == [
         ('atmospheric', 'dawn'),
         ('breakdown', 'drift_apart'),
-        ('buildup', 'ramp'),
+        ('buildup', 'stutter'),
         ('drop', 'kick'),
     ]
     assert report_to_replay(source) == report_to_replay(copy.deepcopy(source))

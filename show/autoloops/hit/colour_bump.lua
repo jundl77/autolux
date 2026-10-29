@@ -1,12 +1,14 @@
 -- The Calm entry hit: a bump in the palette's punch colour, no white and no strobe.
 -- strobe: no
 -- intensity: htp
+-- movement: still
+-- texture: wash
 local palette = sf.palette()
-local WASH_PEAK, STRIP_PEAK = 0.8, 0.7
+local WASH_PEAK, STRIP_PEAK = 0.9, 0.8
 
 return {
     render = function(ctx)
-        local progress = math.min(1, ctx.autoloop_elapsed_beats / (ctx.overlay_length_beats or 1))
+        local progress = sf.overlay_progress(ctx)
         local decay = (1 - progress) ^ 2
         return sf.scene {
             sf.colour(sf.group("wash"), palette.accent),

@@ -17,7 +17,7 @@ end
 return {
     render = function(ctx)
         local level = sf.loudness_gain(ctx.normalized_rms_level)
-        local beat = ctx.section_elapsed_beats or ctx.autoloop_elapsed_beats
+        local beat = sf.section_beats(ctx)
         return sf.scene {
             sf.colour(sf.group("wash"), palette.primary),
             sf.each(sf.group("wash"), function(wash, index, count)

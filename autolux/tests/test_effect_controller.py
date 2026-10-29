@@ -40,7 +40,7 @@ async def test_applied_lighting_change_has_one_useful_info_line(effect_controlle
     with caplog.at_level(logging.INFO):
         await effect_controller.change_effect(LightIntent.BUILDUP)
     assert len(caplog.records) == 1
-    assert 'intent=BUILDUP | autoloop=buildup/ramp' in caplog.text
+    assert 'intent=BUILDUP | autoloop=buildup/stutter' in caplog.text
 
 
 @pytest.mark.parametrize(
@@ -48,7 +48,7 @@ async def test_applied_lighting_change_has_one_useful_info_line(effect_controlle
     [
         (LightIntent.ATMOSPHERIC, 'dawn'),
         (LightIntent.BREAKDOWN, 'drift_apart'),
-        (LightIntent.BUILDUP, 'ramp'),
+        (LightIntent.BUILDUP, 'stutter'),
         (LightIntent.DROP, 'kick'),
     ],
 )

@@ -880,7 +880,7 @@ def test_preflight_requires_every_discovered_autoloop(tmp_path, monkeypatch):
     for bank, names in {
         'atmospheric': ('dawn', 'amber_drift', 'pixel_rain'),
         'breakdown': ('drift_apart',),
-        'buildup': ('ramp',),
+        'buildup': ('stutter',),
         'drop': ('kick', 'slam'),
     }.items():
         (tmp_path / bank).mkdir()
@@ -891,7 +891,7 @@ def test_preflight_requires_every_discovered_autoloop(tmp_path, monkeypatch):
         for bank, name in [
             ('atmospheric', 'dawn'),
             ('breakdown', 'drift_apart'),
-            ('buildup', 'ramp'),
+            ('buildup', 'stutter'),
             ('drop', 'kick'),
         ]
     ]
@@ -918,7 +918,7 @@ def test_preflight_names_an_autoloop_whose_selection_header_is_broken(tmp_path, 
     loops = [
         ('atmospheric', 'dawn'),
         ('breakdown', 'drift_apart'),
-        ('buildup', 'ramp'),
+        ('buildup', 'stutter'),
         ('drop', 'kick'),
         ('standby', 'warm_white'),
     ]
@@ -946,7 +946,7 @@ def test_preflight_warns_about_groups_the_rig_lacks(tmp_path, monkeypatch, caplo
     loops = [
         ('atmospheric', 'dawn'),
         ('breakdown', 'drift_apart'),
-        ('buildup', 'ramp'),
+        ('buildup', 'stutter'),
         ('drop', 'kick'),
         ('standby', 'warm_white'),
     ]
@@ -970,7 +970,7 @@ def test_preflight_warns_about_groups_the_rig_lacks(tmp_path, monkeypatch, caplo
 
 
 def test_an_omitted_transition_leaves_the_default_to_starfire_and_a_cut_stays_explicit():
-    default = protocol.build_command({'kind': 'select', 'bank': 'buildup', 'autoloop': 'ramp'})
+    default = protocol.build_command({'kind': 'select', 'bank': 'buildup', 'autoloop': 'stutter'})
     assert not default.HasField('transition')
     cut = protocol.build_command(
         {'kind': 'select', 'bank': 'drop', 'autoloop': 'kick', 'transition': {'kind': 'cut'}}

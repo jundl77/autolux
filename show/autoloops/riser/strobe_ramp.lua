@@ -1,12 +1,13 @@
--- The Wild riser: a white wash rising over the pre-roll, strobing faster each pair of beats.
+-- The Wild riser: white rising to full by the dip, strobing faster each pair of beats.
 -- strobe: yes
 -- intensity: htp
+-- movement: still
+-- texture: mixed
 local MAX_STROBE_HZ = 10
 local STROBE_BEATS = 8
-local PEAK = 0.6
 
 -- Over the last eight beats the rate steps on beat lines through half, one, two and four
--- flashes a beat, never past the cap, so the ramp stays on the grid at any tempo.
+-- flashes a beat, never past the cap. The level eases out so it clears a loud build early.
 local function strobe_hz(ctx, remaining)
     if remaining > STROBE_BEATS then return 0 end
     local division = 2 ^ (math.floor((STROBE_BEATS - remaining) / 2) - 1)
@@ -16,15 +17,14 @@ end
 
 return {
     render = function(ctx)
-        local length = ctx.overlay_length_beats or 1
-        local progress = math.min(1, ctx.autoloop_elapsed_beats / length)
-        local remaining = math.ceil(length - ctx.autoloop_elapsed_beats)
-        local hz = strobe_hz(ctx, remaining)
+        local progress, left = sf.overlay_progress(ctx)
+        local hz = strobe_hz(ctx, math.ceil(left))
+        local level = 1 - (1 - progress) ^ 2
         local effects = {}
         for _, name in ipairs({ "wash", "strip", "movers" }) do
             local group = sf.group(name)
             effects[#effects + 1] = {
-                sf.colour(group, sf.white()), sf.dimmer(group, PEAK * progress), sf.strobe(group, hz)
+                sf.colour(group, sf.white()), sf.dimmer(group, level), sf.strobe(group, hz)
             }
         end
         return sf.scene(effects)
