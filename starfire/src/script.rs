@@ -16,7 +16,7 @@ use serde::Serialize;
 use crate::fixtures::{FixtureRig, MAX_CELLS};
 use crate::gdtf::GOBO_ATTRIBUTE;
 use crate::intensity;
-use crate::model::{Effect, MAX_STROBE_HZ, PropertyValues, RenderContext, Rgb, Target};
+use crate::model::{Effect, MAX_STROBE_HZ, PropertyValues, RenderContext, Target};
 use crate::palette::{PaletteSlots, PaletteTable, WHITE, WHITE_SLOT};
 use crate::protocol::wire;
 use crate::spatial::MM_PER_METRE;
@@ -29,7 +29,7 @@ const MAX_AUTOLOOP_ID_BYTES: usize = 128;
 const LUA_MEMORY_LIMIT_BYTES: usize = 16 * 1024 * 1024;
 const LUA_INSTRUCTION_LIMIT: u32 = 100_000;
 const HOOK_INSTRUCTION_INTERVAL: u32 = 100;
-const MAX_EFFECTS_PER_FRAME: usize = 512;
+pub const MAX_EFFECTS_PER_FRAME: usize = 512;
 const LIGHTING_API: &str = include_str!("lua/lighting.lua");
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
@@ -45,7 +45,7 @@ pub struct AutoloopCatalog {
     intensity_htp: BTreeSet<(String, String)>,
 }
 
-const OVERLAY_BANKS: [&str; 5] = ["hit", "fill", "riser", "dip", "accent"];
+pub const OVERLAY_BANKS: [&str; 5] = ["hit", "fill", "riser", "dip", "accent"];
 /// Mirrors Autolux's OVERLAY_META_VALUES.
 const OVERLAY_HEADER: [(&str, &[&str]); 4] = [
     ("strobe", &["yes", "no"]),
@@ -441,15 +441,9 @@ impl LuaAutoloop {
             .set_name("starfire lighting API")
             .set_mode(ChunkMode::Text)
             .eval()?;
-        let colour_table = |colour: &Rgb| -> Result<Table> {
-            lua.to_value(colour)?
-                .as_table()
-                .cloned()
-                .context("palette slot is a table")
-        };
-        let white = colour_table(&WHITE)?;
+        let white = lua_table(&lua, &WHITE)?;
         for (name, slots) in palettes.iter() {
-            let table = colour_table_of(&lua, slots)?;
+            let table = lua_table(&lua, slots)?;
             table.set(WHITE_SLOT, &white)?;
             named_palettes.set(
                 name,
@@ -460,7 +454,7 @@ impl LuaAutoloop {
         let active_palette = lua.create_table()?;
         let mut active_palette_slots = Vec::new();
         for (slot, colour) in initial_slots.named_slots() {
-            let table = colour_table(&colour)?;
+            let table = lua_table(&lua, &colour)?;
             active_palette.set(slot, &table)?;
             active_palette_slots.push(table);
         }
@@ -828,11 +822,11 @@ fn freeze_globals(lua: &Lua) -> mlua::Result<()> {
     Ok(())
 }
 
-fn colour_table_of(lua: &Lua, slots: &PaletteSlots) -> Result<Table> {
-    lua.to_value(slots)?
+fn lua_table(lua: &Lua, value: &impl Serialize) -> Result<Table> {
+    lua.to_value(value)?
         .as_table()
         .cloned()
-        .context("palette is a table")
+        .context("palette colours are tables")
 }
 
 fn read_only(lua: &Lua, value: Value, error: &'static str) -> mlua::Result<Table> {

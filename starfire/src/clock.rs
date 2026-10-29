@@ -25,10 +25,10 @@ pub struct BeatFact {
     pub bpm: f64,
 }
 
-#[derive(Clone, Copy, Debug)]
-struct ReceivedBeat {
-    beat_index: u64,
-    grid_beat: u64,
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ReceivedBeat {
+    pub beat_index: u64,
+    pub grid_beat: u64,
 }
 
 #[derive(Clone, Debug)]
@@ -159,10 +159,8 @@ impl MusicalClock {
         Ok(())
     }
 
-    /// (beat index, grid beat): grid = index + a session offset.
-    pub fn last_beat(&self) -> Option<(u64, u64)> {
+    pub fn last_beat(&self) -> Option<ReceivedBeat> {
         self.last_received
-            .map(|beat| (beat.beat_index, beat.grid_beat))
     }
 
     pub fn tempo_bpm(&self) -> f64 {

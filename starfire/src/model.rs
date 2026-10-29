@@ -241,6 +241,15 @@ pub enum Transition {
     },
 }
 
+impl Transition {
+    pub fn crossfade_beats(&self) -> f64 {
+        match self {
+            Self::Crossfade { duration_beats } => *duration_beats,
+            Self::Cut | Self::RendererDefault => 0.0,
+        }
+    }
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum OverrideLifetime {

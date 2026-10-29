@@ -12,11 +12,11 @@ use crate::cue::{
     MAX_ROTATION, OverlayInstance, Span,
 };
 use crate::fixtures::FixtureRig;
-use crate::gdtf::GdtfProfile;
+use crate::gdtf::{GdtfProfile, SNAP_POINT};
 use crate::intensity;
 use crate::model::{
     AttributeValue, BeatFeatures, Command, Effect, FixtureState, FixtureStates, LightingOverride,
-    MAX_STROBE_HZ, OverrideLifetime, PropertyValues, RenderContext, Rgb, SectionCue, SectionIntent,
+    MAX_STROBE_HZ, OverrideLifetime, PropertyValues, RenderContext, SectionCue, SectionIntent,
     SpecialFx, Target, Transition, lerp,
 };
 use crate::palette::{PaletteSlots, PaletteTable};
@@ -36,7 +36,6 @@ const STROBE_EDGE_CYCLES: f64 = 1e-9;
 /// Must stay inside even calm's movement slew limit.
 const PAN_SWEEP_SECONDS: f64 = 8.0;
 pub const MAX_SCRIPT_ERROR_BYTES: usize = 1024;
-const OVERLAY_SNAP_LEVEL: f64 = 0.5;
 const ONE_TOLERANCE_BEATS: f64 = 1e-6;
 const TRUNCATED_ERROR_SUFFIX: &str = "… [truncated]";
 
@@ -169,7 +168,7 @@ pub struct Engine {
     strobe_max_burst_seconds: f64,
     strobe_started_seconds: BTreeMap<String, f64>,
     strobe_gates: StrobeGates,
-    cell_traits: BTreeMap<String, CellTraits>,
+    cell_rests: BTreeMap<String, BTreeMap<String, AttributeValue>>,
     overlay_scripts: BTreeMap<u64, OverlayScript>,
     refused_overlay_strobes: BTreeSet<String>,
     palette: ActivePalette,
@@ -185,12 +184,17 @@ impl Engine {
         let palette =
             ActivePalette::steady(palettes.initial(), palettes.slots(palettes.initial())?);
         let scripts = catalog.compile(&rig, &palettes);
-        let cell_traits = rig
+        let cell_rests = rig
             .cell_ids()
             .into_iter()
             .filter_map(|id| {
-                let traits = CellTraits::of(rig.profile(&id)?);
-                Some((id, traits))
+                let rests = rig
+                    .profile(&id)?
+                    .functions()
+                    .into_iter()
+                    .map(|function| (function.key, AttributeValue::Number(function.rest)))
+                    .collect();
+                Some((id, rests))
             })
             .collect();
         Ok(Self {
@@ -221,7 +225,7 @@ impl Engine {
             strobe_max_burst_seconds: f64::INFINITY,
             strobe_started_seconds: BTreeMap::new(),
             strobe_gates: StrobeGates::default(),
-            cell_traits,
+            cell_rests,
             overlay_scripts: BTreeMap::new(),
             refused_overlay_strobes: BTreeSet::new(),
             palette,
@@ -283,22 +287,18 @@ impl Engine {
                 let transition = &self.resolve_transition(transition);
                 validate_transition(transition, time.elapsed_musical_beats)?;
                 let slots = self.palettes.slots(palette)?;
-                if !self
-                    .active
-                    .as_ref()
-                    .is_some_and(|active| active.bank == *bank && active.name == *autoloop)
-                {
+                if !self.is_playing(bank, autoloop) {
                     self.select(at_seconds, time, bank, autoloop, transition)?;
                     self.phrase_start = Some(bar_line_at_or_before(time));
                 }
                 self.cues.clear(time.elapsed_musical_beats, true);
                 self.features = None;
-                let duration_beats = match transition {
-                    Transition::Crossfade { duration_beats } => *duration_beats,
-                    Transition::Cut | Transition::RendererDefault => 0.0,
-                };
-                self.palette
-                    .retarget(time.elapsed_musical_beats, palette, slots, duration_beats);
+                self.palette.retarget(
+                    time.elapsed_musical_beats,
+                    palette,
+                    slots,
+                    transition.crossfade_beats(),
+                );
             }
             Command::SetPalette { name } => {
                 let slots = self.palettes.slots(name)?;
@@ -526,11 +526,7 @@ impl Engine {
             self.phrase_start = None;
         }
         let transition = self.resolve_transition(&transition);
-        if !self
-            .active
-            .as_ref()
-            .is_some_and(|active| active.bank == bank && active.name == autoloop)
-        {
+        if !self.is_playing(&bank, &autoloop) {
             let script = self.scripts.get(&bank, &autoloop)?;
             let behind = (time.beat_position - begin_beat).max(0.0);
             self.begin_base(
@@ -547,18 +543,12 @@ impl Engine {
         }
         if let Some(palette) = palette {
             match self.palettes.slots(&palette) {
-                Ok(slots) => {
-                    let duration_beats = match transition {
-                        Transition::Crossfade { duration_beats } => duration_beats,
-                        Transition::Cut | Transition::RendererDefault => 0.0,
-                    };
-                    self.palette.retarget(
-                        time.elapsed_musical_beats,
-                        &palette,
-                        slots,
-                        duration_beats,
-                    );
-                }
+                Ok(slots) => self.palette.retarget(
+                    time.elapsed_musical_beats,
+                    &palette,
+                    slots,
+                    transition.crossfade_beats(),
+                ),
                 Err(error) => self
                     .cues
                     .record_overlay_error(format!("cue palette not applied: {error:#}")),
@@ -592,11 +582,7 @@ impl Engine {
                 &self.resolve_transition(&entry.transition),
                 time.elapsed_musical_beats,
             )?;
-            self.scripts
-                .get(&entry.bank, &entry.autoloop)
-                .with_context(|| {
-                    format!("cannot load autoloop {}/{}", entry.bank, entry.autoloop)
-                })?;
+            self.load_script(&entry.bank, &entry.autoloop)?;
         }
         let bar = f64::from(time.beats_per_bar);
         for overlay in &cue.overlays {
@@ -628,11 +614,7 @@ impl Engine {
                 overlay.every_bars == 0 || overlay.length_beats + overlay.release_beats <= period,
                 "a repeating overlay's length and release exceed its period"
             );
-            self.scripts
-                .get(&overlay.bank, &overlay.autoloop)
-                .with_context(|| {
-                    format!("cannot load autoloop {}/{}", overlay.bank, overlay.autoloop)
-                })?;
+            self.load_script(&overlay.bank, &overlay.autoloop)?;
         }
         Ok(())
     }
@@ -804,23 +786,34 @@ impl Engine {
     }
 
     fn strobe_rate_cap_hz(&self) -> f64 {
+        self.scaled_by_strobe_intensity(self.strobe_max_rate_hz)
+    }
+
+    fn scaled_by_strobe_intensity(&self, cap: f64) -> f64 {
         let strobe_scale = intensity::strobe_scale(self.intensity);
         if strobe_scale > 0.0 {
-            self.strobe_max_rate_hz * strobe_scale
+            cap * strobe_scale
         } else {
             0.0
         }
     }
 
+    fn is_playing(&self, bank: &str, autoloop: &str) -> bool {
+        self.active
+            .as_ref()
+            .is_some_and(|active| active.bank == bank && active.name == autoloop)
+    }
+
+    fn load_script(&self, bank: &str, autoloop: &str) -> Result<Rc<RefCell<LuaAutoloop>>> {
+        self.scripts
+            .get(bank, autoloop)
+            .with_context(|| format!("cannot load autoloop {bank}/{autoloop}"))
+    }
+
     fn limit_strobes(&mut self, seconds: f64, states: &mut FixtureStates) {
         let paused = self.clock.paused();
-        let strobe_scale = intensity::strobe_scale(self.intensity);
         let max_rate_hz = self.strobe_rate_cap_hz();
-        let max_burst_seconds = if strobe_scale > 0.0 {
-            self.strobe_max_burst_seconds * strobe_scale
-        } else {
-            0.0
-        };
+        let max_burst_seconds = self.scaled_by_strobe_intensity(self.strobe_max_burst_seconds);
         for (id, state) in states.iter_mut() {
             if paused {
                 state.strobe_hz = 0.0;
@@ -879,10 +872,7 @@ impl Engine {
         autoloop: &str,
         transition: &Transition,
     ) -> Result<()> {
-        let script = self
-            .scripts
-            .get(bank, autoloop)
-            .with_context(|| format!("cannot load autoloop {bank}/{autoloop}"))?;
+        let script = self.load_script(bank, autoloop)?;
         self.begin_base(
             seconds,
             time,
@@ -1077,7 +1067,7 @@ impl Engine {
                     continue;
                 };
                 compose_layer(
-                    self.rig.profile(&id).zip(self.cell_traits.get(&id)),
+                    self.rig.profile(&id).zip(self.cell_rests.get(&id)),
                     state,
                     &values,
                     layer.level,
@@ -1170,10 +1160,7 @@ impl Engine {
         };
         let entry = &cue.rotation[0];
         let cuts_to_new_loop = self.resolve_transition(&entry.transition) == Transition::Cut
-            && !self
-                .active
-                .as_ref()
-                .is_some_and(|active| active.bank == entry.bank && active.name == entry.autoloop);
+            && !self.is_playing(&entry.bank, &entry.autoloop);
         if !cuts_to_new_loop {
             return Ok(());
         }
@@ -1651,36 +1638,6 @@ fn apply_scalar_properties(state: &mut FixtureState, values: &PropertyValues) {
     }
 }
 
-struct CellTraits {
-    rests: BTreeMap<String, AttributeValue>,
-    wheel_colour: bool,
-}
-
-impl CellTraits {
-    fn of(profile: &GdtfProfile) -> Self {
-        let (red, blue) = (
-            Rgb {
-                red: 1.0,
-                green: 0.0,
-                blue: 0.0,
-            },
-            Rgb {
-                red: 0.0,
-                green: 0.0,
-                blue: 1.0,
-            },
-        );
-        Self {
-            rests: profile
-                .functions()
-                .into_iter()
-                .map(|function| (function.key, AttributeValue::Number(function.rest)))
-                .collect(),
-            wheel_colour: profile.blend_colour(red, blue, 0.25) == red,
-        }
-    }
-}
-
 struct OverlayScript {
     script: Rc<RefCell<LuaAutoloop>>,
     intensity_htp: bool,
@@ -1739,7 +1696,7 @@ fn layer_values(rig: &FixtureRig, effects: &[Effect]) -> Result<BTreeMap<String,
 }
 
 fn compose_layer(
-    cell: Option<(&GdtfProfile, &CellTraits)>,
+    cell: Option<(&GdtfProfile, &BTreeMap<String, AttributeValue>)>,
     state: &mut FixtureState,
     values: &PropertyValues,
     level: f64,
@@ -1758,8 +1715,12 @@ fn compose_layer(
     }
     if let Some(colour) = values.colour {
         state.colour = match cell {
-            Some((profile, traits)) => {
-                let amount = if traits.wheel_colour { level } else { mix };
+            Some((profile, _)) => {
+                let amount = if profile.wheel_only_colour() {
+                    level
+                } else {
+                    mix
+                };
                 profile.blend_colour(state.colour, colour, amount)
             }
             None => state.colour.lerp(colour, mix),
@@ -1772,15 +1733,15 @@ fn compose_layer(
         state.tilt = lerp(state.tilt, tilt, level);
     }
     if let Some(rate) = values.strobe_hz
-        && level >= OVERLAY_SNAP_LEVEL
+        && level >= SNAP_POINT
     {
         state.strobe_hz = rate;
     }
     if values.attributes.is_empty() {
         return;
     }
-    let Some((profile, traits)) = cell else {
-        if level >= OVERLAY_SNAP_LEVEL {
+    let Some((profile, rests)) = cell else {
+        if level >= SNAP_POINT {
             state.attributes.extend(values.attributes.clone());
         }
         return;
@@ -1788,8 +1749,8 @@ fn compose_layer(
     let mut layer = BTreeMap::new();
     for (key, to) in &values.attributes {
         let below = state.attributes.get(key);
-        let Some(from) = below.or_else(|| traits.rests.get(key)) else {
-            if level >= OVERLAY_SNAP_LEVEL {
+        let Some(from) = below.or_else(|| rests.get(key)) else {
+            if level >= SNAP_POINT {
                 layer.insert(key.clone(), to.clone());
             }
             continue;

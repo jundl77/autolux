@@ -405,7 +405,8 @@ mod tests {
         let mut packet = [0; 1024];
         let count = listener.recv(&mut packet).unwrap();
         assert_eq!(count, 530);
-        for dimmer in [4, 12, 20, 28, 39, 51] {
+        let stage_dimmer_channels = [4, 12, 20, 28, 39, 51];
+        for dimmer in stage_dimmer_channels {
             assert_eq!(packet[18 + dimmer], 0);
         }
     }

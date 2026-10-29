@@ -1,6 +1,7 @@
 mod support;
 
 use prost::Message;
+use starfire::clock::ReceivedBeat;
 use starfire::cue::{
     CueSample, CueTimeline, InstanceState, MAX_ACTIVE_OVERLAYS, MAX_OVERLAYS, MAX_PENDING_CUES,
     MAX_ROTATION,
@@ -1085,7 +1086,10 @@ fn sample(beat: f64) -> CueSample {
         beat_position: beat,
         elapsed_musical_beats: beat,
         beats_per_bar: 4,
-        anchor: Some((0, 0)),
+        anchor: Some(ReceivedBeat {
+            beat_index: 0,
+            grid_beat: 0,
+        }),
     }
 }
 

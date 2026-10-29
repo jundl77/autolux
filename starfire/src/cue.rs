@@ -4,6 +4,7 @@
 
 use anyhow::{Result, ensure};
 
+use crate::clock::ReceivedBeat;
 use crate::model::{OverlayCue, SectionCue, SectionIntent, Transition};
 
 pub const MAX_ROTATION: usize = 8;
@@ -12,6 +13,7 @@ pub const MAX_PENDING_CUES: usize = 4;
 pub const MAX_ACTIVE_OVERLAYS: usize = 8;
 pub const MAX_PREROLL_BEATS: f64 = 64.0;
 pub const MAX_OVERLAY_ERROR_BYTES: usize = 256;
+const ROW_STOPPED: u64 = u64::MAX;
 /// The proto Overlay dip contract: beats_until_dip and move in black key on this bank name.
 pub const DIP_BANK: &str = "dip";
 
@@ -20,20 +22,19 @@ pub struct CueSample {
     pub beat_position: f64,
     pub elapsed_musical_beats: f64,
     pub beats_per_bar: u32,
-    /// (Autolux beat index, grid beat) of the newest received beat.
-    pub anchor: Option<(u64, u64)>,
+    pub anchor: Option<ReceivedBeat>,
 }
 
 impl CueSample {
     /// i128: a cue may address a beat before the session's first, below grid zero.
     fn grid_of(&self, beat_index: i128) -> Option<f64> {
-        let (index, grid) = self.anchor?;
-        Some((i128::from(grid) + beat_index - i128::from(index)) as f64)
+        let anchor = self.anchor?;
+        Some((i128::from(anchor.grid_beat) + beat_index - i128::from(anchor.beat_index)) as f64)
     }
 
     fn index_of_grid(&self, grid: i128) -> Option<i128> {
-        let (index, anchor_grid) = self.anchor?;
-        Some(grid - i128::from(anchor_grid) + i128::from(index))
+        let anchor = self.anchor?;
+        Some(grid - i128::from(anchor.grid_beat) + i128::from(anchor.beat_index))
     }
 
     fn bar_beats(&self) -> f64 {
@@ -107,7 +108,7 @@ impl OverlayInstance {
         Some(now.grid_of(self.anchor_index)? + self.overlay.begin_beats)
     }
 
-    fn continues(&self, row: &OverlayCue, anchor_index: i128) -> bool {
+    fn is_same_row(&self, row: &OverlayCue, anchor_index: i128) -> bool {
         let own = &self.overlay;
         self.anchor_index == anchor_index
             && (own.bank.as_str(), own.autoloop.as_str(), own.every_bars)
@@ -361,7 +362,7 @@ impl CueTimeline {
         if let Some(active) = &mut self.active
             && active.id == stopped.owner
         {
-            active.next_repetition[stopped.row] = u64::MAX;
+            active.next_repetition[stopped.row] = ROW_STOPPED;
         }
     }
 
@@ -389,7 +390,8 @@ impl CueTimeline {
             if overlay.every_bars != 0 {
                 continue;
             }
-            let entry = if replaces_active || overlay.begin_beats < 0.0 {
+            let keeps_true_start = replaces_active || overlay.begin_beats < 0.0;
+            let entry = if keeps_true_start {
                 start
             } else {
                 activates_at
@@ -469,7 +471,7 @@ impl CueTimeline {
             let waiting = self.instances.iter().position(|candidate| {
                 candidate.owner == to
                     && candidate.state == InstanceState::Pending
-                    && instance.continues(&candidate.overlay, candidate.anchor_index)
+                    && instance.is_same_row(&candidate.overlay, candidate.anchor_index)
             });
             if let Some(waiting) = waiting {
                 let (row, seed) = (self.instances[waiting].row, self.instances[waiting].seed);
@@ -493,7 +495,7 @@ impl CueTimeline {
                     (period > 0
                         && offset >= 0
                         && offset % period == 0
-                        && instance.continues(overlay, instance.anchor_index))
+                        && instance.is_same_row(overlay, instance.anchor_index))
                     .then(|| (row, (offset / period) as u64))
                 });
             if let Some((row, repetition)) = matched {

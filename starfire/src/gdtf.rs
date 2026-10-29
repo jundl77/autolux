@@ -16,7 +16,7 @@ const MAX_ATTRIBUTE_ID_BYTES: usize = 512;
 const WHITE_SLOT_SATURATION: f64 = 0.05;
 pub const GOBO_ATTRIBUTE: &str = "Gobo1";
 const OPEN_GOBO: &str = "Open";
-const SNAP_POINT: f64 = 0.5;
+pub const SNAP_POINT: f64 = 0.5;
 const DMX_BYTE_BITS: usize = 8;
 const DMX_BYTE_MASK: u32 = 255;
 const CIE_LUMINANCE_SCALE: f64 = 100.0;
@@ -211,8 +211,7 @@ impl GdtfProfile {
                 (1..=MAX_CHANNEL_BYTES).contains(&width),
                 "GDTF channel resolution must be 8, 16, 24 or 32 bits"
             );
-            let maximum =
-                (u64::from(u32::MAX) >> ((MAX_CHANNEL_BYTES - width) * DMX_BYTE_BITS)) as u32;
+            let maximum = max_dmx_value(width);
             let mut offsets = Vec::with_capacity(width);
             for &offset in &channel.offsets {
                 let offset = offset as usize;
@@ -795,6 +794,10 @@ impl GdtfProfile {
         }
     }
 
+    pub fn wheel_only_colour(&self) -> bool {
+        self.wheel_only_colour
+    }
+
     pub fn has_dark_wheel_slot(&self) -> bool {
         self.channels
             .iter()
@@ -1150,8 +1153,7 @@ fn compile_wire_function(
                 (1..=MAX_CHANNEL_BYTES).contains(&width),
                 "virtual ModeMaster is unsupported"
             );
-            let limit =
-                (u64::from(u32::MAX) >> ((MAX_CHANNEL_BYTES - width) * DMX_BYTE_BITS)) as u32;
+            let limit = max_dmx_value(width);
             ensure!(
                 master.dmx_from <= master.dmx_to && master.dmx_to <= limit,
                 "invalid GDTF ModeMaster interval"
@@ -1211,6 +1213,10 @@ pub fn numbered_attribute(attribute: &str, prefix: &str) -> bool {
     attribute
         .strip_prefix(prefix)
         .is_some_and(|index| !index.is_empty() && index.bytes().all(|byte| byte.is_ascii_digit()))
+}
+
+fn max_dmx_value(width: usize) -> u32 {
+    (u64::from(u32::MAX) >> ((MAX_CHANNEL_BYTES - width) * DMX_BYTE_BITS)) as u32
 }
 
 fn wheel_only_colour(channels: &[Channel]) -> bool {

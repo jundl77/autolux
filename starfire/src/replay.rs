@@ -1,14 +1,19 @@
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs::File;
 use std::io::{Read, Write};
 use std::path::Path;
 
 use anyhow::{Context, Result, ensure};
 use serde::{Deserialize, Serialize};
+use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
 use crate::engine::{Engine, RenderedFrame};
 use crate::fixtures::FixtureRig;
-use crate::model::{DMX_CHANNELS, MAX_FRAME_RATE_HZ, TimedCommand};
+use crate::gdtf::numbered_attribute;
+use crate::model::{
+    AttributeValue, Command, DMX_CHANNELS, FixtureState, MAX_FRAME_RATE_HZ, Rgb, TimedCommand,
+};
 use crate::palette::{PaletteDefinition, PaletteTable};
 use crate::script::AutoloopCatalog;
 
@@ -99,9 +104,28 @@ pub fn render_replay(
         "replay exceeds DMX memory budget"
     );
     let mut engine = Engine::new(rig, catalog, PaletteTable::new(&replay.palettes)?)?;
-    let mut events = replay.events.iter().peekable();
     let mut frames = Vec::with_capacity(frame_count);
     let mut diagnostic_bytes: usize = 0;
+    render_frames(replay, &mut engine, frame_count, |_, frame, _| {
+        diagnostic_bytes =
+            diagnostic_bytes.saturating_add(frame.script_error.as_ref().map_or(0, String::len));
+        ensure!(
+            diagnostic_bytes <= MAX_REPLAY_DIAGNOSTIC_BYTES,
+            "replay exceeds diagnostic memory budget"
+        );
+        frames.push(frame);
+        Ok(())
+    })?;
+    Ok(frames)
+}
+
+fn render_frames(
+    replay: &Replay,
+    engine: &mut Engine,
+    frame_count: usize,
+    mut each: impl FnMut(usize, RenderedFrame, &Engine) -> Result<()>,
+) -> Result<()> {
+    let mut events = replay.events.iter().peekable();
     for frame_index in 0..frame_count {
         let time_seconds =
             (frame_index as f64 / f64::from(replay.frame_rate_hz)).min(replay.duration_seconds);
@@ -113,15 +137,9 @@ pub fn render_replay(
             engine.apply(event.at_seconds, &event.command)?;
         }
         let frame = engine.render_at(time_seconds)?;
-        diagnostic_bytes =
-            diagnostic_bytes.saturating_add(frame.script_error.as_ref().map_or(0, String::len));
-        ensure!(
-            diagnostic_bytes <= MAX_REPLAY_DIAGNOSTIC_BYTES,
-            "replay exceeds diagnostic memory budget"
-        );
-        frames.push(frame);
+        each(frame_index, frame, engine)?;
     }
-    Ok(frames)
+    Ok(())
 }
 
 pub fn dmx_digest(frames: &[RenderedFrame]) -> String {
@@ -167,7 +185,7 @@ const PREVIEW_DECIMALS: f64 = 1000.0;
 
 pub struct PreviewSummary {
     pub frames: usize,
-    pub script_errors: std::collections::BTreeSet<String>,
+    pub script_errors: BTreeSet<String>,
 }
 
 /// JSON lines: a header, then one line per written frame. Each cell is `[i, r, g, b, strobe_hz,
@@ -180,10 +198,6 @@ pub fn write_preview(
     rate_hz: u32,
     output: &mut impl Write,
 ) -> Result<PreviewSummary> {
-    use crate::model::Command;
-    use serde_json::{Value, json};
-    use std::collections::{BTreeMap, BTreeSet};
-
     ensure!(
         rate_hz > 0 && replay.frame_rate_hz.is_multiple_of(rate_hz),
         "preview rate {rate_hz} Hz must divide the replay's {} Hz",
@@ -228,69 +242,64 @@ pub fn write_preview(
     output.write_all(b"\n")?;
 
     let mut engine = Engine::new(rig.clone(), catalog, PaletteTable::new(&replay.palettes)?)?;
-    let mut events = replay.events.iter().peekable();
     let mut script_errors = BTreeSet::new();
     let mut diagnostic_bytes: usize = 0;
     let mut unwritten_error = None;
-    for frame_index in 0..frame_count {
-        let time_seconds =
-            (frame_index as f64 / f64::from(replay.frame_rate_hz)).min(replay.duration_seconds);
-        while events
-            .peek()
-            .is_some_and(|event| event.at_seconds <= time_seconds)
-        {
-            let event = events.next().expect("peeked event exists");
-            engine.apply(event.at_seconds, &event.command)?;
-        }
-        let frame = engine.render_at(time_seconds)?;
-        if let Some(error) = &frame.script_error
-            && !script_errors.contains(error)
-        {
-            diagnostic_bytes = diagnostic_bytes.saturating_add(error.len());
-            ensure!(
-                diagnostic_bytes <= MAX_REPLAY_DIAGNOSTIC_BYTES,
-                "preview exceeds diagnostic memory budget"
-            );
-            script_errors.insert(error.clone());
-            unwritten_error = Some(error.clone());
-        }
-        if !frame_index.is_multiple_of(stride) {
-            continue;
-        }
-        let states = &frame.fixture_properties_before_strobe;
-        let values: Vec<Value> = cells
-            .iter()
-            .map(|id| {
-                let state = &states[id];
-                let colour = rig
-                    .profile(id)
-                    .and_then(|profile| profile.emitted_colour(state).ok())
-                    .unwrap_or(state.colour);
-                let direction = rig.beam_direction(id, state.pan, state.tilt);
-                preview_cell(state, colour, direction)
-            })
-            .collect();
-        let (intent, overlays) = engine.sounding_section()?;
-        let mut line = json!({
-            "t": preview_round(frame.time_seconds),
-            "beat": preview_round(frame.beat_position),
-            "intent": intent,
-            "bank": frame.active_bank,
-            "autoloop": frame.active_autoloop,
-            "c": values,
-        });
-        if !overlays.is_empty() {
-            line["overlays"] = json!(overlays);
-        }
-        if frame.script_error.is_some() {
-            line["fault"] = Value::Bool(true);
-        }
-        if let Some(error) = unwritten_error.take() {
-            line["error"] = Value::String(error);
-        }
-        serde_json::to_writer(&mut *output, &line)?;
-        output.write_all(b"\n")?;
-    }
+    render_frames(
+        replay,
+        &mut engine,
+        frame_count,
+        |frame_index, frame, engine| {
+            if let Some(error) = &frame.script_error
+                && !script_errors.contains(error)
+            {
+                diagnostic_bytes = diagnostic_bytes.saturating_add(error.len());
+                ensure!(
+                    diagnostic_bytes <= MAX_REPLAY_DIAGNOSTIC_BYTES,
+                    "preview exceeds diagnostic memory budget"
+                );
+                script_errors.insert(error.clone());
+                unwritten_error = Some(error.clone());
+            }
+            if !frame_index.is_multiple_of(stride) {
+                return Ok(());
+            }
+            let states = &frame.fixture_properties_before_strobe;
+            let values: Vec<Value> = cells
+                .iter()
+                .map(|id| {
+                    let state = &states[id];
+                    let colour = rig
+                        .profile(id)
+                        .and_then(|profile| profile.emitted_colour(state).ok())
+                        .unwrap_or(state.colour);
+                    let direction = rig.beam_direction(id, state.pan, state.tilt);
+                    preview_cell(state, colour, direction)
+                })
+                .collect();
+            let (intent, overlays) = engine.sounding_section()?;
+            let mut line = json!({
+                "t": preview_round(frame.time_seconds),
+                "beat": preview_round(frame.beat_position),
+                "intent": intent,
+                "bank": frame.active_bank,
+                "autoloop": frame.active_autoloop,
+                "c": values,
+            });
+            if !overlays.is_empty() {
+                line["overlays"] = json!(overlays);
+            }
+            if frame.script_error.is_some() {
+                line["fault"] = Value::Bool(true);
+            }
+            if let Some(error) = unwritten_error.take() {
+                line["error"] = Value::String(error);
+            }
+            serde_json::to_writer(&mut *output, &line)?;
+            output.write_all(b"\n")?;
+            Ok(())
+        },
+    )?;
     output.flush()?;
     Ok(PreviewSummary {
         frames: frame_count.div_ceil(stride),
@@ -298,14 +307,7 @@ pub fn write_preview(
     })
 }
 
-fn preview_cell(
-    state: &crate::model::FixtureState,
-    colour: crate::model::Rgb,
-    direction: Option<[f64; 3]>,
-) -> serde_json::Value {
-    use crate::model::AttributeValue;
-    use serde_json::{Value, json};
-
+fn preview_cell(state: &FixtureState, colour: Rgb, direction: Option<[f64; 3]>) -> Value {
     let mut cell = [
         state.intensity,
         colour.red,
@@ -319,11 +321,7 @@ fn preview_cell(
         .attributes
         .iter()
         .find_map(|(attribute, value)| match value {
-            AttributeValue::Preset(name)
-                if attribute.strip_prefix("Gobo").is_some_and(|wheel| {
-                    !wheel.is_empty() && wheel.bytes().all(|byte| byte.is_ascii_digit())
-                }) =>
-            {
+            AttributeValue::Preset(name) if numbered_attribute(attribute, "Gobo") => {
                 Some(name.clone())
             }
             _ => None,

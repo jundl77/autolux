@@ -50,6 +50,8 @@ struct Placement {
     focus: Option<Position>,
 }
 
+type DegreeRange = (f64, f64);
+
 impl Placement {
     fn from_wire(fixture: &wire::Fixture) -> Result<Self> {
         let home = home_orientation(&fixture.matrix)?;
@@ -601,9 +603,9 @@ impl FixtureRig {
         self.aim_at(cell_id, self.focus(cell_id)?)
     }
 
-    pub fn aim_at(&self, cell_id: &str, point: Position) -> Option<(f64, f64)> {
-        let placement = &self.fixtures[self.cells.get(cell_id)?.0].placement;
-        let [x, y, z] = [0, 1, 2].map(|axis| point[axis] - placement.position[axis]);
+    pub fn aim_at(&self, cell_id: &str, point_mm: Position) -> Option<(f64, f64)> {
+        let (placement, (from, to), tilt_travel) = self.pan_tilt_travel(cell_id)?;
+        let [x, y, z] = [0, 1, 2].map(|axis| point_mm[axis] - placement.position[axis]);
         let heading_degrees = x.atan2(y).to_degrees();
         let lean_degrees = if [x, y, z] == [0.0; 3] {
             // No direction at all; atan2(+0, -0) would read it as a half turn.
@@ -613,35 +615,22 @@ impl FixtureRig {
                 .atan2(if placement.reversed { z } else { -z })
                 .to_degrees()
         };
-        let profile = self.profile(cell_id)?;
-        let (from, to) = profile
-            .movement_range("Pan")
-            .filter(|(from, to)| from != to)?;
         let turn = FULL_TURN_DEGREES / (to - from);
         let position = (heading_degrees - from) / (to - from);
         let centre = (placement.pan.min + placement.pan.max) / 2.0;
         let position = position + ((centre - position) / turn).round() * turn;
-        let tilt = profile
-            .movement_range("Tilt")
-            .filter(|(from, to)| from != to)
-            .map_or(0.5, |(from, to)| {
-                placement
-                    .hanging_tilt()
-                    .unmap(0.5 + lean_degrees / (to - from))
-            });
+        let tilt = tilt_travel.map_or(0.5, |(from, to)| {
+            placement
+                .hanging_tilt()
+                .unmap(0.5 + lean_degrees / (to - from))
+        });
         Some((placement.pan.unmap(position), tilt))
     }
 
     pub fn beam_direction(&self, cell_id: &str, pan: f64, tilt: f64) -> Option<[f64; 3]> {
-        let placement = &self.fixtures[self.cells.get(cell_id)?.0].placement;
-        let profile = self.profile(cell_id)?;
-        let (from, to) = profile
-            .movement_range("Pan")
-            .filter(|(from, to)| from != to)?;
+        let (placement, (from, to), tilt_travel) = self.pan_tilt_travel(cell_id)?;
         let heading = (from + placement.pan.map(pan) * (to - from)).to_radians();
-        let lean = profile
-            .movement_range("Tilt")
-            .filter(|(from, to)| from != to)
+        let lean = tilt_travel
             .map_or(0.0, |(from, to)| {
                 (placement.hanging_tilt().map(tilt) - 0.5) * (to - from)
             })
@@ -656,6 +645,20 @@ impl FixtureRig {
             lean.sin() * heading.cos(),
             along_pan_axis,
         ])
+    }
+
+    fn pan_tilt_travel(
+        &self,
+        cell_id: &str,
+    ) -> Option<(&Placement, DegreeRange, Option<DegreeRange>)> {
+        let placement = &self.fixtures[self.cells.get(cell_id)?.0].placement;
+        let profile = self.profile(cell_id)?;
+        let travel = |attribute| {
+            profile
+                .movement_range(attribute)
+                .filter(|(from, to)| from != to)
+        };
+        Some((placement, travel("Pan")?, travel("Tilt")))
     }
 
     pub fn uuid_of_cell(&self, cell_id: &str) -> Option<&str> {
