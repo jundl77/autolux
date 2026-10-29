@@ -1278,3 +1278,33 @@ fn metrics_at_their_largest_fit_the_realtime_cap() {
         metrics.encoded_len()
     );
 }
+
+fn directory_catalog(bank: &str, source: &str) -> anyhow::Result<AutoloopCatalog> {
+    let directory = tempfile::tempdir().unwrap();
+    std::fs::create_dir(directory.path().join(bank)).unwrap();
+    std::fs::write(directory.path().join(bank).join("look.lua"), source).unwrap();
+    AutoloopCatalog::load(directory.path())
+}
+
+#[test]
+fn overlay_banks_need_their_strobe_and_intensity_header_as_login_does() {
+    const BODY: &str = "return {render=function(ctx) return {} end}\n";
+    let htp = |bank: &str, header: &str| {
+        directory_catalog(bank, &format!("-- 1-beat hit\n{header}{BODY}"))
+            .map(|catalog| catalog.intensity_htp(bank, "look"))
+    };
+    assert!(htp("hit", "-- strobe: no\n-- intensity: htp\n").unwrap());
+    assert!(!htp("dip", "-- intensity: ltp\n-- strobe: yes\n").unwrap());
+    for header in [
+        "",
+        "-- strobe: no\n",
+        "-- strobe: no\n-- intensity: max\n",
+        "-- strobe: no\n-- strobe: no\n-- intensity: htp\n",
+        "local x = 1\n-- strobe: no\n-- intensity: htp\n",
+    ] {
+        let error = htp("fill", header).unwrap_err();
+        assert!(format!("{error:#}").contains("fill/look.lua"), "{error:#}");
+    }
+    // Base banks keep their own header rules.
+    assert!(!htp("drop", "").unwrap());
+}
