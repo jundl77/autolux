@@ -240,15 +240,25 @@ def test_a_capped_tier_without_loops_falls_back_to_the_nearest_energy():
     assert 'no energy 1 loop, nearest 2' in choice.reason
 
 
-@pytest.mark.parametrize(('intent', 'look'), [(DROP, BREAKDOWN), (BUILDUP, ATMOSPHERIC)])
-def test_calm_plays_drops_and_builds_from_the_quiet_banks_at_energy_one(intent, look):
+def test_calm_plays_drops_from_the_breakdown_bank_at_energy_one():
     for seed in range(20):
         chooser = policy(seed=seed)
-        context = SelectionContext(intent, build_bars=64)
+        context = SelectionContext(DROP, build_bars=64)
         choice = chooser.choose(context, intensity=INTENSITY_CALM)
-        assert (choice.bank, choice.meta.energy, choice.look) == (look.value, 1, look)
-        assert f'calm plays it from the {look.value} bank' in choice.reason
+        assert (choice.bank, choice.meta.energy, choice.look) == ('breakdown', 1, BREAKDOWN)
+        assert 'calm plays it from the breakdown bank' in choice.reason
         chooser.record(context, choice)
+
+
+def test_calm_still_builds_from_the_buildup_bank_at_energy_two():
+    for seed in range(20):
+        chooser = policy(seed=seed)
+        context = SelectionContext(BUILDUP, build_bars=64)
+        choice = chooser.choose(context, intensity=INTENSITY_CALM)
+        assert (choice.bank, choice.meta.energy, choice.look) == ('buildup', 2, BUILDUP)
+        assert 'intensity caps energy at 2' in choice.reason
+        chooser.record(context, choice)
+    assert max_energy_for_intensity(INTENSITY_CALM, BUILDUP) == 2
 
 
 @pytest.mark.parametrize('intent', [BREAKDOWN, ATMOSPHERIC])

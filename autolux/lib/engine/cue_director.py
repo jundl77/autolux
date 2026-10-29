@@ -56,13 +56,16 @@ COLOUR_HIT = ('hit', 'colour_bump')
 # Calm's riser: the strip filling in the palette's accent. The overlay header names no colour,
 # so the one riser that paints no white is named here.
 CALM_RISER = ('riser', 'strip_fill')
+# Balanced's riser whenever it pairs with the build; the others stand in when it does not.
+BALANCED_RISER = ('riser', 'white_rise')
 # The bar-16 fill, bigger than the bar-8 one.
 TURNAROUND_FILL = ('fill', 'turnaround')
 # A texture that leads no single layer and a movement that moves nothing fight nothing.
 MIXED_TEXTURE = 'mixed'
 STILL_MOVEMENT = 'still'
 # Banks that also yield the heads to a base loop moving them the same way.
-MOVEMENT_PAIRED_BANKS = ('accent', 'riser')
+MOVEMENT_PAIRED_BANKS = ('accent',)
+PIXEL_TEXTURE = 'pixel'
 
 # The dip before a drop, by the quiet beats before the one: half a beat, a beat, a bar, two bars.
 DIP_BEATS = (0.5, 1.0, float(BEATS_PER_BAR), 2.0 * BEATS_PER_BAR)
@@ -414,9 +417,12 @@ class CueDirector:
         )
 
     def _fights(self, overlay: tuple[str, str], base: AutoloopChoice) -> bool:
-        """An overlay on the layer the base loop leads with would cover its idea; an accent or
-        riser moving the heads the way the base does would take them over."""
+        """An overlay on the layer the base loop leads with would cover its idea; an accent
+        moving the heads the way the base does would take them over."""
         meta = self._overlays[overlay]
+        if overlay[0] == 'riser':
+            # Risers ride on top of the finale; only a strip riser over a strip build hides.
+            return meta.texture == base.meta.texture == PIXEL_TEXTURE
         if meta.texture != MIXED_TEXTURE and meta.texture == base.meta.texture:
             return True
         return (
@@ -471,7 +477,9 @@ class CueDirector:
             # The entry hits are the track's: a second drop reuses the first drop's.
             hits=first_drop.picks.hits if first_drop is not None else white_hits,
             strobe_hit=next(iter(self._bank('hit', strobe=True)), None),
-            riser=self._pick(risers),
+            riser=BALANCED_RISER
+            if BALANCED_RISER in risers
+            else self._pick([loop for loop in risers if loop != CALM_RISER]),
             strobe_riser=next(iter(self._bank('riser', strobe=True, under=build)), None),
             calm_riser=CALM_RISER if CALM_RISER in risers else None,
             fill=self._pick(fills),

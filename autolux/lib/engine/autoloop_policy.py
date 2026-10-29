@@ -26,12 +26,13 @@ LONG_SINCE_DROP_SECONDS = 90.0
 ARRIVAL_BEATS = 4
 MAXIMAL_ARRIVAL_OF_PEAK = 0.9
 MAX_ENERGY = 3
-# Calm tranquilises: a drop plays from the breakdown bank and a build from the atmospheric
-# one, so the room never gets a drop look while the operator asked for calm.
+# Calm tranquilises: a drop plays from the breakdown bank, so the room never gets a drop look
+# while the operator asked for calm.
 CALM_INTENT_BANKS: dict[LightIntent, LightIntent] = {
     LightIntent.DROP: LightIntent.BREAKDOWN,
-    LightIntent.BUILDUP: LightIntent.ATMOSPHERIC,
 }
+# Calm still builds, on the gentler builds: a build at energy 1 would not rise at all.
+CALM_BUILD_ENERGY = 2
 WILD_MAX_ENERGY_WEIGHT = 3
 
 
@@ -78,9 +79,9 @@ TIER_RULES: tuple[tuple[LightIntent, str | None, tuple[int, ...], str], ...] = (
 )
 
 
-def max_energy_for_intensity(intensity: float) -> int:
+def max_energy_for_intensity(intensity: float, look: LightIntent | None = None) -> int:
     if intensity <= INTENSITY_CALM:
-        return 1
+        return CALM_BUILD_ENERGY if look is LightIntent.BUILDUP else 1
     # Balanced and above get every tier; the renderer's intensity curve restrains them.
     if intensity < INTENSITY_BALANCED:
         return 2
@@ -156,7 +157,7 @@ class AutoloopPolicy:
         if not loops:
             raise ValueError(f'{look.name} has no other autoloop')
         tiers, reason = self._tiers(context, wild)
-        max_energy = max_energy_for_intensity(intensity)
+        max_energy = max_energy_for_intensity(intensity, look)
         if max(tiers) > max_energy:
             tiers = tuple(sorted({min(tier, max_energy) for tier in tiers}))
             reason = f'{reason}; intensity caps energy at {max_energy}'
