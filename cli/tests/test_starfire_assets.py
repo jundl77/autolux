@@ -134,7 +134,8 @@ def test_overlay_intensity_composition_comes_from_the_loop_header(login_assets):
     (autoloops / 'hit').mkdir()
     body = 'return {render=function(ctx) return {} end}\n'
     (autoloops / 'hit/blinder.lua').write_text(
-        '-- 1-beat hit\n-- strobe: no\n-- intensity: htp\n' + body
+        '-- 1-beat hit\n-- strobe: no\n-- intensity: htp\n-- movement: still\n-- texture: wash\n'
+        + body
     )
     login = assets.load_login(rig, autoloops, '127.0.0.1:6454', run_id=1)
     htp = {script.autoloop_id: script.intensity_htp for script in login.autoloops}

@@ -38,7 +38,7 @@ Selection (top level):
 - `group`: the rig group it plays on, or `all` for the whole rig; or
 - `role`: `accent` or `loop`, instead of `group`: the row plays on every group of that role whose
   profiles can express it (below), so a new accent group inherits it. Each such group is a
-  separate candidate and rests on its own. A strobe row always names a group.
+  separate candidate and rests on its own.
 - `zone` (optional, role rows only): `house_left`, `centre` or `house_right`, seen from the
   audience.
 - `depth` (optional, role rows only): `downstage`, `centre` or `upstage`.
@@ -79,22 +79,20 @@ is the only place the two vocabularies meet.
 Values are sent as written. Starfire applies the intensity macro: it scales speed and gates and
 caps pulse; energy is not scaled. Autolux only gates which specials may fire (below).
 
-A strobe row has only the selection keys and `[effect] form = { strobe_hz = 8.0 }`, and goes
-out as the capped strobe accent; its length follows the strobe burst settings.
-A strobe row is never selected: it fires on every eligible entry of its intents, alongside the
-selected special. `strobe_burst` is the drop burst.
+Specials never strobe. The drop's strobe is the cue's `hit/strobe` overlay (and the Wild riser),
+which the director places and venue-gates (`autolux/lib/engine/cue_director.py`).
 
 Unknown or missing keys, out-of-range values and a name that does not match the file are
 rejected at startup, with the file and the key's path (such as `effect.size`) named.
 
 ## Intense
 
-A special is intense when it pulses, strobes, or its speed is above `INTENSE_SPEED` (0.6).
-This is derived from the values and never declared. An entry that fires the strobe burst
-and an intense special counts as one intense event on one cooldown, the drop strobe cooldown
-setting (halved at wild), and nothing intense fires at or below intensity 0.3. While the
-cooldown runs neither the burst nor an intense special fires; a calm special may. Calm specials
-are free.
+A special is intense when it pulses or its speed is above `INTENSE_SPEED` (0.6).
+This is derived from the values and never declared. A drop whose cue strobes (hit or riser)
+and the intense special entering with it count as one intense event on one cooldown, the drop
+strobe cooldown setting (halved at wild), and nothing intense fires at or below intensity 0.3.
+While the cooldown runs neither a strobing overlay nor an intense special fires; a calm special
+may. Calm specials are free.
 
 ## Selection
 
@@ -103,7 +101,7 @@ the group must be reported by Starfire at login with fixtures in it, and able to
 axis the special sets (colour, speed when above 0, pulse, pattern; energy always), and not
 resting after its last special. Within those
 it plays each one before repeating any, then favours the least recently used, seeded like the
-loops; strobe rows are not candidates and join whichever special is chosen. An intent with no
+loops. An intent with no
 playable special releases the one running. When the pick lands on an accent and several accent
 groups are ready, their MVR positions choose the group: house left-most first, then each time the
 ready group furthest in X from the last accent (equal reach: the one that waited longest), so
@@ -116,13 +114,13 @@ as a laser that rotates and colours, plays them too):
 - Textures (`drift`, `cold_drift`) on `atmospheric` and `breakdown`: low size and rate, no
   pulse, an 8-bar attack and 16-bar release, and a 240 s cooldown, so after a texture blooms in
   and fades out `fx` plays nothing, texture or accent, for four minutes; a drop in that window
-  still gets its strobe burst. They are calm, so they never use the drop
+  still gets its cue's entry. They are calm, so they never use the drop
   strobe cooldown.
 - Drop accents (`spin`, `cold_spin`): intense, so they share the drop strobe cooldown, and each
   rests `fx` for 90 s. An entry with no playable row releases the running special;
   a drop accent replaces a running texture, and Starfire runs the texture's release. A soft
   drop, one whose arrival is known and below 0.9 of the track peak (the autoloop policy's
-  grading), keeps its strobe burst but plays no intense special.
+  grading), keeps its cue's entry but plays no intense special.
 
 ## Venue
 
@@ -133,10 +131,11 @@ as a laser that rotates and colours, plays them too):
 max_accent_events_per_minute = 2
 ```
 
-- `max_accent_events_per_minute` (default 2, at least 1): specials fired on accent groups in any
-  sliding 60 s, counted across every accent group. At the cap no accent row is selectable until
-  the oldest of those events is a minute old; loop-group rows and strobe rows are not counted or
-  capped. The FX Effects block shows it as the bar `venue · accents n/cap`.
+- `max_accent_events_per_minute` (default 2, at least 1): specials fired on accent groups and
+  the white or strobing entry hits of cues in any 60 s. At the cap no accent row is selectable
+  until the oldest of those events is a minute old, and a cue's entry hit falls back to the
+  palette's colour bump; loop-group rows are not counted or capped. A cue's hit and the special
+  entering with it are one event. The FX Effects block shows it as the bar `venue · accents n/cap`.
 
 ## Adding a special
 

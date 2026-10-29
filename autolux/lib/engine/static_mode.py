@@ -7,12 +7,12 @@ from dataclasses import dataclass, field
 
 from autolux.lib.clients.starfire_client import StarfireClient
 from autolux.lib.clock import SYSTEM_CLOCK, Clock
-from autolux.lib.engine.effect_controller import DROP_ACCENT_PRIORITY
+from autolux.lib.engine.effect_controller import SPECIAL_PRIORITY
 from autolux.lib.engine.special_policy import Special, SpecialCapabilities
 
 LOGGER = logging.getLogger(__name__)
 
-STATIC_PRIORITY = DROP_ACCENT_PRIORITY + 1000
+STATIC_PRIORITY = SPECIAL_PRIORITY + 1000
 STATIC_FLOOR_PRIORITY = STATIC_PRIORITY - 1
 STATIC_FLOOR_ID = 'static_floor'
 STATIC_GROUP_PRIORITY = STATIC_PRIORITY + 1
@@ -97,8 +97,7 @@ class StaticLooks:
         self._clock = clock
         self.rig = rig
         self._capabilities = capabilities
-        # Strobe rows stay the show's own drop accent; the operator never holds one.
-        self._rows = {row.name: row for row in specials if row.strobe_hz is None}
+        self._rows = {row.name: row for row in specials}
         self._looks: dict[str, dict] = {}
         self._special: Special | None = None
         self._floor = False

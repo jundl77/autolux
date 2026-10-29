@@ -6,7 +6,6 @@ import pytest
 
 from autolux.lib.engine.effect_definitions import LightIntent
 from autolux.lib.engine.special_policy import (
-    DROP_STROBE,
     Special,
     SpecialCapabilities,
     SpecialPolicy,
@@ -57,25 +56,24 @@ def test_a_row_needs_its_group_and_every_axis_it_sets():
 
 
 def test_an_empty_capability_list_leaves_only_whole_rig_rows():
-    policy = SpecialPolicy([row('spin', pulse=1), DROP_STROBE], random.Random(0))
-    choice = policy.choose(DROP, SpecialCapabilities())
-    assert (choice.special, choice.strobes) == (None, (DROP_STROBE,))
+    whole_rig = row('glow', group='all')
+    policy = SpecialPolicy([row('spin', pulse=1), whole_rig], random.Random(0))
+    assert policy.choose(DROP, SpecialCapabilities()).special == whole_rig
 
 
-def test_the_strobe_burst_always_joins_the_chosen_row_and_is_never_selected():
-    policy = SpecialPolicy([row('spin', pulse=1), DROP_STROBE], random.Random(0))
-    for _ in range(5):
-        choice = policy.choose(DROP, SpecialCapabilities.from_groups([FX]))
-        policy.record(choice.special)
-        assert (choice.special.name, choice.strobes) == ('spin', (DROP_STROBE,))
-        assert choice.intense
-
-
-def test_a_blocked_drop_drops_the_strobe_and_keeps_a_calm_row():
-    policy = SpecialPolicy([row('calm'), row('spin', pulse=1), DROP_STROBE], random.Random(0))
+def test_a_blocked_drop_keeps_a_calm_row():
+    policy = SpecialPolicy([row('calm'), row('spin', pulse=1)], random.Random(0))
     choice = policy.choose(DROP, SpecialCapabilities.from_groups([FX]), 'cooldown')
-    assert (choice.special.name, choice.strobes, choice.suppressed) == ('calm', (), 'cooldown')
+    assert (choice.special.name, choice.suppressed) == ('calm', 'cooldown')
     assert not choice.intense
+
+
+def test_the_strobe_burst_special_is_gone():
+    from autolux.lib.engine import special_policy
+
+    assert not hasattr(special_policy, 'DROP_STROBE')
+    assert 'strobe_hz' not in {field.name for field in dataclasses.fields(Special)}
+    assert all(not hasattr(special, 'strobe_hz') for special in discover_specials())
 
 
 def test_every_row_plays_before_any_repeats_and_the_seed_fixes_the_order():
@@ -126,17 +124,13 @@ def test_the_shipped_fx_rows_keep_textures_calm():
         assert not policy.choose(intent, capabilities, 'cooldown 30s of 60s left').special.intense
     assert policy.choose(DROP, capabilities).special.group == 'fx'
     blocked = policy.choose(DROP, capabilities, 'cooldown 30s of 60s left')
-    assert (blocked.special, blocked.strobes) == (None, ())
+    assert blocked.special is None
 
 
-def test_a_soft_drop_keeps_the_strobe_and_a_calm_row_but_no_intense_one():
-    policy = SpecialPolicy([row('calm'), row('spin', pulse=1), DROP_STROBE], random.Random(0))
+def test_a_soft_drop_keeps_a_calm_row_but_no_intense_one():
+    policy = SpecialPolicy([row('calm'), row('spin', pulse=1)], random.Random(0))
     choice = policy.choose(DROP, SpecialCapabilities.from_groups([FX]), soft_drop='soft')
-    assert (choice.special.name, choice.strobes, choice.suppressed) == (
-        'calm',
-        (DROP_STROBE,),
-        'soft',
-    )
+    assert (choice.special.name, choice.suppressed) == ('calm', 'soft')
 
 
 def fire(policy, intent, now, blocked=None):
@@ -150,12 +144,12 @@ def test_a_texture_rests_its_group_so_no_accent_or_other_texture_plays_there():
     drift = row('drift', ATMOSPHERIC, speed=0.1, cooldown=240)
     cold = row('cold_drift', ATMOSPHERIC, speed=0.1, cooldown=240)
     spin = row('spin', pulse=1, cooldown=90)
-    policy = SpecialPolicy([drift, cold, spin, DROP_STROBE], random.Random(0))
+    policy = SpecialPolicy([drift, cold, spin], random.Random(0))
     assert fire(policy, ATMOSPHERIC, 1000.0) is not None
     assert fire(policy, ATMOSPHERIC, 1100.0) is None
-    # A drop inside the texture's 240 s keeps its strobe burst but plays nothing on fx.
+    # A drop inside the texture's 240 s plays nothing on fx.
     choice = policy.choose(DROP, SpecialCapabilities.from_groups([FX]), now=1239.0)
-    assert (choice.special, choice.strobes) == (None, (DROP_STROBE,))
+    assert choice.special is None
     # The texture itself returns exactly when its 240 s are up.
     capabilities = SpecialCapabilities.from_groups([FX])
     assert policy.choose(ATMOSPHERIC, capabilities, now=1240.0).special is not None
@@ -164,13 +158,11 @@ def test_a_texture_rests_its_group_so_no_accent_or_other_texture_plays_there():
 
 def test_an_accent_rests_its_group_for_its_own_cooldown_after_the_shared_one_expires():
     drift = row('drift', ATMOSPHERIC, speed=0.1, cooldown=240)
-    policy = SpecialPolicy(
-        [drift, row('spin', pulse=1, cooldown=90), DROP_STROBE], random.Random(0)
-    )
+    policy = SpecialPolicy([drift, row('spin', pulse=1, cooldown=90)], random.Random(0))
     assert fire(policy, DROP, 1000.0).name == 'spin'
     # 70 s on, the shared 60 s intense cooldown has run out (no block) but the group's has not.
     choice = policy.choose(DROP, SpecialCapabilities.from_groups([FX]), now=1070.0)
-    assert (choice.special, choice.strobes) == (None, (DROP_STROBE,))
+    assert choice.special is None
     assert fire(policy, ATMOSPHERIC, 1089.0) is None
     assert fire(policy, ATMOSPHERIC, 1090.0).name == 'drift'
 
@@ -199,6 +191,7 @@ def test_a_role_row_plays_on_every_capable_group_of_its_role_and_each_rests_alon
     assert third.group == first.group
     resting = {e['group']: e['ready'] for e in policy.cooldowns(1091.0, 0.0, 0.0, capabilities)}
     resting.pop('venue')
+    assert resting.pop('all'), 'the shared intense cooldown is always listed'
     assert resting == {'fx': first.group == 'fx', 'laser': first.group == 'laser'}
 
 
@@ -305,7 +298,7 @@ def test_cooldowns_list_one_entry_per_group_and_the_strobe_on_the_shared_cooldow
     drift = row('drift', ATMOSPHERIC, speed=0.1, cooldown=240)
     spin = row('spin', pulse=1, cooldown=90)
     sweep = row('sweep', ATMOSPHERIC, group='movers', speed=0.1, cooldown=240)
-    policy = SpecialPolicy([drift, spin, sweep, DROP_STROBE], random.Random(0))
+    policy = SpecialPolicy([drift, spin, sweep], random.Random(0))
     policy.record(drift, 1000.0)
     assert policy.cooldowns(1100.0, 60.0, 20.0) == [
         {
@@ -324,7 +317,7 @@ def test_cooldowns_list_one_entry_per_group_and_the_strobe_on_the_shared_cooldow
         },
         {
             'group': 'all',
-            'last': 'strobe_burst',
+            'last': 'strobe',
             'cooldown_seconds': 60.0,
             'remaining_seconds': 20.0,
             'ready': False,
