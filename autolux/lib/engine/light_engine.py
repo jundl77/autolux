@@ -72,7 +72,13 @@ MEASUREMENT_ENDING_INTENTS = (LightIntent.BUILDUP, LightIntent.DROP)
 # Radius bridges a capture resync with zeros; a gap this close to one is not a track change.
 RESYNC_GUARD_SECONDS = 3.0
 TRACK_LEVEL_BEATS = 2048
+# The decoder commits about two bars behind the analysis head.
 BEAT_RING_SIZE = 64
+
+
+def start_reach(bpm: float | None, phased: bool) -> float:
+    beat_sec = 60.0 / bpm if bpm else 0.0
+    return (BEATS_PER_BAR if phased else 1) * beat_sec / 2
 
 
 def levels_before(levels: Iterable[tuple[float, float]], opens: float) -> tuple[float, ...]:
@@ -90,7 +96,7 @@ def planned_context(
     bar_seconds: float,
     levels: Sequence[float],
     new_track: bool,
-    arrival_of_peak: float | None = None,
+    arrival: float | None = None,
 ) -> SelectionContext:
     building = intent in (LightIntent.BUILDUP, LightIntent.DROP) and previous in BUILD_INTENTS
     return SelectionContext(
@@ -101,7 +107,7 @@ def planned_context(
         else 0.0,
         loudness=loudness_trend(levels),
         new_track=new_track,
-        arrival_of_peak=arrival_of_peak,
+        arrival_of_peak=arrival,
     )
 
 
@@ -253,6 +259,7 @@ class LightEngine(IMusicAnalyserHandler):
         self._paused = True
         self._held_intent = None
         self.static_looks.clear_highlight()
+        # Pause before the cut so play does not revive it.
         self.lighting_client.set_paused(True)
         self.effect_controller.forget_special(instantaneous=True)
         self._send_brightness(BRIGHTNESS_FADE_SECONDS)
@@ -719,8 +726,7 @@ class LightEngine(IMusicAnalyserHandler):
         )
 
     def _start_reach(self, phased: bool) -> float:
-        beat_sec = 60.0 / self._last_bpm if self._last_bpm else 0.0
-        return (BEATS_PER_BAR if phased else 1) * beat_sec / 2
+        return start_reach(self._last_bpm, phased)
 
     def _start_beat_index(self, start_sec: float) -> int | None:
         candidates = [
@@ -836,19 +842,21 @@ class LightEngine(IMusicAnalyserHandler):
             bar_seconds=self._bar_seconds(),
             levels=self._levels_before(planned.start_sec),
             new_track=new_track,
-            arrival_of_peak=planned.arrival,
+            arrival=planned.arrival,
         )
 
     def _levels_before(self, start_sec: float) -> tuple[float, ...]:
         return levels_before(self._beat_levels, start_sec - self._start_reach(False))
 
     def _planned_sections(self, *, current: bool) -> list[PlannedSection]:
+        # Current first, then start order: a re-sent cue drops every later pending one.
         ahead = [p for p in self._pending_intents if p.start_beat_index is not None]
         if current and self._current_plan is not None:
             return [self._current_plan, *ahead]
         return ahead
 
     def _cue_out(self, planned: PlannedSection, cue: Cue) -> None:
+        # Under Static the cue stays planned and booked; leaving Static sends it.
         if self._static_mode:
             return
         if planned is self._current_plan:

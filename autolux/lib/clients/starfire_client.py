@@ -67,6 +67,7 @@ class StarfireClient:
         self._send_command(command)
 
     def cue_section(self, cue: Cue) -> None:
+        # Starfire clears every cue on a selection or a stop, so the engine re-sends after one.
         self._send_command(cue.command())
 
     def clear_cues(self) -> None:

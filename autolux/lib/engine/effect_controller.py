@@ -494,6 +494,7 @@ class EffectController:
         )
 
     def release_special(self, *, instantaneous: bool = False) -> None:
+        # Never through the delayed queue: a cut is the operator's, so it belongs to the room's now.
         if not self._special_on:
             return
         self.lighting_client.clear_override(SPECIAL_ID, instantaneous_release=instantaneous)
