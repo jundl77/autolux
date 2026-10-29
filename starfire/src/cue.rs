@@ -378,6 +378,7 @@ impl CueTimeline {
             .active
             .as_ref()
             .is_some_and(|active| active.cue.start_beat_index == pending.cue.start_beat_index);
+        // Mirrors Autolux's switch clock so the hit, room state and specials land on one bar line.
         let activates_at = if start_grid >= now.beat_position {
             start
         } else {

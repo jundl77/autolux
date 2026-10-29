@@ -201,6 +201,7 @@ message BeatFeatures {
 // Starts on the first frame at or past start_beat_index; a cue whose start has passed starts on
 // the next bar line, its rotation still counted from the true start. A cue drops every pending
 // cue starting at or after its start, so cues are sent in start order. At most 4 cues wait.
+// A re-sent cue's rows that are already playing carry on.
 message CueSection {
   uint64 command_id = 1;
   uint64 start_beat_index = 2;  // An UpdateBeat.beat_index whose bar_phase is 0.
@@ -232,6 +233,7 @@ message CueSection {
   }
 }
 
+// Ends every cue: its overlays release and the base look plays on.
 message ClearCues {
   uint64 command_id = 1;
 }

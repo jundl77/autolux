@@ -338,9 +338,11 @@ pub enum Command {
         #[serde(default)]
         features: Option<BeatFeatures>,
     },
+    /// A re-sent cue's rows that are already playing carry on.
     CueSection {
         value: Box<SectionCue>,
     },
+    /// Overlays release; the base look plays on.
     ClearCues,
     Select {
         bank: String,

@@ -11,7 +11,6 @@ use starfire::model::{
 };
 use starfire::protocol::wire;
 use starfire::replay::{Replay, dmx_digest, render_replay};
-use starfire::script::{MAX_EFFECTS_PER_FRAME, OVERLAY_BANKS};
 
 const FLOAT_TOLERANCE: f64 = 1e-9;
 const GOLDEN_INTENSITY: f64 = 1.0;
@@ -27,13 +26,18 @@ const WHITE: Rgb = Rgb {
     green: 1.0,
     blue: 1.0,
 };
+const OVERLAY_BANKS: [&str; 5] = ["hit", "fill", "riser", "dip", "accent"];
 const LOOP_GROUPS: [&str; 3] = ["wash", "strip", "movers"];
+/// Headroom above for HTP hits and risers.
 const BASE_PEAK: f64 = 0.9;
 const PULSE_DEPTH: f64 = 0.05;
+/// Never divides the beat, so a sampled pulse can land anywhere in it.
 const SAMPLE_BEATS: f64 = 0.07;
 const MIN_PULSE_GAP_BEATS: f64 = 0.5 - SAMPLE_BEATS;
+/// The finale replay cues the drop for beat 128; its dip blacks out beat 127.
 const DROP_BEAT: f64 = 128.0;
 const DIP_BEAT: f64 = 127.0;
+const EFFECT_CAP: usize = 512;
 const COUNT_STEPS: usize = 8;
 const WINDOW_EDGE_SHARE: f64 = 0.02;
 const OVERLAY_SETTLE_BEATS: f64 = 4.0;
@@ -1506,7 +1510,7 @@ fn every_loop_stays_inside_the_effect_cap_on_large_rigs() {
                     .render(context, &slots)
                     .unwrap_or_else(|error| panic!("{look} on {name}: {error:#}"));
                 assert!(
-                    effects.len() <= MAX_EFFECTS_PER_FRAME,
+                    effects.len() <= EFFECT_CAP,
                     "{look} on {name}: {} effects",
                     effects.len()
                 );

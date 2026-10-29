@@ -76,6 +76,7 @@ fn assert_near(actual: [f64; 3], expected: [f64; 3], tolerance: f64, context: &s
 
 #[test]
 fn aim_at_and_beam_direction_are_inverses_over_mounts_yaws_points_and_soft_limits() {
+    // Every limit pair still reaches every heading (378 of 540 degrees) and leans to 121.5.
     let limits = [
         (json!({}), json!({})),
         (
@@ -148,6 +149,7 @@ fn aim_at_and_beam_direction_are_inverses_over_mounts_yaws_points_and_soft_limit
 
 #[test]
 fn a_point_outside_the_soft_limits_clamps_to_the_nearest_edge() {
+    // Soft limits: headings 54..162 degrees, leans 0..54 degrees.
     let position = [0.0, 0.0, 3000.0];
     let mut fixture = head("head", 0, support::mounted(true, 0.0, position), [0.0; 3]);
     fixture["pan"] = json!({"min": 0.1, "max": 0.3});

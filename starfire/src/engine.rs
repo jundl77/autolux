@@ -713,6 +713,7 @@ impl Engine {
         }
         self.limit_movement_speed(time_seconds, &mut states);
         self.limit_strobes(time_seconds, &mut states);
+        // Pause darkens overrides and static looks too, on purpose.
         if self.blackout || self.clock.paused() {
             extinguish(&mut states);
         }
@@ -845,6 +846,7 @@ impl Engine {
         };
         let max_step = range_per_second * (seconds - previous_seconds);
         for (id, state) in states.iter_mut() {
+            // A dark head skips the slew limit so it moves in black.
             if state.intensity <= 0.0 {
                 continue;
             }
@@ -1037,8 +1039,7 @@ impl Engine {
         }
         layers.sort_by_key(|layer| layer.rank);
         let palette = self.palette.slots_at(beat);
-        let max_burst_seconds =
-            self.strobe_max_burst_seconds * intensity::strobe_scale(self.intensity);
+        let max_burst_seconds = self.scaled_by_strobe_intensity(self.strobe_max_burst_seconds);
         let mut refused_strobes = BTreeSet::new();
         let mut held_dark = BTreeSet::new();
         for layer in &layers {
@@ -1054,7 +1055,8 @@ impl Engine {
             };
             for (id, values) in cells {
                 if values.strobe_hz.is_some_and(|hz| hz > 0.0)
-                    && (self.refused_overlay_strobes.contains(&id)
+                    && (max_burst_seconds <= 0.0
+                        || self.refused_overlay_strobes.contains(&id)
                         || self
                             .strobe_started_seconds
                             .get(&id)
@@ -1124,6 +1126,7 @@ impl Engine {
         layer_values(&self.rig, &effects)
     }
 
+    /// Only for the dip, and only when the next cue cuts to a new loop.
     fn move_in_black(
         &self,
         frame: &RenderContext,
@@ -1324,7 +1327,7 @@ impl Engine {
         let palette = self.palette.slots_at(beat);
         let strobe_scale = intensity::strobe_scale(self.intensity);
         let max_pulse_hz = self.strobe_max_rate_hz * strobe_scale;
-        let max_gate_seconds = self.strobe_max_burst_seconds * strobe_scale;
+        let max_gate_seconds = self.scaled_by_strobe_intensity(self.strobe_max_burst_seconds);
         let beats_per_second = self.clock.beats_per_second();
         for value in self.overrides.values_mut() {
             if let Some(special) = &value.value.special_fx {

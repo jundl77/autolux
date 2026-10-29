@@ -29,7 +29,7 @@ const MAX_AUTOLOOP_ID_BYTES: usize = 128;
 const LUA_MEMORY_LIMIT_BYTES: usize = 16 * 1024 * 1024;
 const LUA_INSTRUCTION_LIMIT: u32 = 100_000;
 const HOOK_INSTRUCTION_INTERVAL: u32 = 100;
-pub const MAX_EFFECTS_PER_FRAME: usize = 512;
+const MAX_EFFECTS_PER_FRAME: usize = 512;
 const LIGHTING_API: &str = include_str!("lua/lighting.lua");
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
@@ -45,7 +45,7 @@ pub struct AutoloopCatalog {
     intensity_htp: BTreeSet<(String, String)>,
 }
 
-pub const OVERLAY_BANKS: [&str; 5] = ["hit", "fill", "riser", "dip", "accent"];
+const OVERLAY_BANKS: [&str; 5] = ["hit", "fill", "riser", "dip", "accent"];
 /// Mirrors Autolux's OVERLAY_META_VALUES.
 const OVERLAY_HEADER: [(&str, &[&str]); 4] = [
     ("strobe", &["yes", "no"]),
@@ -441,9 +441,9 @@ impl LuaAutoloop {
             .set_name("starfire lighting API")
             .set_mode(ChunkMode::Text)
             .eval()?;
-        let white = lua_table(&lua, &WHITE)?;
+        let white = palette_table(&lua, &WHITE)?;
         for (name, slots) in palettes.iter() {
-            let table = lua_table(&lua, slots)?;
+            let table = palette_table(&lua, slots)?;
             table.set(WHITE_SLOT, &white)?;
             named_palettes.set(
                 name,
@@ -454,7 +454,7 @@ impl LuaAutoloop {
         let active_palette = lua.create_table()?;
         let mut active_palette_slots = Vec::new();
         for (slot, colour) in initial_slots.named_slots() {
-            let table = lua_table(&lua, &colour)?;
+            let table = palette_table(&lua, &colour)?;
             active_palette.set(slot, &table)?;
             active_palette_slots.push(table);
         }
@@ -822,7 +822,7 @@ fn freeze_globals(lua: &Lua) -> mlua::Result<()> {
     Ok(())
 }
 
-fn lua_table(lua: &Lua, value: &impl Serialize) -> Result<Table> {
+fn palette_table(lua: &Lua, value: &impl Serialize) -> Result<Table> {
     lua.to_value(value)?
         .as_table()
         .cloned()

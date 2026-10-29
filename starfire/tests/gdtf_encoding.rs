@@ -379,6 +379,7 @@ fn a_focus_aim_throws_the_beam_through_the_focus_point_at_any_yaw_and_mount() {
 
 #[test]
 fn without_a_focus_point_every_head_aims_at_the_stage_centre_on_the_floor() {
+    // The fixtures' plan bounding box runs x -2000..3000, y -1000..1000: centre (500, 0, 0).
     let positions = [[-2000.0, 1000.0, 3000.0], [3000.0, -1000.0, 2500.0]];
     let matrices = [
         support::mounted(true, 37.0, positions[0]),

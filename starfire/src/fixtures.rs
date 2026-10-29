@@ -514,6 +514,7 @@ impl FixtureRig {
         &self.spatial
     }
 
+    /// MVR Layer "accent": specials only, never autoloops.
     pub fn is_accent(&self, group: &str) -> bool {
         self.accent_groups.contains(group)
     }

@@ -6,6 +6,7 @@ use std::time::Instant;
 use serde_json::json;
 use starfire::engine::{Engine, RenderedFrame, perceptual_to_linear_master};
 use starfire::fixtures::FixtureRig;
+use starfire::intensity::STROBE_GATE_INTENSITY;
 use starfire::model::{
     AttributeValue, Command, FixtureState, LightingOverride, OverlayCue, OverrideLifetime,
     PropertyValues, Rgb, RotationEntry, SectionCue, SectionIntent, Target, Transition,
@@ -473,6 +474,31 @@ fn past_the_burst_cap_an_overlay_strobe_is_refused_and_the_base_plays_on() {
             assert!(!light.is_low(&rendered), "{what}: the base stays lit");
         }
     }
+}
+
+#[test]
+fn at_the_strobe_gate_an_uncapped_overlay_strobe_is_refused_and_the_base_plays_on() {
+    let mut engine = playing("base");
+    send(&mut engine, 0.0, 4, "base", vec![overlay("tint", 0.0, 8.0)]);
+    let frame = render(&mut engine, 4.0);
+    near(
+        state(&frame, "wash_left_outer").strobe_hz,
+        4.0,
+        "above the gate",
+    );
+    engine
+        .apply(
+            at(4.5),
+            &Command::SetIntensity {
+                level: STROBE_GATE_INTENSITY,
+            },
+        )
+        .unwrap();
+    let frame = render(&mut engine, 4.5);
+    let wash = state(&frame, "wash_left_outer");
+    near(wash.strobe_hz, 0.0, "at the gate");
+    near(wash.intensity, 0.5, "at the gate");
+    near_colour(wash.colour, RED, "at the gate");
 }
 
 #[test]
