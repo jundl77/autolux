@@ -4,9 +4,9 @@
 -- texture: beam
 local palette = sf.palette()
 local FAN_DEGREES, FAN_MEASURE = 25, 16
-local KICK_WIDTH_BEATS, WAVE_PIXELS = 0.4, 1.5
+local KICK_WIDTH_BEATS, WAVE_SHARE = 0.4, 0.19
 local FLOOR_QUIET, FLOOR_LOUD = 0.05, 0.25
-local WASH_PEAK, STRIP_PEAK, MOVER_FLOOR, MOVER_PEAK = 0.85, 0.9, 0.3, 0.85
+local WASH_PEAK, STRIP_PEAK, MOVER_FLOOR, MOVER_PEAK = 0.85, 0.9, 0.6, 0.85
 
 return {
     render = function(ctx)
@@ -20,7 +20,7 @@ return {
             sf.dimmer(sf.group("wash"), sf.lerp(floor, WASH_PEAK, kick) * gain),
             sf.each(sf.group("strip"), function(pixel, index, count)
                 local distance = math.abs(sf.from_centre(index, count) - wave) * (count - 1) / 2
-                local front = math.max(0, 1 - distance / WAVE_PIXELS) * (1 - wave)
+                local front = math.max(0, 1 - distance / sf.pixels(WAVE_SHARE, count)) * (1 - wave)
                 return {
                     sf.colour(pixel, palette.secondary),
                     sf.dimmer(pixel, STRIP_PEAK * front * gain)
