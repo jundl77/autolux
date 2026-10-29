@@ -465,20 +465,15 @@ impl Engine {
     }
 
     /// The active cue's section and the overlays sounding (running or releasing) as of the
-    /// last render, as bank and autoloop; the offline preview labels its frames with them.
-    pub fn sounding_section(&self) -> Result<(Option<SectionIntent>, Vec<(String, String)>)> {
+    /// last render, each as `bank/autoloop`; the offline preview labels its frames with them.
+    pub fn sounding_section(&self) -> Result<(Option<SectionIntent>, Vec<String>)> {
         let now = self.cue_sample(self.clock.sample_at(self.last_time_seconds)?);
         let overlays = self
             .cues
             .instances()
             .iter()
             .filter(|instance| !matches!(instance.state, InstanceState::Pending))
-            .map(|instance| {
-                (
-                    instance.overlay.bank.clone(),
-                    instance.overlay.autoloop.clone(),
-                )
-            })
+            .map(|instance| format!("{}/{}", instance.overlay.bank, instance.overlay.autoloop))
             .collect();
         Ok((self.cues.context(&now).section_intent, overlays))
     }

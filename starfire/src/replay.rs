@@ -294,11 +294,7 @@ pub fn write_preview(
             "c": values,
         });
         if !overlays.is_empty() {
-            let named: Vec<String> = overlays
-                .into_iter()
-                .map(|(bank, autoloop)| format!("{bank}/{autoloop}"))
-                .collect();
-            line["overlays"] = json!(named);
+            line["overlays"] = json!(overlays);
         }
         // A faulted loop renders dark; the flag keeps that from reading as restraint.
         if frame.script_error.is_some() {
