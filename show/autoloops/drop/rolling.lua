@@ -9,6 +9,8 @@ local KICK_WIDTH_BEATS, ROLL_WIDTH_BEATS, ROLL_LEVEL = 0.4, 0.2, 0.35
 local FLOOR_QUIET, FLOOR_LOUD = 0.05, 0.2
 local WASH_PEAK, STRIP_PEAK, MOVER_FLOOR, MOVER_PEAK = 0.9, 0.9, 0.6, 0.85
 local CIRCLE_DEGREES, CIRCLE_MEASURE = 10, 8
+-- One mover spins once round and back on each 16-bar line.
+local SPIN = { measure = 8, every = 64 }
 
 return {
     render = function(ctx)
@@ -29,7 +31,8 @@ return {
             sf.colour(sf.group("movers"), palette.secondary),
             sf.dimmer(sf.group("movers"), sf.lerp(MOVER_FLOOR, MOVER_PEAK, eighth) * gain),
             sf.phaser(sf.group("movers"), ctx, {
-                shape = "circle", size = CIRCLE_DEGREES * sf.lerp(0.6, 1, energy), measure = CIRCLE_MEASURE
+                shape = "circle", size = CIRCLE_DEGREES * sf.lerp(0.6, 1, energy), measure = CIRCLE_MEASURE,
+                spin = SPIN
             })
         }
     end

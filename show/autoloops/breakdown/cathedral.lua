@@ -7,6 +7,8 @@ local LOOP_BEATS = 16
 local PIXEL_LOW, PIXEL_HIGH = 0.03, 0.3
 local MOVER_LEVEL = 0.4
 local CROSS_DEGREES, RISE_DEGREES = 20, 12
+-- One mover turns a slow circle and back at the top of every 16 bars.
+local SPIN = { measure = 16, every = 64 }
 
 return {
     render = function(ctx)
@@ -25,7 +27,7 @@ return {
             end),
             sf.colour(sf.group("movers"), palette.cold),
             sf.dimmer(sf.group("movers"), MOVER_LEVEL * level),
-            sf.phaser(sf.group("movers"), ctx, { shape = "cross", size = cross, centre_tilt = rise })
+            sf.phaser(sf.group("movers"), ctx, { shape = "cross", size = cross, centre_tilt = rise, spin = SPIN })
         }
     end
 }

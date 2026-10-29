@@ -25,6 +25,7 @@ const FULL_TURN_DEGREES: f64 = 360.0;
 const HALF_TURN_DEGREES: f64 = 180.0;
 const MAX_PITCH_DEGREES: f64 = 60.0;
 const MATRIX_VALUES: usize = 12;
+const PROBE_DEGREES: f64 = 1.0;
 
 #[derive(Clone, Debug)]
 struct FixturePatch {
@@ -86,6 +87,20 @@ impl Placement {
             position,
             focus,
         })
+    }
+
+    /// The physical pan (0..1 of the GDTF range) the yaw offset alone gives a pan state.
+    fn physical_pan(&self, pan: f64, (from, to): DegreeRange) -> f64 {
+        let position = self.pan.map(pan);
+        if self.reversed {
+            // Standing reverses pan about physical 0 and the reversed tilt adds a half turn,
+            // so heading L needs 180 - L - yaw: the mirrored range, offset.
+            let offset = HALF_TURN_DEGREES
+                - (self.pan_offset_degrees + from + to).rem_euclid(FULL_TURN_DEGREES);
+            offset_pan(1.0 - position, offset, from, to)
+        } else {
+            offset_pan(position, self.pan_offset_degrees, from, to)
+        }
     }
 
     fn hanging_tilt(&self) -> MovementRange {
@@ -641,6 +656,40 @@ impl FixtureRig {
         (span >= FULL_TURN_DEGREES).then(|| FULL_TURN_DEGREES / span)
     }
 
+    /// Degrees of beam heading (clockwise seen from above, then anticlockwise) a head can turn
+    /// from its focus aim before its pan meets an end stop, starting from the pan solution a
+    /// show's first frame takes. A beam along the pan axis has no heading to turn: zero both.
+    pub fn pan_reach(&self, cell_id: &str) -> Option<(f64, f64)> {
+        let (placement, travel, _) = self.pan_tilt_travel(cell_id)?;
+        let focus = self.focus(cell_id)?;
+        let [x, y, z] = [0, 1, 2].map(|axis| focus[axis] - placement.position[axis]);
+        let across = x.hypot(y);
+        if across <= f64::EPSILON * x.abs().max(y.abs()).max(z.abs()).max(1.0) {
+            return Some((0.0, 0.0));
+        }
+        let turn = FULL_TURN_DEGREES / (travel.1 - travel.0).abs();
+        let physical = |point: Position, previous| {
+            let (pan, _) = self.aim_at(cell_id, point)?;
+            let position = placement.physical_pan(pan, travel);
+            Some(nearest_turn(position, turn, &placement.pan, previous))
+        };
+        let rest = physical(focus, None)?;
+        // One degree clockwise shows which way physical pan runs for this mount and yaw.
+        let heading = x.atan2(y) + PROBE_DEGREES.to_radians();
+        let probe = [
+            placement.position[0] + across * heading.sin(),
+            placement.position[1] + across * heading.cos(),
+            focus[2],
+        ];
+        let rising = physical(probe, Some(rest))? > rest;
+        let degrees = |share: f64| share.max(0.0) * (travel.1 - travel.0).abs();
+        let (up, down) = (
+            degrees(placement.pan.max - rest),
+            degrees(rest - placement.pan.min),
+        );
+        Some(if rising { (up, down) } else { (down, up) })
+    }
+
     pub fn beam_direction(&self, cell_id: &str, pan: f64, tilt: f64) -> Option<[f64; 3]> {
         let (placement, (from, to), tilt_travel) = self.pan_tilt_travel(cell_id)?;
         let heading = (from + placement.pan.map(pan) * (to - from)).to_radians();
@@ -762,19 +811,10 @@ impl FixtureRig {
             let tilt_range = profile.movement_range("Tilt");
             let placement = &fixture.placement;
             let pan = |position| {
-                let position = placement.pan.map(position);
-                pan_range.map_or(position, |(from, to)| {
-                    if placement.reversed {
-                        // Standing reverses pan about physical 0 and the reversed tilt adds a
-                        // half turn, so heading L needs 180 - L - yaw: the mirrored range, offset.
-                        let offset = HALF_TURN_DEGREES
-                            - (placement.pan_offset_degrees + from + to)
-                                .rem_euclid(FULL_TURN_DEGREES);
-                        offset_pan(1.0 - position, offset, from, to)
-                    } else {
-                        offset_pan(position, placement.pan_offset_degrees, from, to)
-                    }
-                })
+                pan_range.map_or_else(
+                    || placement.pan.map(position),
+                    |travel| placement.physical_pan(position, travel),
+                )
             };
             let tilt = |position| {
                 let position = placement.tilt.map(position);
