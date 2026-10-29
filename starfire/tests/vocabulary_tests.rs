@@ -22,6 +22,26 @@ fn frame_time(frame: usize) -> f64 {
 }
 
 fn engine(rig: FixtureRig, scripts: &[(&str, &str)]) -> Engine {
+    engine_at(rig, scripts, 120.0)
+}
+
+fn beat(engine: &mut Engine, at: f64, beat_index: u64, bar_phase: Option<u32>, bpm: f64) {
+    engine
+        .apply(
+            at,
+            &Command::Beat {
+                beat_index,
+                bar_phase,
+                beats_per_bar: 4,
+                bpm,
+                features: None,
+            },
+        )
+        .unwrap();
+}
+
+/// An engine with one beat at 0 s, so its grid starts at 0 at `bpm`.
+fn engine_at(rig: FixtureRig, scripts: &[(&str, &str)], bpm: f64) -> Engine {
     let directory = tempfile::tempdir().unwrap();
     fs::create_dir(directory.path().join("test")).unwrap();
     for (name, source) in scripts {
@@ -33,18 +53,7 @@ fn engine(rig: FixtureRig, scripts: &[(&str, &str)]) -> Engine {
     }
     let catalog = AutoloopCatalog::load(directory.path()).unwrap();
     let mut engine = Engine::new(rig, catalog, support::palettes()).unwrap();
-    engine
-        .apply(
-            0.0,
-            &Command::Beat {
-                beat_index: 0,
-                bar_phase: None,
-                beats_per_bar: 4,
-                bpm: 120.0,
-                features: None,
-            },
-        )
-        .unwrap();
+    beat(&mut engine, 0.0, 0, None, bpm);
     engine
 }
 
@@ -139,15 +148,63 @@ fn every_flash_at_a_rate_dividing_the_frame_rate_lasts_two_frames() {
             "strobe",
             Transition::Cut,
         );
-        let cycle = FRAMES_PER_SECOND / hz;
         let frames = lit(
             &mut engine,
             START_FRAME..START_FRAME + 4 * FRAMES_PER_SECOND,
             1,
         );
-        // 50 ms on, the rest of the cycle off, from the burst's first frame.
-        for (index, cells) in frames.iter().enumerate() {
-            assert_eq!(cells[0], index % cycle < 2, "{hz} Hz, frame {index}");
+        // 50 ms on, the rest of the cycle off, cycles on the beat grid from 0 s.
+        for (frame, cells) in (START_FRAME..).zip(&frames) {
+            assert_eq!(
+                cells[0],
+                (frame * hz) % FRAMES_PER_SECOND < 2 * hz,
+                "{hz} Hz, {frame}"
+            );
+        }
+    }
+}
+
+#[test]
+fn flashes_at_beat_divisions_start_on_the_beat_grid_and_follow_a_bar_phase_correction() {
+    // 60 bpm, so a beat is 40 frames. Beats arrive on time until index 5 comes 0.3 s late as bar
+    // phase 2, moving the grid on by 1.3 beats; its next bar line is grid beat 8, at 7.3 s.
+    let beats = [
+        (40, 1, None),
+        (80, 2, None),
+        (120, 3, None),
+        (160, 4, None),
+        (212, 5, Some(2)),
+        (252, 6, None),
+        (292, 7, None),
+        (332, 8, None),
+        (372, 9, None),
+    ];
+    for per_beat in [4, 8] {
+        let script = format!(
+            "return {{render=function(ctx) return sf.scene {{sf.dimmer(sf.all(), 1), \
+             sf.strobe(sf.all(), {per_beat} * ctx.bpm / 60)}} end}}"
+        );
+        let mut engine = engine_at(dimmers(1), &[("grid", &script)], 60.0);
+        select(&mut engine, 0.0, "grid", Transition::Cut);
+        let cycle = FRAMES_PER_SECOND / per_beat;
+        for frame in 0..400 {
+            if let Some(&(_, index, bar_phase)) = beats.iter().find(|(at, ..)| *at == frame) {
+                beat(&mut engine, frame_time(frame), index, bar_phase, 60.0);
+            }
+            let rendered = engine.render_at(frame_time(frame)).unwrap();
+            let lit = rendered.dmx_frames_by_universe[&0][0] > 0;
+            let grid_frame = match frame {
+                0..200 => Some(frame),
+                292.. => Some(frame - 292),
+                _ => None,
+            };
+            if let Some(grid_frame) = grid_frame {
+                assert_eq!(
+                    lit,
+                    grid_frame % cycle < 2,
+                    "{per_beat} per beat, frame {frame}"
+                );
+            }
         }
     }
 }
@@ -695,6 +752,99 @@ fn a_wheel_only_cell_takes_the_nearest_slot_python_predicts() {
             rig.encode(&states).unwrap()[&0][0],
             dmx,
             "{red}, {green}, {blue}"
+        );
+    }
+}
+
+/// Requested colour -> the stage Spot's Color1 DMX (Open 0, Red 32, Blue 111, Yellow 128,
+/// Magenta 160, Amber 192, Cyan 224). Only white lands on Open; a pale colour takes its nearest
+/// coloured slot. autolux/tests/test_palette_variants.py holds palettes.nearest_slot to it.
+const SPOT_PICKS: [([f64; 3], u8); 9] = [
+    ([1.0, 0.82, 0.6], 192),
+    ([1.0, 1.0, 1.0], 0),
+    ([0.5, 0.5, 0.5], 0),
+    ([1.0, 0.0, 0.0], 32),
+    ([0.0, 0.7, 1.0], 224),
+    ([0.85, 0.92, 1.0], 160),
+    ([1.0, 1.0, 0.0], 128),
+    ([1.0, 1.0, 0.7], 128),
+    ([0.5, 0.0, 1.0], 111),
+];
+
+fn spot() -> FixtureRig {
+    rig(
+        json!({"fixtures": [{"fixture_uuid": "spot", "universe": 0, "address": 1,
+        "profile": "chauvet_intimidator_spot_110_12ch"}]}),
+    )
+}
+
+/// The Spot's Color1 is its sixth channel.
+const SPOT_COLOUR: usize = 5;
+
+#[test]
+fn only_white_lands_on_the_open_slot_of_a_colour_wheel() {
+    let rig = spot();
+    for ([red, green, blue], dmx) in SPOT_PICKS {
+        let mut states = rig.empty_states();
+        let state = states.get_mut("spot").unwrap();
+        state.intensity = 1.0;
+        state.colour = Rgb { red, green, blue };
+        assert_eq!(
+            rig.encode(&states).unwrap()[&0][SPOT_COLOUR],
+            dmx,
+            "{red}, {green}, {blue}"
+        );
+    }
+}
+
+#[test]
+fn sf_white_is_a_fixed_palette_slot_that_opens_the_wheel_and_a_blend_snaps_to_it() {
+    let white = "return {render=function(ctx)
+        assert(sf.white() == sf.palette().white and sf.palette('house').white == sf.white())
+        return sf.scene {sf.dimmer(sf.all(), 1), sf.colour(sf.all(), sf.white())} end}";
+    let pale = solid("1, 0.82, 0.6");
+    let mut engine = engine(spot(), &[("white", white), ("pale", &pale)]);
+    select(&mut engine, 0.0, "white", Transition::Cut);
+    let frame = engine.render_at(0.0).unwrap();
+    assert_eq!(frame.script_error, None);
+    assert_eq!(
+        frame.fixture_properties_before_strobe["spot"].colour,
+        Rgb {
+            red: 1.0,
+            green: 1.0,
+            blue: 1.0
+        }
+    );
+    // The white slot ignores palette changes: mid palette crossfade it is still full white.
+    engine
+        .apply(
+            0.0,
+            &Command::SetPalette {
+                name: "house".into(),
+            },
+        )
+        .unwrap();
+    let frame = engine.render_at(0.25).unwrap();
+    assert_eq!(
+        frame.fixture_properties_before_strobe["spot"].colour.green,
+        1.0
+    );
+    assert_eq!(frame.dmx_frames_by_universe[&0][SPOT_COLOUR], 0);
+    // 120 bpm: a 4-beat crossfade from 1 s reaches half-way at 2 s; Open, then Amber.
+    select(
+        &mut engine,
+        1.0,
+        "pale",
+        Transition::Crossfade {
+            duration_beats: 4.0,
+        },
+    );
+    for (seconds, dmx) in [(1.5, 0), (1.99, 0), (2.0, 192), (2.5, 192)] {
+        let frame = engine.render_at(seconds).unwrap();
+        assert_eq!(frame.script_error, None);
+        assert_eq!(
+            frame.dmx_frames_by_universe[&0][SPOT_COLOUR], dmx,
+            "{seconds}"
         );
     }
 }

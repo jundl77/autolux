@@ -5,6 +5,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use anyhow::{Context, Result, ensure};
 
 use crate::model::{AttributeValue, DMX_CHANNELS, FixtureState, Rgb, lerp};
+use crate::palette::WHITE;
 use crate::protocol::wire;
 
 const MAX_CHANNEL_BYTES: usize = 4;
@@ -13,6 +14,9 @@ const CURVE_TOLERANCE: f64 = 1e-9;
 const MAX_FUNCTIONS: usize = 4096;
 const MAX_ATTRIBUTE_VALUES: usize = 512;
 const MAX_ATTRIBUTE_ID_BYTES: usize = 512;
+/// A wheel slot less saturated than this is white (GDTF's Open): only full white lands on it, so
+/// a pale palette colour takes its nearest coloured slot. Autolux's palette floor is the same.
+const WHITE_SLOT_SATURATION: f64 = 0.05;
 pub const GOBO_ATTRIBUTE: &str = "Gobo1";
 const OPEN_GOBO: &str = "Open";
 /// Values that cannot mix (wheel slots, presets, snapping channels) all change at this point of
@@ -1035,12 +1039,19 @@ fn semantic_value(
         } else {
             normalize(state.colour)
         };
-        return function
+        let slots = function
             .sets
             .iter()
             .rev()
             .filter(|set| set.first <= last)
-            .filter_map(|set| set.colour.map(|colour| (set, colour)))
+            .filter_map(|set| set.colour.map(|colour| (set, colour)));
+        // A wheel with no coloured slot keeps the plain nearest rule, so a pale colour shows
+        // white there rather than its black slot.
+        let coloured = slots
+            .clone()
+            .any(|(_, colour)| colour != BLACK && !is_white_slot(colour));
+        return slots
+            .filter(|&(_, colour)| requested == WHITE || !coloured || !is_white_slot(colour))
             .min_by(|(_, left), (_, right)| {
                 colour_distance(*left, requested).total_cmp(&colour_distance(*right, requested))
             })
@@ -1287,6 +1298,12 @@ fn cie_to_rgb(colour: &wire::CieColor) -> Result<Rgb> {
     } else {
         BLACK
     })
+}
+
+fn is_white_slot(colour: Rgb) -> bool {
+    let peak = colour_peak(colour);
+    peak > 0.0
+        && (peak - colour.red.min(colour.green).min(colour.blue)) / peak < WHITE_SLOT_SATURATION
 }
 
 fn colour_peak(colour: Rgb) -> f64 {

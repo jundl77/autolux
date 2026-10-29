@@ -21,9 +21,10 @@ MAX_PALETTE_NAME_BYTES = 64
 # A mono cold is primary held low, so builds and breakdowns keep white back for the hit. Linear
 # DMX: 0.4 still reads about 65 % bright and does not separate as a role.
 MONO_COLD_LEVEL = 0.15
-# Primary, secondary and accent stay coloured; white and greys are for sf.white() hits only. Also
-# what makes a wheel slot a white one.
+# Primary, secondary and accent stay coloured; white and greys are for sf.white() hits only. A
+# wheel slot below it is white, and only full white lands there (gdtf.rs WHITE_SLOT_SATURATION).
 MIN_COLOUR_SATURATION = 0.05
+WHITE: Rgb = (1.0, 1.0, 1.0)
 COLOUR_ROLES = ('primary', 'secondary', 'accent')
 # Primary and secondary this close in hue are one colour on purpose (the mono palettes), so a
 # wheel showing both on one slot is not worth a warning.
@@ -318,8 +319,12 @@ def wheel_slots(mode) -> list[list[tuple[str, Rgb]]]:
 
 
 def nearest_slot(slots: list[tuple[str, Rgb]], colour: Rgb) -> str:
+    """The slot Starfire's encode picks: white slots only for full white, unless the wheel has
+    no coloured slot; the highest-DMX slot of equally near ones."""
     requested = _normalised(colour)
-    # Starfire keeps the highest-DMX slot of equally near ones.
+    white = _white_slots(slots)
+    if requested != WHITE and any(rgb != BLACK and name not in white for name, rgb in slots):
+        slots = [slot for slot in slots if slot[0] not in white]
     return min(
         reversed(slots),
         key=lambda slot: sum((a - b) ** 2 for a, b in zip(slot[1], requested, strict=True)),
@@ -338,42 +343,29 @@ def _same_hue(palette: Palette) -> bool:
 
 
 def wheel_warnings(rig, palettes: tuple[Palette, ...] | None = None) -> list[str]:
-    """One line per patched wheel-only fixture type: palettes whose primary and secondary land on
-    the same slot of every wheel (colour A and B look alike on it; same-hue palettes mean to),
-    and palette colours that land on a white slot, which is kept for hits. A variant is listed
-    only where its colours differ from its palette's."""
+    """One line per patched wheel-only fixture type listing the palettes whose primary and
+    secondary land on the same slot of every wheel, so colour A and B look alike on it. Same-hue
+    palettes mean to; a variant is listed only where its colours differ from its palette's."""
     palettes = PALETTES + BREAKDOWN_PALETTES + DROP_PALETTES if palettes is None else palettes
     patched = {fixture.profile_id for fixture in rig.fixtures}
     warnings = []
     for profile in rig.profiles:
         wheels = wheel_slots(profile.mode) if profile.profile_id in patched else []
-        shared, white = {}, {role: {} for role in COLOUR_ROLES}
+        shared = {}
         for palette in palettes if wheels else ():
-            picks = {
-                role: [nearest_slot(slots, getattr(palette, role)) for slots in wheels]
-                for role in COLOUR_ROLES
-            }
-            family = base_palette_name(palette.name)
-            if picks['primary'] == picks['secondary'] and not _same_hue(palette):
-                shared.setdefault(
-                    (family, palette.primary, palette.secondary),
-                    f'{palette.name} ({", ".join(picks["primary"])})',
-                )
-            for role in COLOUR_ROLES:
-                if any(
-                    pick in _white_slots(slots)
-                    for pick, slots in zip(picks[role], wheels, strict=True)
-                ):
-                    white[role].setdefault((family, getattr(palette, role)), palette.name)
-        parts = []
-        if shared:
-            parts.append(
-                'primary and secondary share one wheel slot in ' + ', '.join(shared.values())
+            primary, secondary = (
+                [nearest_slot(slots, colour) for slots in wheels]
+                for colour in (palette.primary, palette.secondary)
             )
-        if landed := [
-            f'{role} of {", ".join(names.values())}' for role, names in white.items() if names
-        ]:
-            parts.append('a white slot, kept for hits, would show the ' + '; the '.join(landed))
-        if parts:
-            warnings.append(f'{profile.profile_id}: ' + '; '.join(parts) + '.')
+            if primary == secondary and not _same_hue(palette):
+                shared.setdefault(
+                    (base_palette_name(palette.name), palette.primary, palette.secondary),
+                    f'{palette.name} ({", ".join(primary)})',
+                )
+        if shared:
+            warnings.append(
+                f'{profile.profile_id}: primary and secondary share one wheel slot in '
+                + ', '.join(shared.values())
+                + '.'
+            )
     return warnings

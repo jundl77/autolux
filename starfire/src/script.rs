@@ -18,8 +18,8 @@ use serde::Serialize;
 use crate::fixtures::{FixtureRig, MAX_CELLS};
 use crate::gdtf::GOBO_ATTRIBUTE;
 use crate::intensity;
-use crate::model::{Effect, MAX_STROBE_HZ, PropertyValues, RenderContext, Target};
-use crate::palette::{PaletteSlots, PaletteTable};
+use crate::model::{Effect, MAX_STROBE_HZ, PropertyValues, RenderContext, Rgb, Target};
+use crate::palette::{PaletteSlots, PaletteTable, WHITE, WHITE_SLOT};
 use crate::protocol::wire;
 use crate::spatial::MM_PER_METRE;
 
@@ -392,24 +392,32 @@ impl LuaAutoloop {
             .set_name("starfire lighting API")
             .set_mode(ChunkMode::Text)
             .eval()?;
+        let colour_table = |colour: &Rgb| -> Result<Table> {
+            lua.to_value(colour)?
+                .as_table()
+                .cloned()
+                .context("palette slot is a table")
+        };
+        // One white table for every palette, reset each frame like the active palette's slots.
+        let white = colour_table(&WHITE)?;
         for (name, slots) in palettes.iter() {
+            let table = colour_table_of(&lua, slots)?;
+            table.set(WHITE_SLOT, &white)?;
             named_palettes.set(
                 name,
-                read_only(&lua, lua.to_value(slots)?, "palettes are read-only")?,
+                read_only(&lua, Value::Table(table), "palettes are read-only")?,
             )?;
         }
         let initial_slots = palettes.slots(palettes.initial())?;
         let active_palette = lua.create_table()?;
         let mut active_palette_slots = Vec::new();
         for (slot, colour) in initial_slots.named_slots() {
-            let table: Table = lua
-                .to_value(&colour)?
-                .as_table()
-                .cloned()
-                .context("palette slot is a table")?;
+            let table = colour_table(&colour)?;
             active_palette.set(slot, &table)?;
             active_palette_slots.push(table);
         }
+        active_palette.set(WHITE_SLOT, &white)?;
+        active_palette_slots.push(white);
         use_active_palette.call::<()>(read_only(
             &lua,
             Value::Table(active_palette),
@@ -655,7 +663,12 @@ impl LuaAutoloop {
                 "render context levels must be finite and between zero and one"
             );
         }
-        for (table, (_, colour)) in self.active_palette_slots.iter().zip(palette.named_slots()) {
+        let colours = palette.named_slots().map(|(_, colour)| colour);
+        for (table, colour) in self
+            .active_palette_slots
+            .iter()
+            .zip(colours.iter().chain([&WHITE]))
+        {
             table.set("red", colour.red)?;
             table.set("green", colour.green)?;
             table.set("blue", colour.blue)?;
@@ -765,6 +778,13 @@ fn freeze_globals(lua: &Lua) -> mlua::Result<()> {
     )?;
     globals.set_metatable(frozen.metatable())?;
     Ok(())
+}
+
+fn colour_table_of(lua: &Lua, slots: &PaletteSlots) -> Result<Table> {
+    lua.to_value(slots)?
+        .as_table()
+        .cloned()
+        .context("palette is a table")
 }
 
 fn read_only(lua: &Lua, value: Value, error: &'static str) -> mlua::Result<Table> {
