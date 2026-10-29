@@ -19,7 +19,7 @@ return {
             sf.dimmer(sf.group("wash"), WASH_LEVEL * level),
             sf.colour(sf.group("strip"), palette.secondary),
             sf.each(sf.group("strip"), function(pixel, index, count)
-                local from_centre = math.abs(2 * (index - 1) / (count - 1) - 1)
+                local from_centre = sf.from_centre(index, count)
                 local band = math.max(0, 1 - 3 * math.abs(from_centre - dusk))
                 return sf.dimmer(pixel, HORIZON_LEVEL * band * level)
             end),

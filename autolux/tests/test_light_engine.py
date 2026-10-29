@@ -1549,7 +1549,7 @@ async def test_two_seconds_of_digital_silence_park_the_rig_and_silence_the_room_
     assert show.monitor_silenced == 1
     assert show.queue.pending == 0, 'the delayed queue must be purged'
     select = next(c for c in standby if c['kind'] == 'select')
-    assert (select['bank'], select['autoloop']) == ('standby', 'warm_white')
+    assert (select['bank'], select['autoloop']) == ('standby', 'white')
     assert select['transition'] == {
         'kind': 'crossfade',
         'duration_beats': pytest.approx(2.0, rel=0.01),
@@ -1576,7 +1576,7 @@ async def test_a_58_ms_gap_only_marks_a_new_track_and_never_stops_the_show():
     assert not show.light.standby
     commands = show.commands(before)
     assert {'kind': 'discard_delayed_audio'} not in commands
-    assert ('standby', 'warm_white') not in _selections(commands)
+    assert ('standby', 'white') not in _selections(commands)
     assert {'kind': 'stop'} not in commands
     assert show.monitor_silenced == 0
 
@@ -1589,7 +1589,7 @@ async def test_a_short_dropout_keeps_the_show_and_its_buffered_audio():
     await show.play(5.0, 0.2)
     assert not show.light.standby
     assert {'kind': 'discard_delayed_audio'} not in show.commands(before)
-    assert ('standby', 'warm_white') not in _selections(show.commands(before))
+    assert ('standby', 'white') not in _selections(show.commands(before))
     assert show.monitor_silenced == 0
 
 
@@ -1630,7 +1630,7 @@ async def test_a_paused_show_still_leaves_standby_for_the_dimmed_baseline():
     parked = len(show.lighting.events)
 
     entered = [c for c in show.commands() if c['kind'] == 'select'][-1]
-    assert entered['autoloop'] == 'warm_white'
+    assert entered['autoloop'] == 'white'
     assert entered['transition'] == {'kind': 'cut'}
 
     await show.play(15.5, 0.2)
@@ -1674,7 +1674,7 @@ async def test_telemetry_shows_standby_instead_of_the_last_intent_and_posterior(
     assert snapshot['intent'] == 'standby'
     assert snapshot['decoder']['posterior'] is None
     assert snapshot['intents'][-1]['trigger'] == SILENCE_TRIGGER
-    assert 'standby/warm_white' in [e['name'] for e in snapshot['effects']]
+    assert 'standby/white' in [e['name'] for e in snapshot['effects']]
 
 
 class SelectionSpy(EffectController):

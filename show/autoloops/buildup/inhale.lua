@@ -27,7 +27,7 @@ return {
             sf.each(sf.group("strip"), function(pixel, index, count)
                 local reach = (breath - sf.from_centre(index, count)) * count / 2 + 1
                 local filled = math.max(0, math.min(1, reach))
-                return sf.dimmer(pixel, STRIP_PEAK * sf.lerp(0.3, 1, build.drive) * filled)
+                return sf.dimmer(pixel, STRIP_PEAK * build.drive * filled)
             end),
             sf.dimmer(sf.group("movers"), MOVER_PEAK * level),
             sf.phaser(sf.group("movers"), ctx, {

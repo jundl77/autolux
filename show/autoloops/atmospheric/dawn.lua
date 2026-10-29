@@ -19,7 +19,7 @@ return {
             sf.dimmer(sf.group("wash"), sf.lerp(WASH_LOW, WASH_HIGH, sun) * level),
             sf.colour(sf.group("strip"), palette.secondary),
             sf.each(sf.group("strip"), function(pixel, index, count)
-                local depth = 1 - math.abs(2 * (index - 1) / (count - 1) - 1)
+                local depth = 1 - sf.from_centre(index, count)
                 local glow = math.max(0, math.min(1, 1.5 * sun + 0.5 - 1.5 * depth))
                 return sf.dimmer(pixel, GLOW_LEVEL * glow * level)
             end),

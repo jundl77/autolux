@@ -60,7 +60,7 @@
       "command": {
         "kind": "select",
         "bank": "standby",
-        "autoloop": "warm_white",
+        "autoloop": "white",
         "transition": {
           "kind": "cut"
         },
@@ -72,7 +72,7 @@
       "command": {
         "kind": "select",
         "bank": "standby",
-        "autoloop": "warm_white",
+        "autoloop": "white",
         "transition": {
           "kind": "cut"
         },

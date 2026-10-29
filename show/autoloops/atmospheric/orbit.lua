@@ -6,7 +6,7 @@ local palette = sf.palette()
 local ORBIT_BEATS = 16
 local CIRCLE_DEGREES, CIRCLE_TILT_DEGREES = 12, 8
 local WASH_LOW, WASH_HIGH = 0.06, 0.2
-local GLOW_LEVEL, MOVER_LEVEL = 0.22, 0.35
+local GLOW_LEVEL, GLOW_SHARE, MOVER_LEVEL = 0.22, 0.125, 0.35
 
 -- One orbit drives the room: the beams circle their focus, the light swings round the washes
 -- with it, and the strip's mirrored glow rides the beams' cross-stage swing.
@@ -24,7 +24,8 @@ return {
             end),
             sf.colour(sf.group("strip"), palette.primary),
             sf.each(sf.group("strip"), function(pixel, index, count)
-                local glow = math.max(0, 1 - math.abs(sf.from_centre(index, count) - swing) * (count - 1) / 2)
+                local distance = math.abs(sf.from_centre(index, count) - swing) * (count - 1) / 2
+                local glow = math.max(0, 1 - distance / sf.pixels(GLOW_SHARE, count))
                 return sf.dimmer(pixel, GLOW_LEVEL * glow * level)
             end),
             sf.colour(sf.group("movers"), palette.primary),
