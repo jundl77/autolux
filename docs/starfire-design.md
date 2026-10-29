@@ -86,8 +86,7 @@ SetParameter. Rejections use ErrorReply; Metrics reports command progress.
 See the [protocol](starfire/protocol-design.md).
 [Radius's contract](../proto/radius/radius.proto) uses the same framing inside
 messages bounded to 1,200 bytes on one ordered TCP stream. TX waits for LoginReply before capturing media. Both
-Login protocols require equal major versions; Radius also negotiates the lower minor, and
-Starfire has no minor.
+Login protocols require equal major versions.
 Version constants come from the schema enums and generated language bindings.
 Both links exchange 10-second heartbeats and time out after 30 seconds.
 Autolux creates one random 64-bit run_id at startup for all three components.

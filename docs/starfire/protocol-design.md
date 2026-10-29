@@ -9,7 +9,7 @@ Only top-level wire messages have direction annotations.
 
 | Command | Behavior |
 | --- | --- |
-| `PlayAutoloop` | Play one globally unique autoloop ID until changed. Repeating the ID continues the loop. An empty ID enters idle and clears effects. A `Transition` is a cut or a positive beat-duration crossfade; an absent one uses `DEFAULT_CROSSFADE_BEATS`. A cue's steps use the same message. |
+| `PlayAutoloop` | Play one globally unique autoloop ID until changed. Repeating the ID continues the loop. An empty ID enters idle and clears effects. A `Transition` crossfades over `crossfade_beats`, 0 cutting; an absent one uses `DEFAULT_CROSSFADE_BEATS`. A cue's steps use the same message. Any `PlayAutoloop` ends every cue as `ClearCues` does; an empty ID drops every overlay and effect at once and goes dark. |
 | `SetActiveEffect` / `UnsetActiveEffect` | Set or remove an identified accent. Specify fixture properties directly; omitted properties leave the baseline untouched. An optional duration in seconds expires the effect; otherwise it lasts until unset. A special's `Envelope` starts on the beat its command applied; `instantaneous_release` drops it this frame, otherwise it runs its release. |
 | `UpdateBeat` | Autolux reports one detected beat with the bar it belongs to: beat index, the tracker's bar phase (absent if unknown), beats per bar and tempo. Starfire derives the continuous bar-aligned position from those facts and interpolates at tempo between beats; animation speed never changes musical phase. `BeatFeatures` (onset, bass, mid, high, each 0..1 against the track's own peaks) ride along once measured; a beat without them clears the previous ones. |
 | `SetParameter` | Change one global parameter, independently of the active autoloop. |
@@ -28,30 +28,37 @@ correction moves a waiting cue with the grid, and plays it on its render clock.
   Autolux re-sends cues in start order. Of several cues passing in one frame the latest
   starts; the others drop.
 - **Re-cue:** a cue with the active section's start replaces it on the next bar line and
-  restarts nothing: the running entry loop, its seed and every playing overlay row carry on,
-  and entry rows never fire twice. It is not a next section.
+  restarts nothing: the running entry loop, its seed and every playing overlay row that
+  matches in autoloop, begin, duration and repeat carry on (with their playing priority,
+  envelope and dip), and entry rows never fire twice. It is not a next section.
 - **Clearing:** `ClearCues` (sent with every Autolux queue clear) and `PlayAutoloop` end
-  every cue and release their overlays; the base look plays on. Stop also drops overlays.
+  the active and every waiting cue and release their overlays; the current step's loop plays
+  on without rotating. Stop drops overlays at once.
 - **Steps:** the rotation's `Step`s play in order from the start, each for whole bars, then
-  cycle.
-- **Overlays:** `priority` orders overlays among themselves (higher composes later, ties keep
-  list order); every `SetActiveEffect` composes above all of them. An overlay's `Envelope`
-  starts on its first rendered frame and releases at its end or when its cue ends, from the
-  level reached. Overlays and specials share the one `Envelope` (attack and release beats).
-- **Blackout:** an overlay with `blackout` set is the blackout before the section, so it
-  plays once with a negative begin. The earliest sets `beats_until_dip`; while one that
+  cycle; a last step of 0 bars holds until the next cue. A step's transition plays each time
+  it is entered, wraps included, unless its loop is already playing.
+- **Overlays:** they compose over the base in `priority` order (ties keep list order), each by
+  its envelope level over what it sets: an LTP row crossfades from the look below to its own,
+  an HTP row takes the higher intensity and crossfades colour by its share. Every
+  `SetActiveEffect` composes above all of them. A row is lit for `duration_beats` plus its
+  release, which starts at its end or at once when its cue is cleared or replaced. Overlays
+  and specials share the one `Envelope` (attack and release beats; 0 attack snaps).
+- **Dip:** an overlay with `dip` set is the dark before the section, drawn by its own loop;
+  it plays once with a negative begin. The earliest sets `beats_until_dip`; while one that
   reaches the section start holds fixtures dark, they move in black to the first step's look
   when that step cuts to a new loop. Starfire reads no meaning into bank names: Autolux's
   director sets the flag on its dip rows.
+- **Palette:** the latest to apply wins: a cue's palette when the cue starts,
+  `PlayAutoloop.palette` and the `PALETTE` parameter on receipt.
 - **Lua context:** the active section's intent and elapsed beats (from the bar line at or
   before a selection without a cue), the next section's intent, beats until it, when it
   became known and beats until its dip, drop strengths, the seed, tempo and beat features;
   each is nil until known.
 
 Bounds are errors (ErrorReply), never clamps: 8 steps, 8 overlays, 4 waiting cues, pre-roll
-at most 64 beats, one-shot begins, overlay lengths, envelopes and crossfades up to 1,024
-beats, a repeating row inside its period with length plus release fitting it, a blackout only
-as a one-shot pre-roll. At most 8 overlays play at once; a ninth is
+at most 64 beats, one-shot begins, overlay durations, envelopes and crossfades up to 1,024
+beats, a repeating row inside its period with duration plus release fitting it, a dip only as
+a one-shot pre-roll, a 0-bar step only last. At most 8 overlays play at once; a ninth is
 not started and is reported. The largest cue stays under the 4 KiB real-time cap. Overlay
 faults and refusals never stop the show; they go to `Metrics.overlay_error`.
 
@@ -98,8 +105,8 @@ Autolux owns fixture configuration and scripts. `Login` supplies a complete snap
 - Initial parameters and the unicast Art-Net destination.
 - The nonzero random 64-bit `run_id` generated by Autolux for this start. LoginReply
   and Metrics echo it; subsequent commands belong to the owned process stream.
-- The protocol major version, which must match. There is no minor version and nothing is
-  negotiated; consumers use the generated constant.
+- The protocol major version, which both ends must have equal. There is no minor version
+  and nothing is negotiated; consumers use the generated constant.
 
 Starfire validates the patch and executes every script against it before acquiring
 output. `LoginReply` means initialization succeeded and the renderer is ready for

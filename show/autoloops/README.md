@@ -183,11 +183,11 @@ The context (`ctx`), in beats and 0..1 levels; nil where noted:
 | `next_intent`, `beats_until_next` | The pending cue's intent and beats until it starts (nil until known). |
 | `next_known_at` | The section time at which the pending cue arrived, where tension bends towards it. |
 | `strobe_max_hz` | The strobe rate the engine lets through at this intensity (0 where strobing is off). |
-| `beats_until_dip` | Beats until the pending cue's blackout row (the director's dip) begins (nil without one). |
+| `beats_until_dip` | Beats until the pending cue's dip row begins (nil without one). |
 | `drop_strength`, `next_drop_strength` | The active and pending drop's strength. |
 | `seed` | The active cue's seed, or 0. |
 | `normalized_rms_level`, `onset`, `bass`, `mid`, `high` | Loudness and the newest beat's features. |
-| `overlay_length_beats` | An overlay's length (overlays only). |
+| `overlay_duration_beats` | An overlay's duration (overlays only). |
 
 A loop is a file returning a render function of ctx; this one is complete:
 
