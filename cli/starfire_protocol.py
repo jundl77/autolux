@@ -105,8 +105,6 @@ def build_command(command: dict | Message) -> Message:
                 if bar_phase is not None:
                     message.bar_phase = bar_phase
             elif kind == 'select':
-                if 'transition' in value:
-                    value['transition'] = _transition(value['transition'])
                 message = wire.PlayAutoloop(
                     autoloop_id=f'{value.pop("bank")}/{value.pop("autoloop")}',
                     **value,
@@ -157,11 +155,7 @@ def build_command(command: dict | Message) -> Message:
 def _cue_section(value):
     value = dict(value)
     rotation = [
-        wire.CueSection.Step(
-            autoloop_id=f'{step.pop("bank")}/{step.pop("autoloop")}',
-            **({'transition': _transition(step.pop('transition'))} if 'transition' in step else {}),
-            **step,
-        )
+        wire.CueSection.Step(autoloop_id=f'{step.pop("bank")}/{step.pop("autoloop")}', **step)
         for step in map(dict, value.pop('rotation'))
     ]
     overlays = [
@@ -176,18 +170,6 @@ def _cue_section(value):
         overlays=overlays,
         **value,
     )
-
-
-def _transition(value):
-    value = dict(value)
-    kind = value.pop('kind')
-    if kind == 'cut':
-        if value:
-            raise ValueError('Cut transition contains unexpected fields')
-        return wire.Transition()
-    if kind == 'crossfade':
-        return wire.Transition(crossfade_beats=value.pop('duration_beats'), **value)
-    raise ValueError('Invalid Starfire transition')
 
 
 def profile_id(spec: str, mode: str) -> str:

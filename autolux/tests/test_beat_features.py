@@ -11,7 +11,7 @@ from autolux.lib.analyser.music_analyser import (
     onset_strength,
     relative_level,
 )
-from autolux.lib.engine.cue import Cue, Envelope, Overlay, Step
+from autolux.lib.engine.cue import CueSection, Envelope, Overlay, Step
 from autolux.lib.engine.effect_definitions import LightIntent
 from cli.starfire_protocol import MAX_MESSAGE_BYTES, build_command
 
@@ -54,13 +54,10 @@ def test_the_track_reference_halves_over_its_half_life_and_follows_new_peaks():
 
 def test_the_largest_cue_fits_the_realtime_cap_and_round_trips():
     name = 'x' * 60
-    cue = Cue(
+    cue = CueSection(
         start_beat_index=2**63,
         intent=LightIntent.DROP,
-        rotation=tuple(
-            Step(name, name + 'y' * 7, 2**31, {'kind': 'crossfade', 'duration_beats': 1024.0})
-            for _ in range(8)
-        ),
+        rotation=tuple(Step(name, name + 'y' * 7, 2**31, 1024.0) for _ in range(8)),
         palette='techno',
         overlays=tuple(
             Overlay(
@@ -70,14 +67,16 @@ def test_the_largest_cue_fits_the_realtime_cap_and_round_trips():
         ),
         drop_strength=0.5,
         seed=2**32 - 1,
+        beats_per_bar=4,
     )
-    command = cue.command(4)
+    command = cue.command()
     command['value']['palette'] = 'p' * 128
     message = build_command(command)
     assert message.ByteSize() <= MAX_MESSAGE_BYTES
     assert message.rotation[0].autoloop_id == f'{name}/{name}yyyyyyy'
     assert message.overlays[0].begin_beats == -64.0
-    assert message.overlays[0].envelope.release_beats == 1024.0 and message.overlays[0].blackout
+    assert message.overlays[0].envelope.release_beats == 1024.0 and message.overlays[0].dip
+    assert message.rotation[0].transition.crossfade_beats == 1024.0
     assert (message.seed, message.drop_strength) == (2**32 - 1, 0.5)
 
 
@@ -85,22 +84,22 @@ def test_the_largest_cue_fits_the_realtime_cap_and_round_trips():
     'change',
     [
         {'rotation': ()},
-        {'rotation': (Step('drop', 'kick', 0),)},
+        {'rotation': (Step('drop', 'kick', 0), Step('drop', 'hammer', 16))},
+        {'rotation': (Step('drop', 'kick', -1),)},
         {'overlays': (Overlay('hit', 'blinder', 40, 1025.0, 2.0),)},
         {'overlays': (Overlay('fill', 'wipe', 20, 0.0, 4.0, 1, Envelope(release_beats=1.0)),)},
         {'overlays': (Overlay('fill', 'wipe', 20, 4.0, 1.0, every_bars=1),)},
         {'overlays': (Overlay('fill', 'wipe', 20, -1.0, 4.0, every_bars=8),)},
         {'overlays': (Overlay('hit', 'blinder', 40, 0.0, 0.0),)},
         {'overlays': (Overlay('hit', 'blinder', 40, 0.0, 2.0, envelope=Envelope(-1.0)),)},
-        {'overlays': (Overlay('dip', 'last_beat', 50, 0.0, 1.0, blackout=True),)},
-        {'overlays': (Overlay('dip', 'last_beat', 50, 0.0, 1.0, 1, blackout=True),)},
+        {'overlays': (Overlay('dip', 'last_beat', 50, 0.0, 1.0, dip=True),)},
+        {'overlays': (Overlay('dip', 'last_beat', 50, 0.0, 1.0, 1, dip=True),)},
         {'intent': LightIntent.BUILDUP, 'drop_strength': 0.5},
         {'drop_strength': 1.5},
         {'seed': 2**32},
         {'palette': 'no such palette'},
-        {'rotation': (Step('drop', 'kick', 16, {'kind': 'crossfade', 'duration_beats': 0}),)},
-        {'rotation': (Step('drop', 'kick', 16, {'kind': 'crossfade', 'duration_beats': 2e3}),)},
-        {'rotation': (Step('drop', 'kick', 16, {'kind': 'fade'}),)},
+        {'rotation': (Step('drop', 'kick', 16, -1.0),)},
+        {'rotation': (Step('drop', 'kick', 16, 2e3),)},
     ],
 )
 def test_an_unsendable_cue_cannot_be_built_or_sent(change):
@@ -109,36 +108,40 @@ def test_an_unsendable_cue_cannot_be_built_or_sent(change):
         'intent': LightIntent.DROP,
         'rotation': (Step('drop', 'kick', 16),),
         'palette': 'techno',
+        'beats_per_bar': 4,
     }
     with pytest.raises(ValueError):
-        Cue(**(fields | change)).command(4)
+        CueSection(**(fields | change))
 
 
-def test_one_shot_rows_may_begin_after_the_start():
-    Cue(
+def test_one_shot_rows_may_begin_after_the_start_and_the_last_step_may_hold():
+    CueSection(
         8,
         LightIntent.DROP,
-        (Step('drop', 'kick', 16),),
+        (Step('drop', 'kick', 16, 0.0), Step('drop', 'hammer', 0)),
         'techno',
+        beats_per_bar=4,
         overlays=(
             Overlay('hit', 'blinder', 40, 62.0, 1.0),
             Overlay('fill', 'wipe', 20, 0.0, 3.0, 1, Envelope(release_beats=1.0)),
-            Overlay('dip', 'last_beat', 50, -1.0, 1.0, blackout=True),
+            Overlay('dip', 'last_beat', 50, -1.0, 1.0, dip=True),
         ),
-    ).command(4)
+    )
 
 
 def test_repeats_count_in_the_bar_the_beats_carry():
-    cue = Cue(
-        8,
-        LightIntent.DROP,
-        (Step('drop', 'kick', 16),),
-        'techno',
-        overlays=(Overlay('fill', 'wipe', 20, 4.0, 1.0, 1, Envelope(release_beats=0.5)),),
+    fields = {
+        'start_beat_index': 8,
+        'intent': LightIntent.DROP,
+        'rotation': (Step('drop', 'kick', 16),),
+        'palette': 'techno',
+        'overlays': (Overlay('fill', 'wipe', 20, 4.0, 1.0, 1, Envelope(release_beats=0.5)),),
+    }
+    assert (
+        CueSection(**fields, beats_per_bar=6).command()['value']['overlays'][0]['every_bars'] == 1
     )
-    assert cue.command(6)['value']['overlays'][0]['every_bars'] == 1
     with pytest.raises(ValueError, match='inside its period'):
-        cue.command(4)
+        CueSection(**fields, beats_per_bar=4)
 
 
 def test_beats_and_cue_clears_adapt_to_their_messages():

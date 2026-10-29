@@ -130,10 +130,10 @@ def _cue(t=1.0, start=8, overlays=('hit/white',)):
                 'autoloop': name.split('/')[1],
                 'priority': 40,
                 'begin_beats': 0.0,
-                'length_beats': 2.0,
+                'duration_beats': 2.0,
                 'every_bars': 0,
                 'envelope': {'attack_beats': 0.0, 'release_beats': 2.0},
-                'blackout': False,
+                'dip': False,
             }
             for name in overlays
         ],
@@ -176,6 +176,12 @@ def test_an_unrecorded_or_twice_recorded_cue_is_rejected():
 
 def test_a_cue_recorded_with_other_rows_is_rejected():
     recorded, sent = _cue(overlays=('hit/white',)), _cue(overlays=('hit/strobe',))
+    assert not relations_digest(_cued_report(recorded), _streams(sent))['lighting_matches_report']
+
+
+def test_a_cue_recorded_with_another_dip_flag_is_rejected():
+    recorded, sent = _cue(overlays=('dip/last_beat',)), _cue(overlays=('dip/last_beat',))
+    sent['command']['value']['overlays'][0]['dip'] = True
     assert not relations_digest(_cued_report(recorded), _streams(sent))['lighting_matches_report']
 
 

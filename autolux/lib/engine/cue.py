@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from autolux.lib.engine.effect_definitions import LightIntent
 from autolux.lighting.palettes import VARIANT_BASES
@@ -26,13 +26,13 @@ class Envelope:
 class Step:
     bank: str
     autoloop: str
-    bars: int
-    transition: dict | None = None
+    bars: int  # 0 holds the last step until the next cue
+    crossfade_beats: float | None = None  # None takes the renderer default, 0 cuts
 
     def command(self) -> dict:
         step = {'bank': self.bank, 'autoloop': self.autoloop, 'bars': self.bars}
-        if self.transition is not None:
-            step['transition'] = dict(self.transition)
+        if self.crossfade_beats is not None:
+            step['transition'] = {'crossfade_beats': self.crossfade_beats}
         return step
 
 
@@ -42,10 +42,10 @@ class Overlay:
     autoloop: str
     priority: int
     begin_beats: float  # negative is pre-roll
-    length_beats: float
+    duration_beats: float
     every_bars: int = 0
     envelope: Envelope = Envelope()
-    blackout: bool = False
+    dip: bool = False
 
     def command(self) -> dict:
         return {
@@ -53,10 +53,10 @@ class Overlay:
             'autoloop': self.autoloop,
             'priority': self.priority,
             'begin_beats': self.begin_beats,
-            'length_beats': self.length_beats,
+            'duration_beats': self.duration_beats,
             'every_bars': self.every_bars,
             'envelope': self.envelope.command(),
-            'blackout': self.blackout,
+            'dip': self.dip,
         }
 
 
@@ -64,21 +64,8 @@ def recurring_rows(overlays: tuple[Overlay, ...]) -> tuple[Overlay, ...]:
     return tuple(row for row in overlays if row.every_bars > 0)
 
 
-def _check_transition(transition: dict | None) -> None:
-    if transition is None or transition == {'kind': 'cut'}:
-        return
-    beats = transition.get('duration_beats')
-    if (
-        set(transition) != {'kind', 'duration_beats'}
-        or transition['kind'] != 'crossfade'
-        or not isinstance(beats, (int, float))
-        or not 0 < beats <= MAX_SPAN_BEATS
-    ):
-        raise ValueError(f'a transition is a cut or a crossfade of 0..{MAX_SPAN_BEATS} beats')
-
-
 @dataclass(frozen=True)
-class Cue:
+class CueSection:
     start_beat_index: int
     intent: LightIntent
     rotation: tuple[Step, ...]
@@ -86,6 +73,8 @@ class Cue:
     overlays: tuple[Overlay, ...] = ()
     drop_strength: float | None = None
     seed: int = 0  # uint32 for sf.random
+    # The bar the session's beat updates carry, which Starfire counts repeat periods in.
+    beats_per_bar: int = field(kw_only=True)
 
     def __post_init__(self):
         if self.start_beat_index < 0:
@@ -97,26 +86,15 @@ class Cue:
         for row in (*self.rotation, *self.overlays):
             if len(f'{row.bank}/{row.autoloop}'.encode()) > MAX_IDENTIFIER_BYTES:
                 raise ValueError('autoloop ID is too long for a cue')
-        if any(step.bars < 1 for step in self.rotation):
-            raise ValueError('a step lasts at least one bar')
+        if any(step.bars < 1 for step in self.rotation[:-1]) or self.rotation[-1].bars < 0:
+            raise ValueError('a step lasts at least one bar; only the last may hold with 0')
         for step in self.rotation:
-            _check_transition(step.transition)
+            if step.crossfade_beats is not None and not 0 <= step.crossfade_beats <= MAX_SPAN_BEATS:
+                raise ValueError(f'a crossfade lasts 0..{MAX_SPAN_BEATS:g} beats, 0 cutting')
         if self.palette not in VARIANT_BASES:
             raise ValueError(f'palette {self.palette!r} is not in the Login palette table')
         for overlay in self.overlays:
-            if not 0 < overlay.length_beats <= MAX_SPAN_BEATS:
-                raise ValueError('an overlay lasts a positive number of beats')
-            envelope = overlay.envelope
-            if not all(0 <= beats <= MAX_SPAN_BEATS for beats in envelope.command().values()):
-                raise ValueError('overlay attack and release are within 0..1024 beats')
-            if overlay.every_bars < 0:
-                raise ValueError('an overlay repeats every nonnegative number of bars')
-            if overlay.every_bars == 0 and not (
-                -MAX_PREROLL_BEATS <= overlay.begin_beats <= MAX_SPAN_BEATS
-            ):
-                raise ValueError('a one-shot overlay begins within -64..1024 beats')
-            if overlay.blackout and (overlay.every_bars or overlay.begin_beats >= 0):
-                raise ValueError('a blackout plays once before its section')
+            self._check_overlay(overlay)
         if self.drop_strength is not None and (
             self.intent is not LightIntent.DROP or not 0.0 <= self.drop_strength <= 1.0
         ):
@@ -124,14 +102,26 @@ class Cue:
         if not 0 <= self.seed < 1 << 32:
             raise ValueError('a cue seed is a uint32')
 
-    def command(self, beats_per_bar: int) -> dict:
-        """beats_per_bar is the session's UpdateBeat bar, which Starfire counts repeats in."""
-        for overlay in recurring_rows(self.overlays):
-            period = overlay.every_bars * beats_per_bar
+    def _check_overlay(self, overlay: Overlay) -> None:
+        if not 0 < overlay.duration_beats <= MAX_SPAN_BEATS:
+            raise ValueError('an overlay lasts a positive number of beats')
+        if not all(0 <= beats <= MAX_SPAN_BEATS for beats in overlay.envelope.command().values()):
+            raise ValueError('overlay attack and release are within 0..1024 beats')
+        if overlay.every_bars < 0:
+            raise ValueError('an overlay repeats every nonnegative number of bars')
+        if overlay.every_bars == 0:
+            if not -MAX_PREROLL_BEATS <= overlay.begin_beats <= MAX_SPAN_BEATS:
+                raise ValueError('a one-shot overlay begins within -64..1024 beats')
+        else:
+            period = overlay.every_bars * self.beats_per_bar
             if not 0 <= overlay.begin_beats < period:
                 raise ValueError('a repeating overlay begins inside its period')
-            if overlay.length_beats + overlay.envelope.release_beats > period:
-                raise ValueError("a repeating overlay's length and release fit its period")
+            if overlay.duration_beats + overlay.envelope.release_beats > period:
+                raise ValueError("a repeating overlay's duration and release fit its period")
+        if overlay.dip and (overlay.every_bars or overlay.begin_beats >= 0):
+            raise ValueError('a dip plays once before its section')
+
+    def command(self) -> dict:
         value = {
             'start_beat_index': self.start_beat_index,
             'intent': self.intent.value,

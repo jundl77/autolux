@@ -221,7 +221,7 @@ def test_control_adapter_rejects_invalid_gdtf_values(value):
             'kind': 'select',
             'bank': 'drop',
             'autoloop': 'x',
-            'transition': {'kind': 'cut', 'extra': 1},
+            'transition': {'crossfade_beats': 0.0, 'extra': 1},
         },
     ],
 )
@@ -969,9 +969,9 @@ def test_an_omitted_transition_leaves_the_default_to_starfire_and_a_cut_stays_ex
     default = protocol.build_command({'kind': 'select', 'bank': 'buildup', 'autoloop': 'stutter'})
     assert not default.HasField('transition')
     cut = protocol.build_command(
-        {'kind': 'select', 'bank': 'drop', 'autoloop': 'kick', 'transition': {'kind': 'cut'}}
+        {'kind': 'select', 'bank': 'drop', 'autoloop': 'kick', 'transition': {'crossfade_beats': 0}}
     )
-    assert cut.HasField('transition') and not cut.transition.HasField('crossfade_beats')
+    assert cut.HasField('transition') and cut.transition.crossfade_beats == 0.0
 
 
 def test_a_renderer_that_survives_its_kill_is_logged_not_raised(caplog):

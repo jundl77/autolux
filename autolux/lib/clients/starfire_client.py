@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 from autolux.lighting.palettes import DEFAULT_PALETTE
 
 if TYPE_CHECKING:
-    from autolux.lib.engine.cue import Cue
+    from autolux.lib.engine.cue import CueSection
 
 RMS_LEVEL_FLOOR_DBFS = -48.0
 RMS_LEVEL_CEILING_DBFS = -12.0
@@ -66,9 +66,9 @@ class StarfireClient:
             command['features'] = dict(features)
         self._send_command(command)
 
-    def cue_section(self, cue: Cue, beats_per_bar: int) -> dict:
+    def cue_section(self, cue: CueSection) -> dict:
         # Starfire clears every cue on a selection or a stop, so the engine re-sends after one.
-        command = cue.command(beats_per_bar)
+        command = cue.command()
         self._send_command(command)
         return command['value']
 
@@ -84,15 +84,15 @@ class StarfireClient:
         autoloop: str,
         *,
         palette: str | None = None,
-        transition: dict | None = None,
+        crossfade_beats: float | None = None,
     ) -> bool:
         identity = bank, autoloop
         palette = palette or self.palette
         if identity == self.selected_autoloop and palette == self.palette:
             return False
         command = {'kind': 'select', 'bank': bank, 'autoloop': autoloop, 'palette': palette}
-        if transition is not None:
-            command['transition'] = transition
+        if crossfade_beats is not None:
+            command['transition'] = {'crossfade_beats': crossfade_beats}
         self._send_command(command)
         self.selected_autoloop = identity
         self.palette = palette

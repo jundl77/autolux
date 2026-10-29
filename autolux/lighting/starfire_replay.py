@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from autolux.lib.clients.starfire_client import rms_to_normalized_level
-from autolux.lib.engine.cue import Cue
+from autolux.lib.engine.cue import CueSection
 from autolux.lib.engine.cue_director import SectionRequest
 from autolux.lib.engine.effect_controller import EffectController
 from autolux.lib.engine.effect_definitions import (
@@ -128,7 +128,7 @@ def _cue_events(
     placed: list[tuple[float, int, float]],
     levels: list[tuple[float, float]],
     delay: float,
-    plan: Callable[[int, SectionRequest], Cue],
+    plan: Callable[[int, SectionRequest], CueSection],
     reset: Callable[[], None],
 ) -> list[dict]:
     events = []
@@ -149,7 +149,7 @@ def _cue_events(
         if start is None:
             bank, autoloop = AUTOLOOP_BY_INTENT[intent.value]
             command = {'kind': 'select', 'bank': bank, 'autoloop': autoloop}
-            command |= {'palette': DEFAULT_PALETTE, 'transition': {'kind': 'cut'}}
+            command |= {'palette': DEFAULT_PALETTE, 'transition': {'crossfade_beats': 0.0}}
             events.append({'at_seconds': at, 'command': command})
         else:
             beat_at, index, bpm = start
@@ -173,9 +173,10 @@ def _cue_events(
                 bpm=bpm,
                 levels_before=before,
                 lead_beats=(beat_at - sent_at) * bpm / 60.0,
+                beats_per_bar=BEATS_PER_BAR,
             )
             cue = plan(moment, request)
-            events.append({'at_seconds': sent_at, 'command': cue.command(BEATS_PER_BAR)})
+            events.append({'at_seconds': sent_at, 'command': cue.command()})
             new_track = False
         if intent not in BUILD_INTENTS:
             build_started_at = None
@@ -280,7 +281,7 @@ def report_to_replay(
         venue=planning.venue,
     )
 
-    def plan(moment: int, request: SectionRequest) -> Cue:
+    def plan(moment: int, request: SectionRequest) -> CueSection:
         in_force[0] = planning.settings_at(request.room_sec + delay)
         return controller.plan_cue(moment, request)
 

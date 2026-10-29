@@ -8,6 +8,8 @@ import json
 import time
 from pathlib import Path
 
+from autolux.lib.engine.event_buffer import cue_record
+
 ANALYSIS_BEAT_COLUMNS = ('t', 'bpm', 'change', 'rms')
 ANALYSIS_DIGEST_KEYS = (
     'beats_detected',
@@ -81,8 +83,6 @@ def _command_effect(command: dict) -> tuple[str, str] | None:
 
 
 def _effects_match_report(events: list, report: dict) -> bool:
-    from autolux.lib.engine.event_buffer import cue_record
-
     commands = [event['command'] for event in events]
     applied = [_command_effect(command) for command in commands]
     played = [

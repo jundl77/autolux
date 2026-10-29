@@ -19,7 +19,7 @@ from autolux.lib.engine.autoloop_policy import (
     arrival_of_peak,
     loudness_trend,
 )
-from autolux.lib.engine.cue import Cue, recurring_rows
+from autolux.lib.engine.cue import CueSection, recurring_rows
 from autolux.lib.engine.cue_director import GAP_REFERENCE_BEATS, SectionRequest
 from autolux.lib.engine.delayed_command_queue import DelayedCommandQueue
 from autolux.lib.engine.effect_controller import OPERATOR_FADE_SECONDS, EffectController
@@ -128,7 +128,7 @@ class PlannedSection:
     arrival: float | None
     start_beat_index: int | None = None
     unplaceable: bool = False
-    cue: Cue | None = None
+    cue: CueSection | None = None
     switch_beat_index: int | None = None
 
 
@@ -170,6 +170,7 @@ class LightEngine(IMusicAnalyserHandler):
         self._beat_ring: deque[AnalysedBeat] = deque(maxlen=BEAT_RING_SIZE)
         self._room_beat_index: int = 0
         self._grid_origin: int | None = None
+        self._beats_per_bar = BEATS_PER_BAR
         self._room_beat_phase: int | None = None
         self._room_beat_at: float = float('-inf')
         self._held_intent: LightIntent | None = None
@@ -676,7 +677,7 @@ class LightEngine(IMusicAnalyserHandler):
                 if self._grid_origin is None:
                     self._grid_origin = beat_index
                 self.lighting_client.beat(
-                    beat_index, phase, BEATS_PER_BAR, published_bpm, features=features
+                    beat_index, phase, self._beats_per_bar, published_bpm, features=features
                 )
             await self._on_room_beat(phase, beat_index)
             if bpm > 0:
@@ -792,7 +793,7 @@ class LightEngine(IMusicAnalyserHandler):
         self._pending_intents.clear()
         self._reset_plan_state()
 
-    def _plan_cue(self, planned: PlannedSection) -> Cue | None:
+    def _plan_cue(self, planned: PlannedSection) -> CueSection | None:
         bpm = self._last_bpm
         lead_sec = max(0.0, planned.fire_at - self._clock.monotonic())
         request = SectionRequest(
@@ -803,6 +804,7 @@ class LightEngine(IMusicAnalyserHandler):
             bpm=bpm,
             levels_before=self._levels_before(planned.start_sec),
             lead_beats=lead_sec * bpm / 60.0 if bpm else 0.0,
+            beats_per_bar=self._beats_per_bar,
         )
         self._plan_new_track = False
         return self.effect_controller.plan_cue(planned, request)
@@ -855,14 +857,14 @@ class LightEngine(IMusicAnalyserHandler):
             return [self._current_plan, *ahead]
         return ahead
 
-    def _cue_out(self, planned: PlannedSection, cue: Cue) -> None:
+    def _cue_out(self, planned: PlannedSection, cue: CueSection) -> None:
         # Under Static the cue stays planned and booked; leaving Static sends it.
         if self._static_mode:
             return
         if planned is self._current_plan:
             # Starfire anchors one-shot rows on the bar it activates on: they would fire again.
             cue = dataclasses.replace(cue, overlays=recurring_rows(cue.overlays))
-        sent = self.lighting_client.cue_section(cue, BEATS_PER_BAR)
+        sent = self.lighting_client.cue_section(cue)
         if self.event_buffer is not None:
             self.event_buffer.add_cue(sent)
 

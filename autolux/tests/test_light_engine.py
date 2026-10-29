@@ -1543,10 +1543,7 @@ async def test_two_seconds_of_digital_silence_park_the_rig_and_silence_the_room_
     assert show.queue.pending == 0, 'the delayed queue must be purged'
     select = next(c for c in standby if c['kind'] == 'select')
     assert (select['bank'], select['autoloop']) == ('standby', 'white')
-    assert select['transition'] == {
-        'kind': 'crossfade',
-        'duration_beats': pytest.approx(2.0, rel=0.01),
-    }
+    assert select['transition'] == {'crossfade_beats': pytest.approx(2.0, rel=0.01)}
     assert {'kind': 'clear_cues'} in standby
 
     parked = len(show.lighting.events)
@@ -1624,7 +1621,7 @@ async def test_a_paused_show_still_leaves_standby_for_the_dimmed_baseline():
 
     entered = [c for c in show.commands() if c['kind'] == 'select'][-1]
     assert entered['autoloop'] == 'white'
-    assert entered['transition'] == {'kind': 'cut'}
+    assert entered['transition'] == {'crossfade_beats': 0.0}
 
     await show.play(15.5, 0.2)
     assert show.light.paused
@@ -1996,9 +1993,15 @@ async def planned_drop(light, decoder, clock):
 
 
 def planned_cue(planned):
-    from autolux.lib.engine.cue import Cue, Step
+    from autolux.lib.engine.cue import CueSection, Step
 
-    return Cue(planned.start_beat_index, planned.intent, (Step('drop', 'kick', 16),), 'techno')
+    return CueSection(
+        planned.start_beat_index,
+        planned.intent,
+        (Step('drop', 'kick', 16),),
+        'techno',
+        beats_per_bar=4,
+    )
 
 
 async def test_the_cue_is_sent_at_commit_time_on_the_sections_analysed_downbeat():
@@ -2143,7 +2146,7 @@ async def test_a_level_change_re_sends_the_planned_cue_with_its_start_and_seed()
         first['seed'],
         first['rotation'],
     )
-    assert light.effect_controller.cue_for(planned).command(4)['value'] == again
+    assert light.effect_controller.cue_for(planned).command()['value'] == again
 
 
 async def test_static_holds_the_look_without_cues_and_leaving_it_sends_them_again():
@@ -2155,7 +2158,7 @@ async def test_static_holds_the_look_without_cues_and_leaving_it_sends_them_agai
     assert cue_events(lighting, 'clear_cues')
     await light.leave_static()
     [sent] = cue_events(lighting)
-    assert sent['command'] == light.effect_controller.cue_for(planned).command(4)
+    assert sent['command'] == light.effect_controller.cue_for(planned).command()
     light.enter_static()
     clock.advance(14.5)
     await queue.drain()
@@ -2218,7 +2221,7 @@ async def test_a_selection_or_leaving_standby_sends_the_planned_cues_again(stand
     await light._switch_held_intent()
     *_, select, again = lighting.events
     assert select['command']['kind'] == 'select'
-    assert again['command'] == light.effect_controller.cue_for(planned).command(4)
+    assert again['command'] == light.effect_controller.cue_for(planned).command()
 
 
 async def test_a_skip_holds_the_operators_loop_and_keeps_the_later_cues():
@@ -2248,7 +2251,7 @@ async def test_a_skip_holds_the_operators_loop_and_keeps_the_later_cues():
     light.next_autoloop()
     *_, select, again = lighting.events
     assert select['command']['kind'] == 'select'
-    assert again['command'] == light.effect_controller.cue_for(later).command(4)
+    assert again['command'] == light.effect_controller.cue_for(later).command()
     before = len(cue_events(lighting))
     light.intensity_changed()
     assert [e['command']['value']['intent'] for e in cue_events(lighting)[before:]] == [

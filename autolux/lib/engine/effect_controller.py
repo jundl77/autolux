@@ -18,7 +18,7 @@ from autolux.lib.engine.autoloop_policy import (
     max_energy_for_intensity,
     soft_drop,
 )
-from autolux.lib.engine.cue import Cue, Overlay, Step
+from autolux.lib.engine.cue import CueSection, Overlay, Step
 from autolux.lib.engine.cue_director import CueDirector, SectionPlan, SectionRequest
 from autolux.lib.engine.effect_definitions import (
     DEFAULT_AUTOLOOP_META,
@@ -33,8 +33,8 @@ from autolux.lib.engine.effect_definitions import (
     LightIntent,
     OverlayMetaTable,
     ShowSettings,
+    crossfade_for,
     intensity_level,
-    transition_for,
 )
 from autolux.lib.engine.palette_policy import PalettePolicy, section_palette
 from autolux.lib.engine.special_policy import (
@@ -61,10 +61,8 @@ def drop_strobe_cooldown_seconds(settings: ShowSettings) -> float:
     return settings.drop_strobe_cooldown_seconds * scale
 
 
-def operator_transition(bpm: float | None) -> dict:
-    if bpm and bpm > 0:
-        return {'kind': 'crossfade', 'duration_beats': bpm / 60.0 * OPERATOR_FADE_SECONDS}
-    return {'kind': 'cut'}
+def operator_crossfade_beats(bpm: float | None) -> float:
+    return bpm / 60.0 * OPERATOR_FADE_SECONDS if bpm and bpm > 0 else 0.0
 
 
 def _loop_ids(rows: Sequence[Step | Overlay]) -> str:
@@ -180,7 +178,7 @@ class EffectController:
             return None
         return self._director.plan_for(self._entered_moment)
 
-    def plan_cue(self, moment: Hashable, request: SectionRequest) -> Cue:
+    def plan_cue(self, moment: Hashable, request: SectionRequest) -> CueSection:
         plan = self._director.plan(moment, request, self._settings(), self._palette_base(), self)
         self._book(moment, plan)
         LOGGER.info(
@@ -193,7 +191,9 @@ class EffectController:
         )
         return plan.cue
 
-    def revise_cue(self, moment: Hashable, *, started: bool, palette: bool = False) -> Cue | None:
+    def revise_cue(
+        self, moment: Hashable, *, started: bool, palette: bool = False
+    ) -> CueSection | None:
         plan = self._director.revise(
             moment,
             self._settings(),
@@ -207,7 +207,7 @@ class EffectController:
             self._book(moment, plan)
         return plan.cue
 
-    def cue_for(self, moment: Hashable) -> Cue | None:
+    def cue_for(self, moment: Hashable) -> CueSection | None:
         plan = self._director.plan_for(moment)
         return None if plan is None else plan.cue
 
@@ -274,12 +274,12 @@ class EffectController:
         self._entered_moment = None
         choice, fresh = self._entry_choice(context)
         bank, autoloop = choice.bank, choice.autoloop
-        transition = transition_for(choice.look)
+        crossfade_beats = crossfade_for(choice.look)
         palette = self._palette_for(choice.look, intent)
         if intent is LightIntent.DROP:
             self._track_dropped = True
         if not self.lighting_client.select_autoloop(
-            bank, autoloop, palette=palette, transition=transition
+            bank, autoloop, palette=palette, crossfade_beats=crossfade_beats
         ):
             self._restore_special()
             return False
@@ -343,7 +343,10 @@ class EffectController:
         choice = dataclasses.replace(choice, reason=f'{cause}; {choice.reason}')
         palette = self._palette_for(choice.look, context.intent) if remapped else None
         self.lighting_client.select_autoloop(
-            choice.bank, choice.autoloop, palette=palette, transition=operator_transition(bpm)
+            choice.bank,
+            choice.autoloop,
+            palette=palette,
+            crossfade_beats=operator_crossfade_beats(bpm),
         )
         if palette is not None:
             self._publish_palette()
@@ -372,7 +375,7 @@ class EffectController:
         intent: LightIntent,
         choice: AutoloopChoice,
         palette: str,
-        cue: Cue | None = None,
+        cue: CueSection | None = None,
     ) -> None:
         bank, autoloop, meta = choice.bank, choice.autoloop, choice.meta
         if self.event_buffer:
@@ -408,12 +411,10 @@ class EffectController:
     def enter_standby(self, bpm: float | None) -> None:
         self.forget_special(instantaneous=True)
         bank, autoloop = STANDBY_AUTOLOOP
-        transition = (
-            {'kind': 'crossfade', 'duration_beats': bpm / 60.0 * STANDBY_CROSSFADE_SECONDS}
-            if bpm and bpm > 0
-            else {'kind': 'cut'}
-        )
-        if not self.lighting_client.select_autoloop(bank, autoloop, transition=transition):
+        crossfade_beats = bpm / 60.0 * STANDBY_CROSSFADE_SECONDS if bpm and bpm > 0 else 0.0
+        if not self.lighting_client.select_autoloop(
+            bank, autoloop, crossfade_beats=crossfade_beats
+        ):
             return
         if self.event_buffer:
             self.event_buffer.add_effect(f'{bank}/{autoloop}', 'AUTOLOOP')

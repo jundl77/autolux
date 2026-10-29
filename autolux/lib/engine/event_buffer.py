@@ -25,6 +25,7 @@ def cue_record(cue: dict) -> dict:
         'intent': cue['intent'],
         'rotation': [_loop_id(step) for step in cue['rotation']],
         'overlays': [_loop_id(row) for row in cue['overlays']],
+        'dips': [_loop_id(row) for row in cue['overlays'] if row['dip']],
     }
 
 
