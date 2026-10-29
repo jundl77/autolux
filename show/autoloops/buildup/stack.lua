@@ -3,7 +3,7 @@
 -- movement: sweep
 -- texture: mixed
 local palette = sf.palette()
-local STRIP_LOW, STRIP_TOP, MOVER_WAIT = 0.5, 0.9, 0.15
+local STRIP_LOW, STRIP_TOP, MOVER_WAIT = 0.5, 0.9, 0.3
 local FAN_DEGREES, LIFT_DEGREES = 15, 35
 
 return {

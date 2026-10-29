@@ -571,22 +571,24 @@ function sf.drop_within(build, beats)
     return build.left ~= nil and build.left <= beats
 end
 
-local ROLL_HALF_BEATS, ROLL_QUARTER_BEATS, LAST_BAR_BEATS = 32, 8, 4
+local HALF_STAGE_BEATS, LAST_BAR_BEATS, UNCUED_STAGE_BEATS = 16, 4, 32
 local WHITE_FROM_BEATS, WHITE_FULL_BEATS = 16, 4
-local WASH_TOP, CALM_WASH_TOP, WASH_START_SHARE = 0.9, 0.6, 0.35
-local MOVER_TOP, MOVER_HOLD, MOVER_STAB_FLOOR = 0.9, 0.5, 0.15
-local FLASH_DECAY_SHARE, SAW_CUT_FLASH_BEATS, SAW_HOLD_BEATS = 1 / 3, 1 / 3, 1 / 8
+local WASH_TOP, CALM_SCALE, LEVEL_START_SHARE = 0.9, 2 / 3, 0.25
+local FLOOR_START, FLOOR_END, FLASH_START, FLASH_TOP = 0.15, 0.35, 0.55, 0.7
+local MOVER_TOP, MOVER_HOLD, MOVER_STAB_FLOOR = 0.6, 0.5, 0.3
+local ATTACK_BEATS = 0.1
+local STAB_DECAY_SHARE, SAW_CUT_FLASH_BEATS, SAW_HOLD_BEATS, SAW_SWELL = 1, 1, 1 / 8, 0.75
+local PAIRED_FROM_WASHES = 6
 -- Mirrors INTENSITY_CALM in intensity.rs: Calm takes the softer roll.
 local CALM_INTENSITY = 0.3
 
-local function flash_at(beats, interval, decay)
-    return math.max(0, 1 - beats % interval / decay) ^ 2
-end
-
-local function roll_interval(ctx, left, calm)
-    if left == nil or left > ROLL_HALF_BEATS then return 1 end
-    if left > ROLL_QUARTER_BEATS or calm or ctx.bpm / 60 * 4 > ctx.strobe_max_hz then return 0.5 end
-    return 0.25
+-- A short ramp up, then a decay over `over` beats, so a flash never steps on or cuts off.
+-- A saw cut takes no ramp: it flashes from the top of its swell.
+local function decay(beats, interval, over, attack)
+    attack = attack or ATTACK_BEATS
+    local into = beats % interval
+    if into < attack then return into / attack end
+    return math.max(0, 1 - (into - attack) / (over - attack)) ^ 2
 end
 
 -- The drop's phrase takes over on the bar line after the cue arrives, so a late cue never jumps mid-flash.
@@ -598,6 +600,11 @@ local function phrase_left(ctx, build)
     return build.left
 end
 
+local function flash_interval(ctx, left)
+    local interval = sf.section_beats(ctx) >= UNCUED_STAGE_BEATS and 1 or 2
+    return left ~= nil and left <= HALF_STAGE_BEATS and 0.5 or interval
+end
+
 local function saw_length(ctx, build, left)
     local uncued, next = 2 * build.measure, ctx.beats_until_next
     if left == nil then return uncued, sf.section_beats(ctx) % uncued end
@@ -606,63 +613,75 @@ local function saw_length(ctx, build, left)
     return length, (length - next % length) % length
 end
 
-local function outside_in_rank(index, count)
+local function outside_in(index, count)
     return index <= count - index + 1 and 2 * (index - 1) or 2 * (count - index) + 1
 end
 
-local function chase_rank(step, count)
-    local cycle = math.max(1, 2 * count - 2)
+local function ping_pong(step, units)
+    local cycle = math.max(1, 2 * units - 2)
     local at = step % cycle
-    return at < count and at or cycle - at
+    return at < units and at or cycle - at
 end
 
--- A buildup's washes: hard flashes on a dark floor rising to the cap, phrase-locked to a cued
--- drop, white over its last four bars; the movers' counterpoint level comes back with them.
+-- Roll units alternate between the odd and even ones, so a seeded pick never repeats back to back.
+local function flashing_unit(ctx, pattern, step, units)
+    if pattern ~= "roll" or units < 2 then return ping_pong(step, units) end
+    local parity = step % 2
+    local choices = (units - parity + 1) // 2
+    return parity + 2 * math.floor(sf.random(ctx, step) * choices)
+end
+
+-- A buildup's washes: one wash at a time flashes off a lit background, faster as the build climbs and
+-- phrase-locked to a cued drop; the movers' counterpoint level comes back with it.
 function sf.wash_build(ctx, build, spec)
     local pattern, palette = spec.pattern, sf.palette()
+    assert(pattern == "roll" or pattern == "chase" or pattern == "saw", "wash build pattern is roll, chase or saw")
     local calm = render_intensity <= CALM_INTENSITY
+    local scale = calm and CALM_SCALE or 1
     local left = phrase_left(ctx, build)
     local climb = (build.drive - DRIVE_FLOOR) / DRIVE_GAIN
-    local peak = (calm and CALM_WASH_TOP or WASH_TOP) * sf.lerp(WASH_START_SHARE, 1, climb)
-    local last_bar = left ~= nil and left <= LAST_BAR_BEATS
-    local interval = roll_interval(ctx, left, calm)
-    local beats = ctx.beat_position
-    local step = math.floor(beats / interval)
-    local flash = flash_at(beats, interval, FLASH_DECAY_SHARE * interval)
+    local floor = scale * sf.lerp(FLOOR_START, FLOOR_END, climb)
+    local peak = scale * sf.lerp(FLASH_START, FLASH_TOP, climb)
+    local last_bar, together = left ~= nil and left <= LAST_BAR_BEATS, left ~= nil and left <= 1
+    local interval = flash_interval(ctx, left)
+    local beats, swell, length = ctx.beat_position, 0, nil
+    local step, flash = math.floor(beats / interval), decay(beats, interval, interval)
+    if pattern == "saw" then
+        local into
+        length, into = saw_length(ctx, build, left)
+        swell = SAW_SWELL * math.min(1, into / (length - SAW_HOLD_BEATS))
+        step = math.floor((sf.section_beats(ctx) + (length - into)) / length)
+        flash = sf.section_beats(ctx) >= length and decay(into, length, math.min(length, SAW_CUT_FLASH_BEATS), 0) or 0
+    end
     local whiten = (left == nil or calm) and 0 or math.max(0, math.min(1,
         (WHITE_FROM_BEATS - left) / (WHITE_FROM_BEATS - WHITE_FULL_BEATS)))
-    local colour = spec.stab and whiten == 0 and step % 2 == 1 and palette.secondary or palette.primary
-    local member_level, movers
-    if pattern == "roll" then
-        member_level = function(index, count)
-            local side = sf.side(index, count)
-            local own = side == 0 or (side < 0) == (step % 2 == 0)
-            return (own or interval < 1) and peak * flash or 0
-        end
-        local stab_interval = interval == 1 and 1 or 2 * interval
-        local stab = flash_at(beats - interval / 2, stab_interval, FLASH_DECAY_SHARE * interval)
-        movers = sf.lerp(MOVER_STAB_FLOOR, MOVER_TOP, last_bar and flash or stab)
-    elseif pattern == "chase" then
-        member_level = function(index, count)
-            local lit = (left ~= nil and left <= 1) or outside_in_rank(index, count) == chase_rank(step, count)
-            return lit and peak * flash or 0
-        end
-    else
-        assert(pattern == "saw", "wash build pattern is roll, chase or saw")
-        local length, into = saw_length(ctx, build, left)
-        member_level = function() return peak * math.min(1, into / (length - SAW_HOLD_BEATS)) end
-        flash = sf.section_beats(ctx) >= length and flash_at(into, length, SAW_CUT_FLASH_BEATS) or 0
-        movers = sf.lerp(MOVER_HOLD, MOVER_TOP, flash)
+    local hit = spec.stab and whiten == 0 and step % 2 == 1 and palette.secondary or palette.primary
+    hit = sf.mix(hit, sf.white(), whiten)
+    local wash, base = sf.group("wash"), floor + (peak - floor) * swell
+    local function lit(target, f)
+        return { sf.colour(target, sf.mix(palette.primary, hit, f)), sf.dimmer(target, base + (peak - base) * f) }
     end
-    local wash, mover_white = sf.group("wash"), pattern == "saw" and not calm and flash or 0
-    colour = sf.mix(colour, sf.white(), whiten)
-    local effects = {
-        sf.colour(wash, colour),
-        sf.each(wash, function(member, index, count) return sf.dimmer(member, member_level(index, count)) end)
-    }
-    return effects, {
-        flash = flash, interval = interval, peak = peak, climb = climb, colour = colour, movers = movers,
-        mover_colour = sf.mix(palette.primary, sf.white(), mover_white), last_bar = last_bar,
+    if together then peak = scale * WASH_TOP end
+    local washes = { lit(wash, together and flash or 0) }
+    if not together then
+        washes[2] = sf.each(wash, function(member, index, count)
+            local paired = count >= PAIRED_FROM_WASHES
+            local units = paired and math.ceil(count / 2) or count
+            local unit = paired and math.min(index, count - index + 1) - 1 or outside_in(index, count)
+            return unit == flashing_unit(ctx, pattern, step, units) and lit(member, flash) or {}
+        end)
+    end
+    local movers = MOVER_HOLD
+    if pattern == "saw" then
+        movers = sf.lerp(MOVER_HOLD, MOVER_TOP, flash)
+    elseif interval < 1 then
+        movers = sf.lerp(MOVER_STAB_FLOOR, MOVER_TOP,
+            decay(beats - interval / 2, 2 * interval, STAB_DECAY_SHARE * 2 * interval))
+    end
+    return washes, {
+        flash = flash, interval = interval, climb = climb, colour = hit, movers = movers, last_bar = last_bar,
+        peak = WASH_TOP * scale * sf.lerp(LEVEL_START_SHARE, 1, climb),
+        mover_colour = sf.mix(palette.primary, sf.white(), pattern == "saw" and not calm and flash or 0),
     }
 end
 

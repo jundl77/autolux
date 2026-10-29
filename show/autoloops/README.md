@@ -59,35 +59,39 @@ Every buildup reads one shared state, `sf.build(ctx)` (below), and implements bo
 - **A cued non-drop** eases `drive` down by half instead of building a finale.
 - **Steps land on the one:** compare thresholds with `build.step`, the tension at the last
   downbeat, never with the continuous tension.
-- **The washes flash, the floor stays dark:** every buildup drives its washes with
-  `sf.wash_build(ctx, build, {pattern, stab})`, hard flashes (attack 0, decay a third of the
-  interval) on a dark floor, peaks rising from about a third to the 0.9 cap with `drive` (0.6 at Calm),
-  draining to white over a cued drop's last four bars (never at Calm). Rates climb a ladder
-  counted from the dip: beats, half beats from 32 beats out, quarter beats over the last 8 unless
-  `ctx.strobe_max_hz` is below that rate (then half beats; never at Calm). Uncued it stays on beats.
-  The quarter-beat stage is the one place a base loop pulses faster than half beats.
-- **Movers counterpoint the washes** through the helper's `movers` level: off-beat stabs at full
-  over a 0.15 floor for `roll`, a white flash on each saw cut over a 0.5 hold for `saw`, their own
-  level for `chase`; in the last bar everything flashes together. Stabs are dimmer only; the
-  heads keep moving on `build.measure` the whole build. The blackout comes from the cue's `dip`.
+- **One wash flashes over a lit background:** every buildup drives its washes with
+  `sf.wash_build(ctx, build, {pattern, stab})`. The washes hold colour A at a floor rising from
+  0.15 to 0.35; one wash at a time (a mirrored pair from six washes) ramps up over a tenth of a
+  beat to a peak rising from 0.55 to 0.7 and decays back to the background over the whole
+  interval, so nothing steps on or cuts off. All washes flash together, to 0.9, only on the last
+  beat before the dip. The flash colour drains to white over a cued drop's last four bars (never
+  at Calm, which also plays two thirds of the levels).
+- **The flashes speed up:** every two beats, every beat from bar 9 of section time, every half
+  beat over a cued drop's last four bars, never faster. The drop's phrase takes over on the bar
+  after the cue arrives.
+- **Movers counterpoint, quietly:** the helper's `movers` level holds 0.5 while they do their
+  move; over the half-beat bars `roll` and `chase` stab the off-beats to 0.6 over 0.3, and `saw`
+  flashes them white to 0.6 on each cut, with the same soft attack. Stabs are dimmer only. The
+  blackout comes from the cue's `dip`.
 - **Never scaled by loudness:** a build's RMS falls as the music high-passes, so a build that
   followed it would dim exactly as the music climbed.
 
-The wash patterns:
+The patterns differ in which wash flashes:
 
-- `roll`, a snare roll: halves of the wash row alternate on the beat, all together from half beats.
-- `chase`, one wash at a time, outside-in to the centre and ping-pong, all together on the last beat.
-- `saw`, the riser swell: every wash ramps up and cuts to black, the ramps shortening from four
-  bars to two, one, half a bar and a beat in the last bar, the cuts landing on the drop's grid.
-- `stab = true` alternates the hits between colours A and B until the white stage (under the
+- `roll`, a seeded pick, alternating odd and even washes so none flashes twice in a row.
+- `chase`, outside-in to the centre and ping-pong.
+- `saw`, the riser swell: every wash ramps up off the floor and drops back to it, the ramps
+  shortening from four bars to two, one, half a bar and a beat in the last bar; each drop is
+  one wash's flash, outside-in.
+- `stab = true` alternates the flash between colours A and B until the white stage (under the
   mono build palette A and B are the same colour).
 
 | Loop | Washes | Idea |
 |---|---|---|
 | `countdown` | chase | Counting: the strip fills in from both ends to half with the build's tension, then over a cued drop's last eight beats one step per beat to full on the last beat before the dip; the beams lift. |
 | `tighten` | saw | Converging: the beams circle the movers' shared point, the circle closing and lifting as the build climbs. |
-| `stutter` | roll | Stuttering: the strip flashes with the washes, the beams stab the gaps. |
-| `stack` | roll, stab | Layering: washes first, the strip from half-way, the beam stabs from two thirds; the last bar locks the strip solid. |
+| `stutter` | roll | Stuttering: the strip flashes with every wash flash, the beams stab the gaps. |
+| `stack` | roll, stab | Layering: washes first, the strip from half-way, the beams from two thirds; the last bar locks the strip solid. |
 | `inhale` | saw | Rising: the beams tilt up towards the ceiling while the strip breathes (energy 2, so Calm can play it). |
 | `release` | chase, stab | Opening: the fan widens from 8 to 45 degrees and the strip dot opens into a chase (energy 2). |
 
@@ -139,7 +143,7 @@ any order:
   - an overlay that moves the heads gets at least half a beat of attack and release.
 - **Hits are full on frame 0** (their attack is 0) and decay over their length.
 - **Risers peak at 1.0** (the base loops' 0.9 is their headroom) and end where the dip starts.
-  They never set the washes: under HTP they would fill the build's dark floor between flashes.
+  They never set the washes: under HTP they would flatten the build's flashes into a wall.
 - An overlay sets only the groups it is about; everything else shows the base.
 - **Strobe rates are beat divisions of `ctx.bpm`**, stepped on beat lines:
   `sf.beat_strobe_hz(ctx, per_beat)` picks the fastest division up to `per_beat` flashes a beat
