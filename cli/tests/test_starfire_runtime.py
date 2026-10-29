@@ -864,6 +864,7 @@ def test_preflight_rejects_valid_catalog_missing_an_autolux_autoloop(tmp_path):
         directory = tmp_path / intent.value
         directory.mkdir()
         (directory / f'{autoloop}.lua').write_text(
+            '-- 8-beat loop\n-- energy: 2\n-- movement: snap\n-- texture: wash\n'
             'return { render = function(ctx) return {} end }'
         )
     with pytest.raises(RuntimeError, match='missing Autolux autoloops: drop/kick'):
