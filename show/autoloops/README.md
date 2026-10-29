@@ -27,7 +27,7 @@ outro also starts a track.
 A track is a few sections, each a cue: intro (atmospheric), build, drop, breakdown, build,
 drop, outro. Inside a section the look changes on phrase lines, never on a random beat.
 
-- **Base.** One loop at a time; rotation entries change on downbeats.
+- **Base.** One loop at a time; steps change on downbeats.
 - **Accents** run for 16 bars and change 8 bars offset from the base rotation, so the two never
   turn over together.
 - **Fills** mark phrase ends: a small one on bar 8, a bigger one on bar 16.
@@ -178,12 +178,12 @@ The context (`ctx`), in beats and 0..1 levels; nil where noted:
 | Field | Meaning |
 |---|---|
 | `beat_position`, `bar_phase`, `bar_index`, `beats_per_bar`, `bpm` | The tracker's grid and tempo. |
-| `autoloop_elapsed_beats` | Beats since this layer began (rotation entry or overlay begin). |
+| `autoloop_elapsed_beats` | Beats since this layer began (step or overlay begin). |
 | `section_intent`, `section_elapsed_beats` | The active cue's intent and beats since its start; for a manual selection the intent is nil and the beats count from the bar line at or before the selection. |
 | `next_intent`, `beats_until_next` | The pending cue's intent and beats until it starts (nil until known). |
 | `next_known_at` | The section time at which the pending cue arrived, where tension bends towards it. |
 | `strobe_max_hz` | The strobe rate the engine lets through at this intensity (0 where strobing is off). |
-| `beats_until_dip` | Beats until the pending cue's dip begins (nil without one). |
+| `beats_until_dip` | Beats until the pending cue's blackout row (the director's dip) begins (nil without one). |
 | `drop_strength`, `next_drop_strength` | The active and pending drop's strength. |
 | `seed` | The active cue's seed, or 0. |
 | `normalized_rms_level`, `onset`, `bass`, `mid`, `high` | Loudness and the newest beat's features. |
@@ -318,7 +318,9 @@ unknown value.
 - `texture`: which roles carry the look: `wash`, `beam` (the movers), `pixel` (the strip),
   `mixed`.
 
-Overlays carry the four-line header above instead.
+Overlays carry the four-line header above instead. Starfire tells the two apart by these
+headers alone, not by bank: `energy` marks a base loop, `strobe` and `intensity` an overlay,
+and a file with neither fails to load. `standby/white` carries a base header for that reason.
 
 ## Adding a loop
 

@@ -9,8 +9,8 @@ Only top-level wire messages have direction annotations.
 
 | Command | Behavior |
 | --- | --- |
-| `PlayAutoloop` | Play one globally unique autoloop ID until changed. Repeating the ID continues the loop. An empty ID enters idle and clears effects. Transitions are cuts or positive beat-duration crossfades. |
-| `SetActiveEffect` / `UnsetActiveEffect` | Set or remove an identified accent. Specify fixture properties directly; omitted properties leave the baseline untouched. An optional duration in seconds expires the effect; otherwise it lasts until unset. `instantaneous_release` drops a special this frame; otherwise it runs its own release. |
+| `PlayAutoloop` | Play one globally unique autoloop ID until changed. Repeating the ID continues the loop. An empty ID enters idle and clears effects. A `Transition` is a cut or a positive beat-duration crossfade; an absent one uses `DEFAULT_CROSSFADE_BEATS`. A cue's steps use the same message. |
+| `SetActiveEffect` / `UnsetActiveEffect` | Set or remove an identified accent. Specify fixture properties directly; omitted properties leave the baseline untouched. An optional duration in seconds expires the effect; otherwise it lasts until unset. A special's `Envelope` starts on the beat its command applied; `instantaneous_release` drops it this frame, otherwise it runs its release. |
 | `UpdateBeat` | Autolux reports one detected beat with the bar it belongs to: beat index, the tracker's bar phase (absent if unknown), beats per bar and tempo. Starfire derives the continuous bar-aligned position from those facts and interpolates at tempo between beats; animation speed never changes musical phase. `BeatFeatures` (onset, bass, mid, high, each 0..1 against the track's own peaks) ride along once measured; a beat without them clears the previous ones. |
 | `SetParameter` | Change one global parameter, independently of the active autoloop. |
 
@@ -32,16 +32,26 @@ correction moves a waiting cue with the grid, and plays it on its render clock.
   and entry rows never fire twice. It is not a next section.
 - **Clearing:** `ClearCues` (sent with every Autolux queue clear) and `PlayAutoloop` end
   every cue and release their overlays; the base look plays on. Stop also drops overlays.
-- **Dip bank:** a pre-roll row from the `dip` bank is the blackout before the section;
-  Starfire derives `beats_until_dip` and the move in black from that bank name only.
+- **Steps:** the rotation's `Step`s play in order from the start, each for whole bars, then
+  cycle.
+- **Overlays:** `priority` orders overlays among themselves (higher composes later, ties keep
+  list order); every `SetActiveEffect` composes above all of them. An overlay's `Envelope`
+  starts on its first rendered frame and releases at its end or when its cue ends, from the
+  level reached. Overlays and specials share the one `Envelope` (attack and release beats).
+- **Blackout:** an overlay with `blackout` set is the blackout before the section, so it
+  plays once with a negative begin. The earliest sets `beats_until_dip`; while one that
+  reaches the section start holds fixtures dark, they move in black to the first step's look
+  when that step cuts to a new loop. Starfire reads no meaning into bank names: Autolux's
+  director sets the flag on its dip rows.
 - **Lua context:** the active section's intent and elapsed beats (from the bar line at or
   before a selection without a cue), the next section's intent, beats until it, when it
   became known and beats until its dip, drop strengths, the seed, tempo and beat features;
   each is nil until known.
 
-Bounds are errors (ErrorReply), never clamps: 8 rotation entries, 8 overlays, 4 waiting
-cues, pre-roll at most 64 beats, one-shot begins up to 1,024 beats, a repeating row inside
-its period with length plus release fitting it. At most 8 overlays play at once; a ninth is
+Bounds are errors (ErrorReply), never clamps: 8 steps, 8 overlays, 4 waiting cues, pre-roll
+at most 64 beats, one-shot begins, overlay lengths, envelopes and crossfades up to 1,024
+beats, a repeating row inside its period with length plus release fitting it, a blackout only
+as a one-shot pre-roll. At most 8 overlays play at once; a ninth is
 not started and is reported. The largest cue stays under the 4 KiB real-time cap. Overlay
 faults and refusals never stop the show; they go to `Metrics.overlay_error`.
 
@@ -58,7 +68,7 @@ It is shared by Login's initial settings and runtime updates.
 | `ANIMATION_SPEED` | Number, 0..8; animation rate independent of musical phase. |
 | `OUTPUT_BLACKOUT` | Boolean; final darkness gate. |
 | `AUDIO_RMS_NORMALIZED` | Number, 0..1; measured RMS, unknown until supplied. |
-| `GROUP_MASTER` | Number, 0..1, with `group` naming a rig group; inhibitive submaster (protocol 3.2). Same perceptual curve as the global master; scales intensity, and colour on fixtures without a Dimmer; pan, tilt and gobo untouched; inhibitive like grandMA3's Group Master. |
+| `GROUP_MASTER` | Number, 0..1, with `group` naming a rig group; inhibitive submaster. Same perceptual curve as the global master; scales intensity, and colour on fixtures without a Dimmer; pan, tilt and gobo untouched; inhibitive like grandMA3's Group Master. |
 
 Unknown parameter types, wrong value types and invalid ranges are rejected.
 There are no arbitrary parameter names or autoloop-owned parameters.
@@ -82,13 +92,14 @@ Autolux owns fixture configuration and scripts. `Login` supplies a complete snap
   Rust validates it once at Login and parses no GDTF.
 - `AutoloopDefinition` entries with globally unique autoloop IDs, bank grouping
   metadata and Lua source code, carried in `Login.autoloops`. `intensity_htp` comes from an
-  overlay's `-- intensity: htp` or `ltp` header; base loops send false.
+  overlay's `-- intensity: htp` or `ltp` header; base loops send false. Loading a directory
+  (replay, check), Starfire classifies each script by its header: `energy` marks a base loop,
+  `strobe` and `intensity` an overlay, and any other header is a load error naming the file.
 - Initial parameters and the unicast Art-Net destination.
 - The nonzero random 64-bit `run_id` generated by Autolux for this start. LoginReply
   and Metrics echo it; subsequent commands belong to the owned process stream.
-- Protocol major/minor versions: majors must match; LoginReply negotiates the
-  lower minor version. Both protocols define version 1.0 in schema enums;
-  consumers use generated constants.
+- The protocol major version, which must match. There is no minor version and nothing is
+  negotiated; consumers use the generated constant.
 
 Starfire validates the patch and executes every script against it before acquiring
 output. `LoginReply` means initialization succeeded and the renderer is ready for
