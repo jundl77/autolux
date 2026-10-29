@@ -36,7 +36,8 @@ drop, outro. Inside a section the look changes on phrase lines, never on a rando
   Calm), and an entry hit lands on the one.
 - **Into a breakdown:** `dip/fade` settles the room before the breakdown's base takes over.
 - **Restraint means smaller, never absent.** Calm keeps the dip and bumps in a palette colour
-  (no white, no strobe); Balanced allows white hits but no strobing riser; Wild adds strobe.
+  (no white, no strobe); Balanced allows white hits and the drop's `strobe_burst` special but no
+  strobing riser; Wild adds the strobing riser.
 
 Contrast comes from the dip and from white, not from a cap. Base loops peak at 0.9 so a hit
 above them still reads, but the punch of a drop is the dark beat before it and the white on
@@ -96,7 +97,7 @@ Each buildup is one idea that drives every layer:
 
 | Bank | Loops | Intensity |
 |---|---|---|
-| `hit` | `white` (washes, strip and beams full white, the beams through the open gobo where they already point), `colour_bump` (Calm: the palette's punch colour), `strobe` (Wild: white strobe on every group) | HTP |
+| `hit` | `white` (washes, strip and beams full white, the beams through the open gobo where they already point), `colour_bump` (Calm: the palette's punch colour) | HTP |
 | `fill` | `strip_wipe` and `mover_flick` (bar 8), `turnaround` (bar 16, in the punch colour: washes and beams roll eighths, the strip doubles to sixteenths, lands on a dark eighth) | LTP |
 | `riser` | `white_rise` (Balanced: washes and beams rise in white, no position), `strobe_ramp` (Wild: white and strobe over the last eight beats only, so the build's finale shows first), `white_sweep` (beams lift in white and land back on the focus over the last bar, washes swell to 0.6), `strip_fill` (Calm: the strip closes from the ends in the punch colour) | HTP |
 | `dip` | `last_beat` (every group dark), `fade` (a low glow for breakdown entry) | LTP |

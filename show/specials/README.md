@@ -81,10 +81,12 @@ caps pulse; energy is not scaled. Autolux only gates which specials may fire (be
 
 A strobe row has only the selection keys and `[effect] form = { strobe_hz = 8.0 }` and names a
 group. It is never selected: it joins whichever special is chosen on the first beat of every drop
-of at least half the track's peak (its drop strength), and goes out as a strobe accent for two
-bars, inside Starfire's rate and burst caps at the current intensity. `strobe_burst` is the drop
-burst on the whole rig; FX off leaves it out with the other automatic specials. The Wild cue's
-`hit/strobe` overlay and riser strobe on top of it as one intense event.
+of at least half the track's peak (its drop strength), and goes out as a strobe accent for the
+drop strobe burst setting in whole beats, at most two bars, inside Starfire's rate and burst caps
+at the current intensity. `strobe_burst` is the drop burst on the whole rig and the drop's only
+strobe: no hit overlay strobes, since Starfire keeps one strobe rate per cell and the special's
+would replace it. FX off leaves it out with the other automatic specials. The Wild riser's strobe
+ends at the dip and shares the drop's one intense event.
 
 Unknown or missing keys, out-of-range values and a name that does not match the file are
 rejected at startup, with the file and the key's path (such as `effect.size`) named.
