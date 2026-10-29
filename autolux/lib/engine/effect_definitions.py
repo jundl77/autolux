@@ -87,7 +87,7 @@ OverlayMetaTable = Mapping[tuple[str, str], OverlayMeta]
 DEFAULT_AUTOLOOP_META: AutoloopMetaTable = {
     ('atmospheric', 'dawn'): AutoloopMeta(1, 'sweep', 'mixed'),
     ('breakdown', 'drift_apart'): AutoloopMeta(1, 'sweep', 'beam'),
-    ('buildup', 'stutter'): AutoloopMeta(3, 'snap', 'wash'),
+    ('buildup', 'stutter'): AutoloopMeta(3, 'sweep', 'wash'),
     ('drop', 'kick'): AutoloopMeta(3, 'snap', 'wash'),
 }
 
@@ -102,7 +102,8 @@ STROBE_RATE_HZ = 8.0
 STARFIRE_MAX_STROBE_HZ = 10.0
 STARFIRE_MAX_STROBE_BURST_SECONDS = 60.0
 STROBE_BURST_SECONDS = 1.0
-STROBE_COOLDOWN_SECONDS = 60.0
+STROBE_BURST_BARS = 2
+STROBE_COOLDOWN_SECONDS = 300.0
 CROSSFADE_BEATS = 1.0
 MAX_STROBE_COOLDOWN_SECONDS = 600.0
 DIGITAL_SILENCE_SECONDS = 2.0

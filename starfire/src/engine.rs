@@ -6,11 +6,11 @@ use std::rc::Rc;
 use anyhow::{Context, Result, ensure};
 use serde::Serialize;
 
-use crate::clock::{BeatFact, ClockSample, MusicalClock, validate_time};
+use crate::clock::{BeatFact, ClockSample, MusicalClock, SECONDS_PER_MINUTE, validate_time};
 use crate::cue::{
     CueSample, CueTimeline, DueStep, InstanceState, MAX_OVERLAYS, MAX_PREROLL_BEATS, MAX_ROTATION,
 };
-use crate::fixtures::FixtureRig;
+use crate::fixtures::{FixtureRig, PanMemory};
 use crate::gdtf::{GdtfProfile, SNAP_POINT};
 use crate::intensity;
 use crate::model::{
@@ -156,12 +156,13 @@ pub struct Engine {
     releasing: Vec<ReleasingSpecial>,
     special_maps: BTreeMap<String, CellMap>,
     override_order: u64,
-    master: MasterFade,
+    master: Glide,
     group_masters: BTreeMap<String, f64>,
-    normalized_rms_level: Option<f64>,
+    normalized_rms_level: Option<Glide>,
     blackout: bool,
     script_error: Option<String>,
     last_output_states: FixtureStates,
+    pan_memory: PanMemory,
     paused_at_seconds: Option<f64>,
     default_crossfade_beats: f64,
     strobe_max_rate_hz: f64,
@@ -213,12 +214,13 @@ impl Engine {
             releasing: Vec::new(),
             special_maps,
             override_order: 0,
-            master: MasterFade::steady(1.0),
+            master: Glide::steady(1.0),
             group_masters: BTreeMap::new(),
             normalized_rms_level: None,
             blackout: false,
             script_error: None,
             last_output_states,
+            pan_memory: PanMemory::new(),
             paused_at_seconds: None,
             default_crossfade_beats: 0.0,
             strobe_max_rate_hz: MAX_STROBE_HZ,
@@ -335,7 +337,17 @@ impl Engine {
             }
             Command::SetNormalizedRmsLevel { level } => {
                 validate_unit(*level, "normalized RMS level")?;
-                self.normalized_rms_level = Some(*level);
+                // The level arrives once a beat; a loop scaling dimmers or phaser sizes by it
+                // would jump every beat, so it glides to each reading over one beat instead.
+                let beat_seconds = if self.clock.tempo_bpm() > 0.0 {
+                    SECONDS_PER_MINUTE / self.clock.tempo_bpm()
+                } else {
+                    0.0
+                };
+                match &mut self.normalized_rms_level {
+                    Some(glide) => glide.retarget(at_seconds, *level, beat_seconds),
+                    None => self.normalized_rms_level = Some(Glide::steady(*level)),
+                }
             }
             Command::SetSpeed { multiplier } => self.clock.set_speed(at_seconds, *multiplier)?,
             Command::SetBlackout { enabled } => self.blackout = *enabled,
@@ -489,7 +501,9 @@ impl Engine {
             beats_per_bar: time.beats_per_bar,
             autoloop_elapsed_beats: 0.0,
             autoloop_speed_scaled_elapsed_beats: 0.0,
-            normalized_rms_level: self.normalized_rms_level,
+            normalized_rms_level: self
+                .normalized_rms_level
+                .map(|glide| glide.level_at(seconds)),
             intensity: self.intensity,
             bpm: self.clock.tempo_bpm(),
             strobe_max_hz: self.strobe_rate_cap_hz(),
@@ -738,13 +752,13 @@ impl Engine {
             .filter_map(|active| active.posed.as_ref().map(|rig| (active.order, rig)))
             .max_by_key(|(order, _)| *order)
             .map_or(&self.rig, |(_, rig)| rig);
-        let universes = match rig.encode(&encoded_states) {
+        let universes = match rig.encode_following(&encoded_states, &mut self.pan_memory) {
             Ok(universes) => universes,
             Err(error) => {
                 self.stop_on_script_error(&error);
                 states = self.dark_states();
                 self.rig
-                    .encode(&states)
+                    .encode_following(&states, &mut self.pan_memory)
                     .context("encode safe darkness after render failure")?
             }
         };
@@ -857,7 +871,22 @@ impl Engine {
                 continue;
             }
             if let Some(previous) = self.last_output_states.get(id) {
-                state.pan = step_toward(previous.pan, state.pan, max_step);
+                state.pan = match self.rig.pan_turn(id) {
+                    // Whole turns apart throw the same beam: slew the short way round and come
+                    // back inside 0..1 by a turn, which the encoder's pan memory follows.
+                    Some(turn) => {
+                        let target = state.pan + ((previous.pan - state.pan) / turn).round() * turn;
+                        let stepped = step_toward(previous.pan, target, max_step);
+                        if stepped > 1.0 {
+                            (stepped - turn).max(0.0)
+                        } else if stepped < 0.0 {
+                            (stepped + turn).min(1.0)
+                        } else {
+                            stepped
+                        }
+                    }
+                    None => step_toward(previous.pan, state.pan, max_step),
+                };
                 state.tilt = step_toward(previous.tilt, state.tilt, max_step);
             }
         }
@@ -1539,14 +1568,14 @@ impl ActivePalette {
 }
 
 #[derive(Clone, Copy, Debug)]
-struct MasterFade {
+struct Glide {
     from: f64,
     to: f64,
     start_seconds: f64,
     duration_seconds: f64,
 }
 
-impl MasterFade {
+impl Glide {
     fn steady(level: f64) -> Self {
         Self {
             from: level,

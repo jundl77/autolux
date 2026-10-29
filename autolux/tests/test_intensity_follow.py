@@ -36,9 +36,7 @@ from autolux.lib.engine.track_mood import (
     ],
 )
 def test_a_drop_reads_the_level_from_the_drive_and_its_loudness(drive, loud_drop, level):
-    follow = FollowMusic()
-    follow.loud_drop = loud_drop
-    assert follow.level_at_drop(drive) == level
+    assert FollowMusic().level_at_drop(drive, loud_drop) == level
 
 
 @pytest.mark.parametrize(
@@ -147,10 +145,10 @@ async def test_an_auto_level_reaches_the_specials_gate_through_the_shared_settin
     controller = EffectController(RecordingStarfireClient(), settings=lambda: control.settings)
     control.commands.put_nowait({'action': 'intensity_auto', 'enabled': True})
     await control.apply_pending(light)
-    assert controller._intense_blocked(control.settings, 0.0) is None
+    assert controller.intense_blocked(control.settings, 0.0) is None
 
     light.on_auto_intensity(INTENSITY_CALM, 'drive -0.52')
-    assert 'at or below' in controller._intense_blocked(control.settings, 0.0)
+    assert 'at or below' in controller.intense_blocked(control.settings, 0.0)
 
 
 async def test_a_mood_that_commits_at_the_section_after_an_early_drop_still_sets_the_level():

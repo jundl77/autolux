@@ -3,29 +3,27 @@
 -- movement: sweep
 -- texture: beam
 local palette = sf.palette()
-local FAN_DEGREES, FAN_MEASURE, RISE_DEGREES = 30, 8, 15
-local WASH_HOLD, WASH_RISE = 0.3, 0.4
-local STRIP_PEAK, STRIP_GLOW, MOVER_PEAK = 0.6, 0.25, 0.9
-local DOT_SHARE = 0.19
+local WIDE_DEGREES, TIGHT_DEGREES, LIFT_DEGREES = 25, 3, 20
+local STRIP_TOP, STRIP_GLOW, DOT_SHARE, STRIP_START = 0.6, 0.25, 0.19, 0.2
 
 return {
     render = function(ctx)
         local build = sf.build(ctx)
-        local converge = sf.lerp(0.5 * build.tension, 1, build.finale)
-        local opening = (1 - converge) * sf.osc.sine(sf.section_beats(ctx), FAN_MEASURE, 1, 0)
+        local washes, roll = sf.wash_build(ctx, build, { pattern = "saw" })
+        local converge = sf.lerp(roll.climb, 1, build.finale)
         local movers = sf.group("movers")
-        local held_back = (WASH_HOLD + WASH_RISE * build.finale) * sf.lerp(0.4, 1, build.tension)
         return sf.scene {
-            sf.colour(sf.all(), palette.primary),
-            sf.dimmer(sf.group("wash"), held_back),
+            washes,
+            sf.colour(sf.group("strip"), palette.primary),
             sf.each(sf.group("strip"), function(pixel, index, count)
-                local dot = math.max(STRIP_GLOW, sf.mirrored_spot(index, count, opening, DOT_SHARE))
-                return sf.dimmer(pixel, STRIP_PEAK * build.drive * dot)
+                local dot = math.max(STRIP_GLOW, sf.mirrored_spot(index, count, 0, DOT_SHARE))
+                return sf.dimmer(pixel, STRIP_TOP * sf.lerp(STRIP_START, 1, roll.climb) * dot)
             end),
-            sf.dimmer(movers, MOVER_PEAK * build.drive),
+            sf.colour(movers, roll.mover_colour),
+            sf.dimmer(movers, roll.movers),
             sf.phaser(movers, ctx, {
-                shape = "fan", size = FAN_DEGREES * opening, at = sf.shared_focus(movers),
-                centre_tilt = RISE_DEGREES * build.drive
+                shape = "circle", size = sf.lerp(WIDE_DEGREES, TIGHT_DEGREES, converge), measure = build.measure,
+                at = sf.shared_focus(movers), centre_tilt = LIFT_DEGREES * converge
             })
         }
     end

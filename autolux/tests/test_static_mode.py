@@ -7,10 +7,12 @@ from autolux.lib.engine.effect_controller import (
 )
 from autolux.lib.engine.effect_definitions import (
     PREFERRED_AUTOLOOPS,
+    STANDBY_AUTOLOOP,
     LightIntent,
 )
 from autolux.lib.engine.special_policy import Special, SpecialCapabilities
 from autolux.lib.engine.static_mode import (
+    AUTOMATION_REST_ID,
     HIGHLIGHT_ID,
     STATIC_FLOOR_PRIORITY,
     STATIC_GROUP_PRIORITY,
@@ -308,7 +310,7 @@ async def test_a_colour_look_carries_a_visible_dimmer_under_a_dark_loop():
     assert overrides(lighting)[-1]['value']['values']['intensity'] == 0.4
 
 
-async def test_standby_during_static_keeps_the_operator_look_and_resends_it():
+async def test_standby_during_static_leaves_the_operator_look_untouched():
     decoder = FakeDecoder()
     light, _, _, lighting = static_engine(decoder=decoder, queue=False)
     await beat_at_phase(light, decoder, 0, decision='breakdown')
@@ -318,7 +320,8 @@ async def test_standby_during_static_keeps_the_operator_look_and_resends_it():
 
     light.on_digital_silence()
     assert light.mode == 'static'
-    assert overrides(lighting)[-1]['value']['id'] == 'static_all'
+    assert [o for o in overrides(lighting) if o['kind'] == 'clear_override'] == []
+    assert lighting.selected_autoloop == STANDBY_AUTOLOOP
     light.on_signal_return()
     light.on_sound_start()
     await beat_at_phase(light, decoder, 0, decision='drop')
@@ -768,3 +771,95 @@ async def test_the_show_publishes_the_highlight_and_rig_and_clears_it_with_the_o
         }
     )
     assert snapshot['highlight'] is None, 'paused, the engine refuses what the bridge let through'
+
+
+async def test_a_panel_pause_under_static_keeps_starfire_rendering_and_the_highlight():
+    light, _, clock, lighting = static_engine()
+    light.static_looks = StaticLooks(lighting, HALL, clock=clock)
+    light.static_looks.look('all', colour=(1.0, 0.0, 0.0))
+    await light.sync_static()
+    light.static_looks.highlight({'fixture': 'par'})
+    lighting.events.clear()
+
+    light.pause()
+    assert light.paused and not light.rendering_paused
+    light.send_renderer_settings()
+    assert [c['paused'] for _, c in sent(lighting, 'set_paused')] == [False]
+    assert sent(lighting, 'set_master') == [] and overrides(lighting) == rests(lighting)
+    assert light.static_looks.highlighted is not None
+    await light.resume()
+    assert [c['paused'] for _, c in sent(lighting, 'set_paused')] == [False]
+
+
+async def test_selecting_static_while_paused_renders_it_and_deselecting_pauses_again():
+    light, _, _, lighting = static_engine()
+    light.pause()
+    lighting.events.clear()
+
+    light.static_looks.preset('red')
+    await light.sync_static()
+    assert [c['paused'] for _, c in sent(lighting, 'set_paused')] == [False]
+    lighting.events.clear()
+    light.static_looks.clear()
+    await light.sync_static()
+    assert [c['paused'] for _, c in sent(lighting, 'set_paused')] == [True]
+    assert light.paused and light.rendering_paused
+
+
+def rests(lighting):
+    return [
+        o
+        for o in overrides(lighting)
+        if AUTOMATION_REST_ID in (o.get('id'), o.get('value', {}).get('id'))
+    ]
+
+
+@pytest.mark.parametrize('cause', ['panel', 'music'])
+async def test_a_pause_under_static_rests_the_base_still_and_dark_and_play_restores_the_held_loop(
+    cause,
+):
+    decoder = FakeDecoder()
+    light, _, _, lighting = static_engine(decoder=decoder, queue=False)
+    await beat_at_phase(light, decoder, 0, decision='breakdown')
+    held = lighting.selected_autoloop
+    assert held not in (None, STANDBY_AUTOLOOP)
+    light.static_looks.look('movers', colour=(1.0, 0.0, 0.0))
+    await light.sync_static()
+    lighting.events.clear()
+
+    if cause == 'panel':
+        light.pause()
+    else:
+        light.on_digital_silence()
+    assert lighting.selected_autoloop == STANDBY_AUTOLOOP, 'the still loop under the look'
+    [rest] = rests(lighting)
+    assert rest['value']['values'] == {'intensity': 0.0}
+    assert rest['value']['target'] == 'all'
+    assert rest['value']['priority'] < STATIC_FLOOR_PRIORITY
+    lighting.events.clear()
+
+    if cause == 'panel':
+        await light.resume()
+    else:
+        light.on_signal_return()
+    assert lighting.selected_autoloop == held
+    assert rests(lighting) == [{'kind': 'clear_override', 'id': AUTOMATION_REST_ID}]
+    assert light.mode == 'static' and overrides(lighting) == rests(lighting)
+
+
+async def test_leaving_static_while_paused_drops_the_rest_and_holds_the_paused_loop():
+    decoder = FakeDecoder()
+    light, _, _, lighting = static_engine(decoder=decoder, queue=False)
+    await beat_at_phase(light, decoder, 0, decision='breakdown')
+    held = lighting.selected_autoloop
+    light.pause()
+    light.static_looks.preset('red')
+    await light.sync_static()
+    assert lighting.selected_autoloop == STANDBY_AUTOLOOP
+    lighting.events.clear()
+
+    light.static_looks.clear()
+    await light.sync_static()
+    assert lighting.selected_autoloop == held
+    assert {'kind': 'clear_override', 'id': AUTOMATION_REST_ID} in overrides(lighting)
+    assert [c['paused'] for _, c in sent(lighting, 'set_paused')] == [True]

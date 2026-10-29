@@ -58,9 +58,12 @@ Link, telemetry and hardware faults appear only when they need attention.
 - **Analysis degraded:** inspect the GPU fault and timing panels. Rhythm continues
   while the analysis worker recovers.
 
-The 14-second show delay is applied once. RX jitter and audio-device buffering add
-latency to audio and its watermarked lighting together. DMX scheduling lateness
-measures software scheduling, not the physical response time of fixtures.
+The 24-second show delay (`PLAYBACK_DELAY_SEC` in `autolux/lib/audio_config.py`, sent
+to Radius TX at login) is applied once. It must exceed the analysis chain latency the
+engine logs at startup; the difference is the lead each cue reaches Starfire with. RX
+jitter and audio-device buffering add latency to audio and its watermarked lighting
+together. DMX scheduling lateness measures software scheduling, not the physical
+response time of fixtures.
 
 ## Fixture patch
 

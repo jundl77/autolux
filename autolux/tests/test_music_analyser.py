@@ -312,6 +312,26 @@ async def test_two_seconds_below_the_digital_silence_floor_mean_the_source_stopp
         assert analyser._rhythm.resets >= 2, 'the beat tracker restarts with the signal'
 
 
+async def test_the_zeros_reach_standby_while_the_media_session_reports_live():
+    from autolux.lib.engine.effect_definitions import ShowSettings
+
+    settings = ShowSettings(digital_silence_seconds=3.0)
+    analyser = MusicAnalyser(
+        sample_rate=44100,
+        buffer_size=256,
+        handler=_StubHandler(),
+        clock=VirtualClock(),
+        settings=lambda: settings,
+        zeros_mark_tracks=lambda: False,
+    )
+    analyser._rhythm = _FakeRhythm()
+    for _ in range(round(3.0 * 44100 / 256) + 1):
+        await analyser.analyse(np.zeros(256, dtype=np.float32))
+    assert analyser.in_standby
+    await analyser.analyse(np.full(256, 0.2, dtype=np.float32))
+    assert not analyser.in_standby
+
+
 async def test_a_raised_silence_setting_tolerates_a_true_zero_break_read_at_use_time():
     from autolux.lib.engine.effect_definitions import ShowSettings
 

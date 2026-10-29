@@ -181,7 +181,7 @@ function sf.section_beats(ctx)
     return ctx.section_elapsed_beats or ctx.autoloop_elapsed_beats
 end
 
-local TENSION_HALF_BEATS = 48
+local TENSION_HALF_BEATS = 24
 
 function sf.tension(ctx, half_beats)
     half_beats = half_beats or TENSION_HALF_BEATS
@@ -279,13 +279,14 @@ local function rotate(v, axis, degrees)
         v[3] * c + k[3] * s + axis[3] * along }
 end
 
-function sf.aim_offset(cell, spread_degrees, elevation_degrees, beam)
+-- The beam sf.aim_offset aims along, or nil for a cell focused on itself.
+local function offset_beam(cell, spread_degrees, elevation_degrees, beam)
     assert(finite(spread_degrees) and finite(elevation_degrees), "aim offsets must be finite degrees")
-    local x, y, z = sf.position(cell)
     if beam == nil then
+        local x, y, z = sf.position(cell)
         local focus_x, focus_y, focus_z = sf.focus(cell)
         beam = { focus_x - x, focus_y - y, focus_z - z }
-        if norm(beam) == 0 then return sf.aim(cell, x, y, z) end
+        if norm(beam) == 0 then return nil end
     else
         assert(type(beam) == "table" and finite(beam[1]) and finite(beam[2]) and finite(beam[3])
             and norm(beam) > 0, "a rest beam must be a finite nonzero {dx, dy, dz}")
@@ -294,8 +295,17 @@ function sf.aim_offset(cell, spread_degrees, elevation_degrees, beam)
     local spread_axis = cross(elevation_axis, beam)
     local scale = (beam[2] < 0 and 1 or -1) / norm(spread_axis)
     spread_axis = { spread_axis[1] * scale, spread_axis[2] * scale, spread_axis[3] * scale }
-    beam = rotate(rotate(beam, elevation_axis, elevation_degrees), spread_axis, spread_degrees)
+    return rotate(rotate(beam, elevation_axis, elevation_degrees), spread_axis, spread_degrees)
+end
+
+local function aim_along(cell, beam)
+    local x, y, z = sf.position(cell)
+    if beam == nil then return sf.aim(cell, x, y, z) end
     return sf.aim(cell, x + beam[1], y + beam[2], z + beam[3])
+end
+
+function sf.aim_offset(cell, spread_degrees, elevation_degrees, beam)
+    return aim_along(cell, offset_beam(cell, spread_degrees, elevation_degrees, beam))
 end
 
 function sf.aim_direction(cell, dx, dy, dz)
@@ -323,6 +333,12 @@ local STATIC_SHAPES = { fan = true, cross = true }
 -- Powers of two divide a phrase, so every member is back at its start on each phrase line.
 local MEASURES = { [1] = true, [2] = true, [4] = true, [8] = true, [16] = true, [32] = true }
 
+local SPIN_MEASURES = { [4] = true, [8] = true, [16] = true }
+local FULL_CIRCLE_DEGREES = 360
+-- A spinning member's look fades out over the first quarter turn and back in over the last, so
+-- the circle runs round its focus aim, which sf.pan_reach measures from.
+local SPIN_LOOK_FADE_TURNS = 0.25
+
 function sf.phaser(target, ctx, spec)
     local shape = PHASER_SHAPES[spec.shape]
     assert(shape ~= nil, "unknown phaser shape")
@@ -346,6 +362,8 @@ function sf.phaser(target, ctx, spec)
         "phaser at must be finite {x, y, z} metres")
     local wings = spec.wings
     if wings == nil then wings = spec.shape ~= "tilt_wave" end
+    local spun, spin_degrees
+    if spec.spin ~= nil then spun, spin_degrees = sf.spin(target, ctx, spec.spin) end
 
     local aimable_members, aimable = {}, {}
     for _, cell in ipairs(sf.members(target)) do
@@ -391,11 +409,47 @@ function sf.phaser(target, ctx, spec)
             local x, y, z = sf.position(cell)
             beam = { at[1] - x, at[2] - y, at[3] - z }
         end
-        local pan, tilt = sf.aim_offset(cell, size * spread + centre_pan,
-            tilt_size * elevation + centre_tilt, beam)
+        local look = 1
+        if cell == spun then
+            look = 1 - math.min(1, math.abs(spin_degrees) / (SPIN_LOOK_FADE_TURNS * FULL_CIRCLE_DEGREES))
+        end
+        beam = offset_beam(cell, look * (size * spread + centre_pan),
+            look * (tilt_size * elevation + centre_tilt), beam)
+        if cell == spun and beam ~= nil then beam = rotate(beam, Z_AXIS, -spin_degrees) end
+        local pan, tilt = aim_along(cell, beam)
         effects[#effects + 1] = sf.pan_tilt(sf.fixture(cell), pan, tilt)
     end
     return effects
+end
+
+-- Spin: one member's beam turns a full circle about the vertical and unwinds, eased, over
+-- `measure` beats from `at` beats into every `every`-beat period of section time. Returns that
+-- member and its heading offset in degrees (clockwise seen from above), or nil between spins;
+-- a phaser with `spin = spec` turns that member's look by it. Only members whose pan reaches a
+-- full circle one way from the focus aim take part, so no head meets an end stop mid-turn;
+-- sf.random picks the member and, where both ways reach, the way, per period.
+function sf.spin(target, ctx, spec)
+    local measure, every, at = spec.measure, spec.every or 64, spec.at or 0
+    assert(SPIN_MEASURES[measure], "spin measure must be 4, 8 or 16 beats")
+    assert(finite(every) and finite(at) and at >= 0 and at + measure <= every,
+        "a spin must fit inside its period")
+    local elapsed = sf.section_beats(ctx)
+    local period = math.floor(elapsed / every)
+    local progress = (elapsed - period * every - at) / measure
+    if progress < 0 or progress >= 1 then return nil end
+    local able = {}
+    for _, cell in ipairs(sf.members(target)) do
+        local clockwise, anticlockwise = sf.pan_reach(cell)
+        if clockwise ~= nil and math.max(clockwise, anticlockwise) >= FULL_CIRCLE_DEGREES then
+            able[#able + 1] = { cell = cell, clockwise = clockwise >= FULL_CIRCLE_DEGREES,
+                anticlockwise = anticlockwise >= FULL_CIRCLE_DEGREES }
+        end
+    end
+    if #able == 0 then return nil end
+    local chosen = able[1 + math.floor(sf.random(ctx, period) * #able)]
+    local sense = chosen.clockwise and 1 or -1
+    if chosen.clockwise and chosen.anticlockwise and sf.random(ctx, period, 1) < 0.5 then sense = -1 end
+    return chosen.cell, sense * FULL_CIRCLE_DEGREES * (1 - math.cos(FULL_TURN * progress)) / 2
 end
 
 -- Show helpers
@@ -465,9 +519,9 @@ function sf.drop_levels(ctx, floor_quiet, floor_loud)
     return sf.loudness_gain(energy), sf.lerp(floor_quiet, floor_loud, energy), energy
 end
 
-local FINALE_BEATS, EASE_BEATS, LADDER_BEATS = 16, 8, 8
-local DRIVE_FLOOR, DRIVE_GAIN = 0.25, 0.65
-local STAGE_TENSIONS = { 1 / 3, 1 / 2 }
+local FINALE_BEATS, FULL_BEATS, EASE_BEATS, LADDER_BEATS = 16, 4, 8, 8
+local DRIVE_FLOOR, DRIVE_GAIN = 0.35, 0.65
+local STAGE_TENSIONS = { 1 / 2, 2 / 3 }
 
 local function stage_of(tension)
     return tension < STAGE_TENSIONS[1] and 0 or tension < STAGE_TENSIONS[2] and 1 or 2
@@ -495,7 +549,8 @@ function sf.build(ctx)
     if left ~= nil then
         local known = ctx.next_known_at
         span = known and math.min(FINALE_BEATS, left + sf.section_beats(ctx) - known) or FINALE_BEATS
-        finale = ramp_to_dip(left, span)
+        local full = math.min(FULL_BEATS, span / 2)
+        finale = ramp_to_dip(left - full, span - full)
         drive = drive + (1 - drive) * finale
     elseif ctx.next_intent ~= nil then
         drive = drive * (1 - 0.5 * sf.finale(ctx, EASE_BEATS))
@@ -516,16 +571,128 @@ function sf.drop_within(build, beats)
     return build.left ~= nil and build.left <= beats
 end
 
+local HALF_STAGE_BEATS, LAST_BAR_BEATS, UNCUED_STAGE_BEATS = 16, 4, 32
+local WHITE_FROM_BEATS, WHITE_FULL_BEATS = 16, 4
+local WASH_TOP, CALM_SCALE, LEVEL_START_SHARE = 0.9, 2 / 3, 0.25
+local FLOOR_START, FLOOR_END, FLASH_START, FLASH_TOP = 0.15, 0.35, 0.55, 0.7
+local MOVER_TOP, MOVER_HOLD, MOVER_STAB_FLOOR = 0.6, 0.5, 0.3
+local ATTACK_BEATS = 0.1
+local STAB_DECAY_SHARE, SAW_CUT_FLASH_BEATS, SAW_HOLD_BEATS, SAW_SWELL = 1, 1, 1 / 8, 0.75
+local PAIRED_FROM_WASHES = 6
+-- Mirrors INTENSITY_CALM in intensity.rs: Calm takes the softer roll.
+local CALM_INTENSITY = 0.3
+
+-- A short ramp up, then a decay over `over` beats, so a flash never steps on or cuts off.
+-- A saw cut takes no ramp: it flashes from the top of its swell.
+local function decay(beats, interval, over, attack)
+    attack = attack or ATTACK_BEATS
+    local into = beats % interval
+    if into < attack then return into / attack end
+    return math.max(0, 1 - (into - attack) / (over - attack)) ^ 2
+end
+
+-- The drop's phrase takes over on the bar line after the cue arrives, so a late cue never jumps mid-flash.
+local function phrase_left(ctx, build)
+    local known, bar = ctx.next_known_at, ctx.beats_per_bar
+    if build.left == nil or (known ~= nil and sf.section_beats(ctx) < (math.floor(known / bar) + 1) * bar) then
+        return nil
+    end
+    return build.left
+end
+
+local function flash_interval(ctx, left)
+    local interval = sf.section_beats(ctx) >= UNCUED_STAGE_BEATS and 1 or 2
+    return left ~= nil and left <= HALF_STAGE_BEATS and 0.5 or interval
+end
+
+local function saw_length(ctx, build, left)
+    local uncued, next = 2 * build.measure, ctx.beats_until_next
+    if left == nil then return uncued, sf.section_beats(ctx) % uncued end
+    local cued = next > 64 and 16 or next > 32 and 8 or next > 8 and 4 or next > LAST_BAR_BEATS and 2 or 1
+    local length = math.min(uncued, cued)
+    return length, (length - next % length) % length
+end
+
+local function outside_in(index, count)
+    return index <= count - index + 1 and 2 * (index - 1) or 2 * (count - index) + 1
+end
+
+local function ping_pong(step, units)
+    local cycle = math.max(1, 2 * units - 2)
+    local at = step % cycle
+    return at < units and at or cycle - at
+end
+
+-- Roll units alternate between the odd and even ones, so a seeded pick never repeats back to back.
+local function flashing_unit(ctx, pattern, step, units)
+    if pattern ~= "roll" or units < 2 then return ping_pong(step, units) end
+    local parity = step % 2
+    local choices = (units - parity + 1) // 2
+    return parity + 2 * math.floor(sf.random(ctx, step) * choices)
+end
+
+-- A buildup's washes: one wash at a time flashes off a lit background, faster as the build climbs and
+-- phrase-locked to a cued drop; the movers' counterpoint level comes back with it.
+function sf.wash_build(ctx, build, spec)
+    local pattern, palette = spec.pattern, sf.palette()
+    assert(pattern == "roll" or pattern == "chase" or pattern == "saw", "wash build pattern is roll, chase or saw")
+    local calm = render_intensity <= CALM_INTENSITY
+    local scale = calm and CALM_SCALE or 1
+    local left = phrase_left(ctx, build)
+    local climb = (build.drive - DRIVE_FLOOR) / DRIVE_GAIN
+    local floor = scale * sf.lerp(FLOOR_START, FLOOR_END, climb)
+    local peak = scale * sf.lerp(FLASH_START, FLASH_TOP, climb)
+    local last_bar, together = left ~= nil and left <= LAST_BAR_BEATS, left ~= nil and left <= 1
+    local interval = flash_interval(ctx, left)
+    local beats, swell, length = ctx.beat_position, 0, nil
+    local step, flash = math.floor(beats / interval), decay(beats, interval, interval)
+    if pattern == "saw" then
+        local into
+        length, into = saw_length(ctx, build, left)
+        swell = SAW_SWELL * math.min(1, into / (length - SAW_HOLD_BEATS))
+        step = math.floor((sf.section_beats(ctx) + (length - into)) / length)
+        flash = sf.section_beats(ctx) >= length and decay(into, length, math.min(length, SAW_CUT_FLASH_BEATS), 0) or 0
+    end
+    local whiten = (left == nil or calm) and 0 or math.max(0, math.min(1,
+        (WHITE_FROM_BEATS - left) / (WHITE_FROM_BEATS - WHITE_FULL_BEATS)))
+    local hit = spec.stab and whiten == 0 and step % 2 == 1 and palette.secondary or palette.primary
+    hit = sf.mix(hit, sf.white(), whiten)
+    local wash, base = sf.group("wash"), floor + (peak - floor) * swell
+    local function lit(target, f)
+        return { sf.colour(target, sf.mix(palette.primary, hit, f)), sf.dimmer(target, base + (peak - base) * f) }
+    end
+    if together then peak = scale * WASH_TOP end
+    local washes = { lit(wash, together and flash or 0) }
+    if not together then
+        washes[2] = sf.each(wash, function(member, index, count)
+            local paired = count >= PAIRED_FROM_WASHES
+            local units = paired and math.ceil(count / 2) or count
+            local unit = paired and math.min(index, count - index + 1) - 1 or outside_in(index, count)
+            return unit == flashing_unit(ctx, pattern, step, units) and lit(member, flash) or {}
+        end)
+    end
+    local movers = MOVER_HOLD
+    if pattern == "saw" then
+        movers = sf.lerp(MOVER_HOLD, MOVER_TOP, flash)
+    elseif interval < 1 then
+        movers = sf.lerp(MOVER_STAB_FLOOR, MOVER_TOP,
+            decay(beats - interval / 2, 2 * interval, STAB_DECAY_SHARE * 2 * interval))
+    end
+    return washes, {
+        flash = flash, interval = interval, climb = climb, colour = hit, movers = movers, last_bar = last_bar,
+        peak = WASH_TOP * scale * sf.lerp(LEVEL_START_SHARE, 1, climb),
+        mover_colour = sf.mix(palette.primary, sf.white(), pattern == "saw" and not calm and flash or 0),
+    }
+end
+
 function sf.overlay_progress(ctx)
     local length = ctx.overlay_duration_beats or 1
     return math.min(1, ctx.autoloop_elapsed_beats / length), length - ctx.autoloop_elapsed_beats
 end
 
-local LOOP_GROUPS = { "wash", "strip", "movers" }
-
-function sf.white_strobe(level, hz)
+function sf.white_strobe(level, hz, groups)
     local effects = {}
-    for _, name in ipairs(LOOP_GROUPS) do
+    for _, name in ipairs(groups) do
         local group = sf.group(name)
         effects[#effects + 1] = { sf.colour(group, sf.white()), sf.dimmer(group, level), sf.strobe(group, hz) }
     end

@@ -7,7 +7,7 @@ import random
 from collections.abc import Callable, Hashable, Sequence
 from typing import TYPE_CHECKING
 
-from autolux.lib.clients.starfire_client import StarfireClient
+from autolux.lib.clients.starfire_client import StarfireClient, special_target
 from autolux.lib.clock import SYSTEM_CLOCK, Clock
 from autolux.lib.engine.autoloop_policy import (
     MAXIMAL_ARRIVAL_OF_PEAK,
@@ -27,6 +27,7 @@ from autolux.lib.engine.effect_definitions import (
     MAX_STROBE_COOLDOWN_SECONDS,
     STANDBY_AUTOLOOP,
     STANDBY_CROSSFADE_SECONDS,
+    STROBE_BURST_BARS,
     STROBE_GATE_INTENSITY,
     AutoloopMetaTable,
     AutoloopTable,
@@ -53,7 +54,33 @@ LOGGER = logging.getLogger(__name__)
 
 SPECIAL_PRIORITY = 100
 SPECIAL_ID = 'special'
+DROP_ACCENT_ID = 'drop_arrival'
 OPERATOR_FADE_SECONDS = 0.1
+
+
+def drop_strobe_seconds(
+    bpm: float | None, settings: ShowSettings, beats_per_bar: int | None
+) -> float:
+    # Starfire scales its burst cap by intensity and holds a longer strobe dark, never steady.
+    seconds = min(
+        settings.strobe_burst_seconds, settings.strobe_max_burst_seconds * settings.intensity
+    )
+    if not bpm or bpm <= 0 or not beats_per_bar:
+        return seconds
+    beats = min(STROBE_BURST_BARS * beats_per_bar, math.floor(seconds * bpm / 60.0))
+    return beats * 60.0 / bpm if beats >= 1 else seconds
+
+
+def strobe_override(special: Special, duration_seconds: float, settings: ShowSettings) -> dict:
+    # The rate ctx.strobe_max_hz gives the overlays: the rate cap scaled by intensity.
+    rate = min(special.strobe_hz, settings.strobe_max_rate_hz) * settings.intensity
+    return {
+        'id': DROP_ACCENT_ID,
+        'target': special_target(special.group),
+        'values': {'strobe_hz': rate},
+        'priority': SPECIAL_PRIORITY,
+        'lifetime': {'kind': 'seconds', 'duration_seconds': duration_seconds},
+    }
 
 
 def drop_strobe_cooldown_seconds(settings: ShowSettings) -> float:
@@ -149,6 +176,10 @@ class EffectController:
         if self.palette_listener is not None:
             self.palette_listener()
 
+    @property
+    def entered_autoloop(self) -> tuple[str, str] | None:
+        return None if self._entered is None else (self._entered[1].bank, self._entered[1].autoloop)
+
     def _palette_for_current_look(self) -> str | None:
         plan = self._entered_plan()
         if plan is not None:
@@ -178,8 +209,13 @@ class EffectController:
             return None
         return self._director.plan_for(self._entered_moment)
 
-    def plan_cue(self, moment: Hashable, request: SectionRequest) -> CueSection:
-        plan = self._director.plan(moment, request, self._settings(), self._palette_base(), self)
+    def plan_cue(
+        self, moment: Hashable, request: SectionRequest, intensity: float | None = None
+    ) -> CueSection:
+        settings = self._settings()
+        if intensity is not None:
+            settings = dataclasses.replace(settings, intensity=intensity)
+        plan = self._director.plan(moment, request, settings, self._palette_base(), self)
         self._book(moment, plan)
         LOGGER.info(
             '[lighting] cue | intent=%s start=%d | looks=%s | palette=%s | overlays=%s',
@@ -236,9 +272,6 @@ class EffectController:
     def _release_booking(self, moment: Hashable) -> None:
         self._intense_at = {key: at for key, at in self._intense_at.items() if key != moment}
         self._special_policy.forget_accent(moment)
-
-    def intense_blocked(self, at: float, moment: Hashable) -> str | None:
-        return self._intense_blocked(self._settings(), at, moment)
 
     def accent_crowded(self, at: float, moment: Hashable) -> bool:
         return self._special_policy.accent_crowded(at, moment)
@@ -314,7 +347,9 @@ class EffectController:
         self._publish_palette()
         self._announce('[lighting] cue |', intent, choice, plan.cue.palette, plan.cue)
         if fresh:
-            self._enter_special(intent, bpm, context.arrival_of_peak, moment)
+            self._enter_special(
+                intent, bpm, context.arrival_of_peak, moment, plan.request.beats_per_bar
+            )
         else:
             self._restore_special()
         return True
@@ -409,6 +444,7 @@ class EffectController:
         )
 
     def enter_standby(self, bpm: float | None) -> None:
+        self.lighting_client.clear_override(DROP_ACCENT_ID)
         self.forget_special(instantaneous=True)
         bank, autoloop = STANDBY_AUTOLOOP
         crossfade_beats = bpm / 60.0 * STANDBY_CROSSFADE_SECONDS if bpm and bpm > 0 else 0.0
@@ -427,7 +463,7 @@ class EffectController:
         remaining = 0.0 if last is None else max(0.0, total - (now - last))
         return self._special_policy.cooldowns(now, total, remaining, self._capabilities)
 
-    def _intense_blocked(
+    def intense_blocked(
         self, settings: ShowSettings, at: float, moment: Hashable = None
     ) -> str | None:
         if settings.intensity <= STROBE_GATE_INTENSITY:
@@ -447,13 +483,14 @@ class EffectController:
         bpm: float | None,
         arrival_of_peak: float | None = None,
         moment: Hashable = None,
+        beats_per_bar: int | None = None,
     ) -> None:
         settings = self._settings()
         now = self.clock.monotonic()
         choice = self._special_policy.choose(
             intent,
             self.special_capabilities(),
-            self._intense_blocked(settings, now, moment),
+            self.intense_blocked(settings, now, moment),
             soft_drop=(
                 f'drop arrival {arrival_of_peak:.2f} below {MAXIMAL_ARRIVAL_OF_PEAK:.2f} '
                 'of the track peak'
@@ -462,9 +499,10 @@ class EffectController:
             ),
             now=now,
             moment=moment,
+            drop_strength=arrival_of_peak,
         )
         if not settings.fx_auto:
-            choice = dataclasses.replace(choice, special=None)
+            choice = dataclasses.replace(choice, special=None, strobes=())
         if choice.suppressed:
             LOGGER.info('[lighting] intense special suppressed | %s', choice.suppressed)
         if choice.intense:
@@ -475,6 +513,21 @@ class EffectController:
         else:
             self._special_policy.record(choice.special, now, self._capabilities, moment)
             self._fire_special(choice.special)
+        for strobe in choice.strobes:
+            self._strobe(strobe, bpm, settings, beats_per_bar)
+
+    def _strobe(
+        self, special: Special, bpm: float | None, settings: ShowSettings, beats_per_bar: int | None
+    ) -> None:
+        duration = drop_strobe_seconds(bpm, settings, beats_per_bar)
+        self.lighting_client.set_override(strobe_override(special, duration, settings))
+        if self.event_buffer:
+            self.event_buffer.add_effect(DROP_ACCENT_ID, 'ACCENT', duration_seconds=duration)
+            if not self._special_on:
+                self.event_buffer.set_special(
+                    special.name, special.group, duration_seconds=duration
+                )
+        LOGGER.info('[lighting] drop strobe %s | duration=%.1fs', special.name, duration)
 
     def _fire_special(self, special: Special) -> None:
         self.lighting_client.set_special(

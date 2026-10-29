@@ -314,7 +314,7 @@ Starfire is the lighting backend. Its live contract is
   audible-source clock accounts for output-device latency and starvation tails.
 - P95: Associate delayed audio with lighting at block assembly time, retaining
   that association during TCP backpressure. Initial show-delay fill transmits
-  silence. Keep the 14-second analysis lead separate from receiver buffering.
+  silence. Keep the 24-second analysis lead separate from receiver buffering.
 - P96: Starfire owns the TX worker by RAII; CLI owns Starfire and remote RX.
   Network, render and DMX workers support explicit CPU affinity. CPAL/Windows
   schedule audio callbacks; no ignored callback-affinity configuration remains.

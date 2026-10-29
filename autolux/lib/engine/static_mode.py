@@ -16,6 +16,8 @@ LOGGER = logging.getLogger(__name__)
 STATIC_PRIORITY = SPECIAL_PRIORITY + 1000
 STATIC_FLOOR_PRIORITY = STATIC_PRIORITY - 1
 STATIC_FLOOR_ID = 'static_floor'
+AUTOMATION_REST_PRIORITY = STATIC_FLOOR_PRIORITY - 1
+AUTOMATION_REST_ID = 'automation_rest'
 STATIC_GROUP_PRIORITY = STATIC_PRIORITY + 1
 STATIC_LOOK_PREFIX = 'static_'
 STATIC_SPECIAL_ID = 'static_special'
@@ -91,7 +93,8 @@ class StaticLooks:
         self._clock = clock
         self.rig = rig
         self._capabilities = capabilities
-        self._rows = {row.name: row for row in specials}
+        # The strobe row is the show's own drop accent; the operator never holds one.
+        self._rows = {row.name: row for row in specials if row.strobe_hz is None}
         self._looks: dict[str, dict] = {}
         self._special: Special | None = None
         self._floor = False

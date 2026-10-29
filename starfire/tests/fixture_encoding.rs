@@ -81,8 +81,9 @@ fn physical_profiles_keep_shutter_gobo_uv_and_program_controls_safe() {
             &[149, 85, 191, 255, 0, 160, 7, 191, 0, 0, 0, 0]
         );
     }
+    // 0.75 rounds the dimmer up to 192 and the colour down to 254: 192 x 254 is nearer.
     for start in [0, 8, 16, 24] {
-        assert_eq!(&frame[start..start + 8], &[255, 0, 255, 0, 191, 0, 0, 0]);
+        assert_eq!(&frame[start..start + 8], &[254, 0, 254, 0, 192, 0, 0, 0]);
     }
     assert!(frame[wheel_fixture.end..].iter().all(|byte| *byte == 0));
 }
@@ -92,14 +93,15 @@ fn blackout_preserves_movement_and_disables_all_device_programs() {
     let rig = rig(json!([fixture("chauvet_intimidator_spot_110_12ch", 1)]));
     let mut states = rig.empty_states();
     let state = states.get_mut("test").unwrap();
-    state.pan = 0.125;
+    // Pan 0.375 has no whole-turn alias nearer mid-range, so the encoder keeps it as given.
+    state.pan = 0.375;
     state.tilt = 0.875;
     state.intensity = 1.0;
     let lit_frame = rig.encode(&states).unwrap();
     states.get_mut("test").unwrap().intensity = 0.0;
     let dark_frame = rig.encode(&states).unwrap();
     assert_eq!(&dark_frame[&0][..4], &lit_frame[&0][..4]);
-    assert_eq!(&dark_frame[&0][..4], &[32, 0, 223, 255]);
+    assert_eq!(&dark_frame[&0][..4], &[96, 0, 223, 255]);
     assert_eq!(&dark_frame[&0][6..12], &[7, 0, 0, 0, 0, 0]);
 }
 
@@ -717,4 +719,54 @@ fn a_pan_range_declared_from_minus_k_aims_heading_zero_at_dmx_share_k_of_the_ran
             );
         }
     }
+}
+
+/// Light from a dimmer over RGB emitters is dimmer x colour. On an 8-bit dimmer a slow
+/// 10 % -> 30 % fade alone has 52 levels, each up to a 4 % jump; spread over both bytes it
+/// must step finer than the eye sees, stay on the requested level and keep the hue.
+#[test]
+fn a_slow_low_fade_on_an_eight_bit_dimmer_over_rgb_steps_finer_than_the_dimmer_byte() {
+    const FRAMES: u32 = 320;
+    const DIMMER: usize = 4;
+    const RED: usize = 0;
+    const GREEN: usize = 1;
+    const GREEN_SHARE: f64 = 0.55;
+    const FULL: f64 = 255.0;
+    let stage = support::stage();
+    let wash = support::stage_uuid("wash_left_outer");
+    let colour = Rgb {
+        red: 1.0,
+        green: GREEN_SHARE,
+        blue: 0.1,
+    };
+    let mut light = Vec::new();
+    for frame in 0..=FRAMES {
+        let level = 0.1 + 0.2 * f64::from(frame) / f64::from(FRAMES);
+        let mut states = stage.empty_states();
+        states.insert(
+            wash.clone(),
+            FixtureState {
+                intensity: level,
+                colour,
+                ..FixtureState::default()
+            },
+        );
+        let dmx = &stage.encode(&states).unwrap()[&0];
+        let emitted = f64::from(dmx[DIMMER]) * f64::from(dmx[RED]) / (FULL * FULL);
+        assert!((emitted - level).abs() <= 0.5 / FULL, "{level}: {emitted}");
+        let hue = f64::from(dmx[GREEN]) / f64::from(dmx[RED]);
+        assert!(
+            (hue - GREEN_SHARE).abs() < 0.01,
+            "{level}: green share {hue}"
+        );
+        light.push(emitted);
+    }
+    let largest_relative_step = light
+        .windows(2)
+        .map(|pair| (pair[1] - pair[0]).abs() / pair[0])
+        .fold(0.0, f64::max);
+    let mut levels = light.clone();
+    levels.dedup();
+    assert!(levels.len() > 250, "{} levels", levels.len());
+    assert!(largest_relative_step < 0.01, "{largest_relative_step}");
 }

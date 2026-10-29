@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
 import datetime
 import logging
 import threading
@@ -100,16 +101,18 @@ class MediaSessionListener:
         self._status: str | None = None
         self._position: tuple[int, float | None] | None = None
 
-    def start(self, show_loop: asyncio.AbstractEventLoop) -> bool:
+    def start(self, show_loop: asyncio.AbstractEventLoop) -> concurrent.futures.Future | None:
+        """The returned future fails if the watch dies; it is never resolved otherwise."""
         control = winrt_media_control()
         if control is None:
             LOGGER.info('[media] system media session unavailable; track cues come from the audio')
-            return False
+            return None
+        watching = concurrent.futures.Future()
         self._thread = threading.Thread(
-            target=self._run, args=(control, show_loop), name='media-session', daemon=True
+            target=self._run, args=(control, show_loop, watching), name='media-session', daemon=True
         )
         self._thread.start()
-        return True
+        return watching
 
     def stop(self) -> None:
         self._stopping = True
@@ -121,13 +124,13 @@ class MediaSessionListener:
         if self._thread is not None:
             self._thread.join(timeout=2.0)
 
-    def _run(self, control, show_loop: asyncio.AbstractEventLoop) -> None:
+    def _run(
+        self, control, show_loop: asyncio.AbstractEventLoop, watching: concurrent.futures.Future
+    ) -> None:
         try:
             asyncio.run(self._watch(control, show_loop))
-        except Exception:
-            LOGGER.exception(
-                '[media] media session listener stopped; track cues fall back to audio'
-            )
+        except Exception as error:  # noqa: BLE001 - raised on the show loop
+            watching.set_exception(error)
 
     async def _watch(self, control, show_loop: asyncio.AbstractEventLoop) -> None:
         self._loop = asyncio.get_running_loop()
@@ -197,7 +200,11 @@ class MediaSessionListener:
             return None
         properties = await session.try_get_media_properties_async()
         timeline = session.get_timeline_properties()
-        status = PLAYBACK_STATUS.get(int(session.get_playback_info().playback_status))
+        playback = session.get_playback_info()
+        if properties is None or timeline is None or playback is None:
+            # Spotify swapping sessions; an all-None state reports nothing this round.
+            return {'track': None, 'status': None, 'position_s': None, 'duration_s': None}
+        status = PLAYBACK_STATUS.get(int(playback.playback_status))
         duration = (timeline.end_time - timeline.start_time).total_seconds() or None
         position = timeline.position.total_seconds()
         if status == 'playing':

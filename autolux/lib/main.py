@@ -1,4 +1,5 @@
 import asyncio
+import concurrent.futures
 import dataclasses
 import datetime
 import json
@@ -8,7 +9,7 @@ import queue
 import tempfile
 from pathlib import Path
 
-from autolux.lib.audio_config import BUFFER_SIZE, SAMPLE_RATE
+from autolux.lib.audio_config import BUFFER_SIZE, PLAYBACK_DELAY_SEC, SAMPLE_RATE
 from autolux.lib.clients.starfire_client import StarfireClient
 from autolux.lib.clock import SYSTEM_CLOCK, Clock
 from autolux.lib.engine.effect_definitions import (
@@ -35,8 +36,6 @@ from autolux.lib.ui_bridge import DEFAULT_DASHBOARD_PORT, PALETTE_POLICY
 
 LOGGER = logging.getLogger(__name__)
 
-# Production copies this to the native audio sender; simulate/runner.py replays with it.
-PLAYBACK_DELAY_SEC = 14.0
 _UI_ONLY_WINDOW_SEC = 60.0
 SHOW_CONFIG_PATH = Path(__file__).resolve().parents[2] / '.live' / 'show.json'
 CONTROL_QUEUE_SIZE = 16
@@ -183,7 +182,7 @@ class ShowControl:
                         sweep=command['sweep'],
                         aim=command['aim'],
                         pose=command['pose'],
-                        paused=light_engine.paused,
+                        paused=light_engine.rendering_paused,
                     )
             except ValueError as error:
                 LOGGER.warning('[main] highlight refused: %s', error)
@@ -431,10 +430,10 @@ class AutoluxController:
         self.light_engine.send_renderer_settings()
 
         self._monitor.arm()
-        self.media_session.start(asyncio.get_running_loop())
+        media_watch = self.media_session.start(asyncio.get_running_loop())
         drain = asyncio.create_task(self._drain_operator_commands())
         try:
-            await self._play(drain)
+            await self._play(drain, media_watch)
         finally:
             drain.cancel()
 
@@ -443,7 +442,9 @@ class AutoluxController:
             await asyncio.sleep(STARFIRE_FRAME_PERIOD_SEC)
             await self.control.apply_pending(self.light_engine)
 
-    async def _play(self, drain: asyncio.Task) -> None:
+    async def _play(
+        self, drain: asyncio.Task, media_watch: concurrent.futures.Future | None
+    ) -> None:
         last_100ms_callback_execution: datetime.datetime = datetime.datetime.now()
         last_1sec_callback_execution: datetime.datetime = datetime.datetime.now()
         last_10sec_callback_execution: datetime.datetime = datetime.datetime.now()
@@ -454,6 +455,8 @@ class AutoluxController:
             await asyncio.sleep(0)
             if drain.done():
                 drain.result()
+            if media_watch is not None and media_watch.done():
+                media_watch.result()
             await self.light_engine.on_audio(audio_signal)
             new_audio_signal = await self.music_analyser.analyse(audio_signal)
             await self.command_queue.drain()

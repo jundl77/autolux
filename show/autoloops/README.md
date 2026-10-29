@@ -31,11 +31,13 @@ drop, outro. Inside a section the look changes on phrase lines, never on a rando
 - **Accents** run for 16 bars and change 8 bars offset from the base rotation, so the two never
   turn over together.
 - **Fills** mark phrase ends: a small one on bar 8, a bigger one on bar 16.
-- **Into a drop:** the build rises, a riser rides its last bars, the dip blacks out the last beat
-  (half a beat to two bars, measured from the audio), and an entry hit lands on the one.
+- **Into a drop:** the build rises, a riser rides its last eight bars (as far as the lead allows),
+  the dip blacks out the last beat (one beat to two bars, measured from the audio; half a beat at
+  Calm), and an entry hit lands on the one.
 - **Into a breakdown:** `dip/fade` settles the room before the breakdown's base takes over.
 - **Restraint means smaller, never absent.** Calm keeps the dip and bumps in a palette colour
-  (no white, no strobe); Balanced allows white hits but no strobing riser; Wild adds strobe.
+  (no white, no strobe); Balanced allows white hits and the drop's `strobe_burst` special but no
+  strobing riser; Wild adds the strobing riser.
 
 Contrast comes from the dip and from white, not from a cap. Base loops peak at 0.9 so a hit
 above them still reads, but the punch of a drop is the dark beat before it and the white on
@@ -45,34 +47,53 @@ its one.
 
 Every buildup reads one shared state, `sf.build(ctx)` (below), and implements both regimes:
 
-- **Regime U, the drop unknown.** `drive = 0.25 + 0.65 * tension`, with tension `e / (e + 48)`
-  of section time: 0.3 in bar 1, 0.51 at bar 8, 0.62 at bar 16 (twice bar 1), 0.72 at bar 32,
-  still rising, so an uncued build climbs from its first bar and never restarts.
+- **Regime U, the drop unknown.** `drive = 0.35 + 0.65 * tension`, with tension `e / (e + 24)`
+  of section time: 0.35 on bar 1, 0.70 on bar 8, 0.81 on bar 16, 0.89 on bar 32, still rising,
+  so an uncued build climbs from its first bar and never restarts. Live, the drop is known only
+  the playback delay less the analysis latency ahead, so most of a build plays in this regime.
 - **Regime K, a drop cued.** `drive` hands over continuously to 1 over the last 16 beats before
-  the dip (`drive + (1 - drive) * finale`); a cue that arrives with fewer than 16 beats to go
-  hands over across what is left (`build.span`, `sf.approach`), never in a jump. Counts move one step
+  the dip and holds full over the last 4 (`drive + (1 - drive) * finale`); a cue that arrives with
+  fewer than 16 beats to go hands over across what is left, full for its last half at most 4
+  (`build.span`, `sf.approach`), never in a jump. Counts move one step
   per beat (`math.ceil(build.left)`) and land on the dip, not the drop.
 - **A cued non-drop** eases `drive` down by half instead of building a finale.
 - **Steps land on the one:** compare thresholds with `build.step`, the tension at the last
   downbeat, never with the continuous tension.
-- **Stillness and tightening into the last bar:** motion collapses, rates are at their fastest,
-  the level is at its peak. The blackout itself comes from the cue's `dip` overlay, never from
-  the loop.
+- **One wash flashes over a lit background:** every buildup drives its washes with
+  `sf.wash_build(ctx, build, {pattern, stab})`. The washes hold colour A at a floor rising from
+  0.15 to 0.35; one wash at a time (a mirrored pair from six washes) ramps up over a tenth of a
+  beat to a peak rising from 0.55 to 0.7 and decays back to the background over the whole
+  interval, so nothing steps on or cuts off. All washes flash together, to 0.9, only on the last
+  beat before the dip. The flash colour drains to white over a cued drop's last four bars (never
+  at Calm, which also plays two thirds of the levels).
+- **The flashes speed up:** every two beats, every beat from bar 9 of section time, every half
+  beat over a cued drop's last four bars, never faster. The drop's phrase takes over on the bar
+  after the cue arrives.
+- **Movers counterpoint, quietly:** the helper's `movers` level holds 0.5 while they do their
+  move; over the half-beat bars `roll` and `chase` stab the off-beats to 0.6 over 0.3, and `saw`
+  flashes them white to 0.6 on each cut, with the same soft attack. Stabs are dimmer only. The
+  blackout comes from the cue's `dip`.
 - **Never scaled by loudness:** a build's RMS falls as the music high-passes, so a build that
-  followed it would dim exactly as the music climbed. Onset may scale how hard a pulse hits.
-- **Groups enter one at a time and beams lift** as the build climbs; phaser rates climb the
-  ladder in `build.measure` (8, 4, 2 beats, moving only on 8-beat lines so a cycle never jumps).
+  followed it would dim exactly as the music climbed.
 
-Each buildup is one idea that drives every layer:
+The patterns differ in which wash flashes:
 
-| Loop | Idea |
-|---|---|
-| `countdown` | Counting: the strip is a meter filling from the centre to half its length with the build's tension (stepping on downbeats); over a cued drop's last eight beats the count closes the rest from both ends one step per beat, full on the last beat before the dip; the beams lift. |
-| `tighten` | Converging: the fan closes onto the movers' shared point while the washes hold back, so the closed beam point is the brightest thing in the room. |
-| `stutter` | Subdividing: the roll halves on downbeats (a bar, half a bar, a beat, half a beat) and its gaps fill in until it is a wall of light. |
-| `stack` | Layering: strip first, washes from a third of the build, movers from two thirds, the beams lifting with it; the last bar locks solid. |
-| `inhale` | Holding: two-bar breaths that deepen; once the drop is cued everything freezes at the top of the inhale. |
-| `release` | Letting go: a dim, motionless share of the drive until half-way, then the beams open into a sweep and the dot into a chase (energy 2, so Calm can play it). |
+- `roll`, a seeded pick, alternating odd and even washes so none flashes twice in a row.
+- `chase`, outside-in to the centre and ping-pong.
+- `saw`, the riser swell: every wash ramps up off the floor and drops back to it, the ramps
+  shortening from four bars to two, one, half a bar and a beat in the last bar; each drop is
+  one wash's flash, outside-in.
+- `stab = true` alternates the flash between colours A and B until the white stage (under the
+  mono build palette A and B are the same colour).
+
+| Loop | Washes | Idea |
+|---|---|---|
+| `countdown` | chase | Counting: the strip fills in from both ends to half with the build's tension, then over a cued drop's last eight beats one step per beat to full on the last beat before the dip; the beams lift. |
+| `tighten` | saw | Converging: the beams circle the movers' shared point, the circle closing and lifting as the build climbs. |
+| `stutter` | roll | Stuttering: the strip flashes with every wash flash, the beams stab the gaps. |
+| `stack` | roll, stab | Layering: washes first, the strip from half-way, the beams from two thirds; the last bar locks the strip solid. |
+| `inhale` | saw | Rising: the beams tilt up towards the ceiling while the strip breathes (energy 2, so Calm can play it). |
+| `release` | chase, stab | Opening: the fan widens from 8 to 45 degrees and the strip dot opens into a chase (energy 2). |
 
 ### The rest of the catalogue
 
@@ -93,9 +114,9 @@ Each buildup is one idea that drives every layer:
 
 | Bank | Loops | Intensity |
 |---|---|---|
-| `hit` | `white` (washes, strip and beams full white, the beams through the open gobo where they already point), `colour_bump` (Calm: the palette's punch colour), `strobe` (Wild: white strobe on every group) | HTP |
+| `hit` | `white` (washes, strip and beams full white, the beams through the open gobo where they already point), `colour_bump` (Calm: the palette's punch colour) | HTP |
 | `fill` | `strip_wipe` and `mover_flick` (bar 8), `turnaround` (bar 16, in the punch colour: washes and beams roll eighths, the strip doubles to sixteenths, lands on a dark eighth) | LTP |
-| `riser` | `white_rise` (Balanced: washes and beams rise in white, no position), `strobe_ramp` (Wild: white and strobe over the last eight beats only, so the build's finale shows first), `white_sweep` (beams lift in white and land back on the focus over the last bar, washes swell to 0.6), `strip_fill` (Calm: the strip closes from the ends in the punch colour) | HTP |
+| `riser` | `white_rise` (Balanced: beams rise in white, no position), `strobe_ramp` (Wild: strip and beams in white and strobe over the last eight beats only, so the build's finale shows first), `white_sweep` (beams lift in white and land back on the focus over the last bar), `strip_fill` (Calm: the strip closes from the ends in the punch colour) | HTP |
 | `dip` | `last_beat` (every group dark), `fade` (a low glow for breakdown entry) | LTP |
 | `accent` | `sparkle` (seeded strip sparkle on the off-beat eighths), `wash_roll` (a quarter of the washes per off-beat, a lap in eight beats), `mover_shapes` (figure-eights through a gobo, swapping A and B on the two-bar line where `hammer` and `crossfire` swap their washes) | HTP, but `mover_shapes` LTP |
 
@@ -122,6 +143,7 @@ any order:
   - an overlay that moves the heads gets at least half a beat of attack and release.
 - **Hits are full on frame 0** (their attack is 0) and decay over their length.
 - **Risers peak at 1.0** (the base loops' 0.9 is their headroom) and end where the dip starts.
+  They never set the washes: under HTP they would flatten the build's flashes into a wall.
 - An overlay sets only the groups it is about; everything else shows the base.
 - **Strobe rates are beat divisions of `ctx.bpm`**, stepped on beat lines:
   `sf.beat_strobe_hz(ctx, per_beat)` picks the fastest division up to `per_beat` flashes a beat
@@ -223,7 +245,7 @@ Section and music helpers:
 ```lua
 sf.random(ctx, i, j, k)        -- 0..1, a pure hash of ctx.seed and up to three integers.
 sf.section_beats(ctx)          -- phrase time: beats since the section start, else the layer's.
-sf.tension(ctx, half_beats)    -- 0..1 build progress (e / (e + 48) until the next change is
+sf.tension(ctx, half_beats)    -- 0..1 build progress (e / (e + 24) until the next change is
                                -- known, then linear to it), and its value at the last downbeat.
 sf.finale(ctx, beats, from)    -- 0..1 over the last `beats` before the next cue (0 when none);
                                -- with `from`, from + (1 - from) x that. The second value holds
@@ -237,9 +259,9 @@ Show helpers, shared by the banks (the show-helpers section of `lighting.lua`):
 
 ```lua
 sf.build(ctx) -> { drive, finale, tension, step, stage, measure, left, span }
--- A buildup's shared state: drive 0..1 (regime U 0.25 + 0.65 x tension, handed over to 1 by a
+-- A buildup's shared state: drive 0..1 (regime U 0.35 + 0.65 x tension, handed over to 1 by a
 -- cued drop's finale, eased down before a cued non-drop), finale 0..1, tension and step (the
--- tension at the last downbeat), stage 0, 1, 2 (from step at a third and a half), measure (the
+-- tension at the last downbeat), stage 0, 1, 2 (from step at a half and two thirds), measure (the
 -- 8, 4, 2-beat rate ladder by stage, moving on 8-beat lines), left = beats until a cued drop's
 -- dip begins (nil while no drop is cued), span = the beats the finale runs over.
 sf.approach(build, beats)      -- 0..1 over the last `beats` before the dip, over less after a
@@ -260,7 +282,7 @@ sf.mirrored_spot(index, count, at, share) -- 1 where from_centre is `at`, 0 `sha
 sf.chase(index, count, head, tail_share) -> level, cells_behind -- a tail behind `head` (0..1 a lap).
 sf.shared_focus(target)        -- {x, y, z}, the mean of the members' focus points.
 sf.overlay_progress(ctx)       -- an overlay's progress 0..1 and the beats it has left.
-sf.white_strobe(level, hz)     -- wash, strip and movers in white at `level`, strobing at `hz`;
+sf.white_strobe(level, hz, groups) -- the named groups in white at `level`, strobing at `hz`;
                                -- overlays only.
 ```
 
@@ -283,7 +305,14 @@ sf.phaser(target, ctx, spec) -> effects
 --   phase = -1..1 cycles spread across the selection; positive runs left to right,
 --   wings = mirror partners share a rank and move outward (default true; false for tilt_wave),
 --   centre_pan, centre_tilt = degrees added to every member,
---   at = {x, y, z} every beam rests on, or direction = {dx, dy, dz} (default each focus) }
+--   at = {x, y, z} every beam rests on, or direction = {dx, dy, dz} (default each focus),
+--   spin = sf.spin spec: one member's look turns a full circle and back (below) }
+sf.pan_reach(cell) -> clockwise, anticlockwise -- degrees of heading the pan can turn from the
+-- focus aim (clockwise seen from above) before an end stop; nil, nil without a pan range
+sf.spin(target, ctx, spec) -> cell, degrees    -- nil between spins
+-- spec = { measure = 4, 8 or 16 beats, every = period in beats (default 64: 16 bars),
+--   at = beats into each period it starts (default 0) }. One member whose pan reaches a full
+-- circle one way turns round and back, eased; sf.random picks it, and the way, per period.
 -- Cycles count from the section start; change measure only where the elapsed beats are a
 -- multiple of both measures (any bar line for measures up to 4).
 ```

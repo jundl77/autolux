@@ -13,6 +13,7 @@ from autolux.lib.engine.effect_definitions import (
     BEAT_LOSS_SECONDS,
     PREFERRED_AUTOLOOPS,
     QUIET_BRIGHTNESS,
+    STANDBY_AUTOLOOP,
     LightIntent,
     ShowSettings,
     intent_for_class,
@@ -20,6 +21,7 @@ from autolux.lib.engine.effect_definitions import (
 from autolux.lib.engine.event_buffer import SILENCE_TRIGGER, STOP_PERSISTENCE_SEC
 from autolux.lib.engine.light_engine import LightEngine
 from autolux.lib.engine.section_decoder import BarDecision, BarObservation
+from autolux.lib.engine.static_mode import AUTOMATION_REST_ID
 from autolux.lighting.palettes import PALETTE_NAMES
 from autolux.simulate.lighting_recorder import RecordingStarfireClient
 
@@ -1645,6 +1647,67 @@ async def test_standby_undims_a_quiet_room_and_return_finds_the_quiet_state_clea
     assert show.light._room_quiet is False
 
 
+def _static_look_changes(commands):
+    return [
+        c
+        for c in commands
+        if c['kind'] in ('set_master', 'stop', 'cue_section')
+        or (c['kind'] == 'clear_override' and c['id'].startswith('static_'))
+        or (c['kind'] == 'set_override' and c['value']['id'].startswith('static_'))
+    ]
+
+
+async def _static_red_show() -> _Show:
+    show = _Show()
+    await show.play(20.0, 0.2)
+    show.light.static_looks.preset('red')
+    await show.light.sync_static()
+    return show
+
+
+async def test_a_pause_under_static_leaves_the_static_look_and_brightness_alone():
+    show = await _static_red_show()
+    held = len(show.lighting.events)
+    show.analyser.enter_standby('media session paused')
+    show.light.pause()
+    await show.play(3.0, 0.0)
+    assert show.light.standby
+    assert _static_look_changes(show.commands(held)) == []
+
+
+async def test_a_resume_under_static_leaves_the_static_look_and_brightness_alone():
+    show = await _static_red_show()
+    show.analyser.enter_standby('media session paused')
+    await show.play(3.0, 0.0)
+    held = len(show.lighting.events)
+    show.analyser.leave_standby()
+    await show.play(20.0, 0.2)
+    assert not show.light.standby and show.light.current_intent is not None
+    assert _static_look_changes(show.commands(held)) == []
+    assert show.lighting.selected_autoloop == ('atmospheric', 'dawn')
+
+
+@pytest.mark.parametrize('playing', [False, True])
+async def test_leaving_static_returns_to_what_the_automation_does_now(playing):
+    show = await _static_red_show()
+    show.analyser.enter_standby('media session paused')
+    await show.play(3.0, 0.0)
+    if playing:
+        show.analyser.leave_standby()
+        await show.play(20.0, 0.2)
+    held = len(show.lighting.events)
+    show.light.static_looks.clear()
+    await show.light.sync_static()
+    assert {'kind': 'clear_override', 'id': 'static_all'} in show.commands(held)
+    assert not any(
+        c['kind'] == 'set_override' and c['value']['id'] == AUTOMATION_REST_ID
+        for c in show.commands(held)
+    )
+    standby = show.lighting.selected_autoloop == STANDBY_AUTOLOOP
+    assert standby is not playing
+    assert show.light._showing_standby is not playing
+
+
 async def test_telemetry_shows_standby_instead_of_the_last_intent_and_posterior():
     show = _Show()
     fake_reset = show.decoder.reset
@@ -2131,22 +2194,67 @@ async def test_a_late_section_switches_on_the_next_room_downbeat_as_starfire_doe
     assert light.current_intent is LightIntent.DROP
 
 
-async def test_a_level_change_re_sends_the_planned_cue_with_its_start_and_seed():
+async def test_a_level_change_re_plans_a_pending_cue_and_leaves_the_running_one():
     decoder = FakeDecoder()
-    control = SimpleNamespace(settings=ShowSettings(intensity=0.7))
-    light, _, clock, lighting = engine(decoder=decoder)
+    control = SimpleNamespace(settings=ShowSettings(intensity=0.3))
+    light, queue, clock, lighting = engine(decoder=decoder)
     light._settings = light.effect_controller._settings = lambda: control.settings
     planned = await planned_drop(light, decoder, clock)
-    [first] = cue_events(lighting)
-    control.settings = ShowSettings(intensity=1.0)
+    [calm] = (e['command']['value'] for e in cue_events(lighting))
+    assert [step['bank'] for step in calm['rotation']] == ['breakdown']
+
+    control.settings = ShowSettings(intensity=0.7)
     light.intensity_changed()
-    first, again = (e['command']['value'] for e in cue_events(lighting))
-    assert (again['start_beat_index'], again['seed'], again['rotation']) == (
-        first['start_beat_index'],
-        first['seed'],
-        first['rotation'],
+    balanced = cue_events(lighting)[-1]['command']['value']
+    assert (balanced['start_beat_index'], balanced['seed']) == (
+        calm['start_beat_index'],
+        calm['seed'],
     )
-    assert light.effect_controller.cue_for(planned).command()['value'] == again
+    assert [step['bank'] for step in balanced['rotation']] == ['drop']
+    assert light.effect_controller.cue_for(planned).command()['value'] == balanced
+
+    clock.advance(14.5)
+    await queue.drain()
+    assert light._current_plan is planned
+    control.settings = ShowSettings(intensity=0.3)
+    light.intensity_changed()
+    running = cue_events(lighting)[-1]['command']['value']
+    assert running['rotation'] == balanced['rotation'], 'a running cue keeps its loops'
+
+
+async def test_a_drop_that_lifts_the_auto_intensity_is_planned_under_the_level_it_lifts_to():
+    from autolux.lib.engine.effect_definitions import CALM, INTENSITY_BALANCED
+    from autolux.lib.engine.track_mood import MeasuredBeat
+
+    decoder = FakeDecoder()
+    control = SimpleNamespace(settings=ShowSettings(intensity=0.3, intensity_auto=True))
+    light, queue, clock, lighting = engine(decoder=decoder)
+    light._settings = light.effect_controller._settings = lambda: control.settings
+    asked = []
+
+    def auto_intensity(level, why):
+        asked.append(level)
+        control.settings = ShowSettings(intensity=level, intensity_auto=True)
+        light.intensity_changed()
+
+    light.on_auto_intensity = auto_intensity
+    light._track_beats = [MeasuredBeat(140.0, 1.0, 3000.0, 0.0)] * 8
+    music = light.follow_music
+    music.track_level, music.opening_heard, music.energies = CALM, True, [1, 1, 2, 1]
+    assert music.heard_calm()
+
+    planned = await planned_drop(light, decoder, clock)
+    [cue] = (e['command']['value'] for e in cue_events(lighting))
+    assert [step['bank'] for step in cue['rotation']] == ['drop'], 'planned under its own arrival'
+    assert asked == [], 'the room level changes on arrival, not at planning'
+    assert music.track_level == CALM
+
+    clock.advance(14.5)
+    await queue.drain()
+    assert light._current_plan is planned
+    assert asked == [INTENSITY_BALANCED]
+    running = cue_events(lighting)[-1]['command']['value']
+    assert running['rotation'] == cue['rotation']
 
 
 async def test_static_holds_the_look_without_cues_and_leaving_it_sends_them_again():
@@ -2287,7 +2395,7 @@ def sent_hits(lighting):
 async def test_a_running_drop_sent_again_never_fires_its_entry_twice(cause):
     light, lighting, planned = await wild_drop_in_the_room()
     entry = sent_hits(lighting)
-    assert {row['autoloop'] for row in entry} == {'white', 'strobe'}
+    assert {row['autoloop'] for row in entry} == {'white'}
     booked = dict(light.effect_controller._intense_at)
     before = len(cue_events(lighting))
     if cause == 'static':

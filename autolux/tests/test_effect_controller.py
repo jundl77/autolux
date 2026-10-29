@@ -5,7 +5,9 @@ import pytest
 from autolux.lib.clock import VirtualClock
 from autolux.lib.engine.autoloop_policy import SelectionContext
 from autolux.lib.engine.cue import Envelope
+from autolux.lib.engine.cue_director import SectionRequest
 from autolux.lib.engine.effect_controller import (
+    DROP_ACCENT_ID,
     SPECIAL_ID,
     SPECIAL_PRIORITY,
     EffectController,
@@ -277,7 +279,12 @@ async def test_next_autoloop_switches_at_once_to_another_loop_with_the_default_c
 
 
 @pytest.mark.parametrize(
-    ('intensity', 'cooldown'), [(INTENSITY_WILD, 30.0), (INTENSITY_BALANCED, 60.0), (0.4, 60.0)]
+    ('intensity', 'cooldown'),
+    [
+        (INTENSITY_WILD, STROBE_COOLDOWN_SECONDS / 2),
+        (INTENSITY_BALANCED, STROBE_COOLDOWN_SECONDS),
+        (0.4, STROBE_COOLDOWN_SECONDS),
+    ],
 )
 async def test_the_intense_cooldown_is_as_set_and_halved_when_wild(intensity, cooldown):
     controller, lighting, clock = with_specials([SPIN], settings=ShowSettings(intensity=intensity))
@@ -392,7 +399,7 @@ async def test_the_catalogue_plays_one_texture_per_fx_cooldown_then_a_drop_accen
     assert len(textures) == 1
     start = len(lighting.events)
     await controller.change_effect(LightIntent.DROP)
-    assert accents(lighting, start) == []
+    assert [c['value']['id'] for c in accents(lighting, start)] == [DROP_ACCENT_ID], 'fx rests'
     clock.advance(240)
     start = len(lighting.events)
     await controller.change_effect(LightIntent.BREAKDOWN)
@@ -401,10 +408,11 @@ async def test_the_catalogue_plays_one_texture_per_fx_cooldown_then_a_drop_accen
     clock.advance(240)
     start = len(lighting.events)
     await controller.change_effect(LightIntent.DROP)
-    [spin] = accents(lighting, start)
+    spin, strobe = accents(lighting, start)
     assert spin['value']['id'] == SPECIAL_ID
     assert spin['value']['target'] == {'group': 'fx'}
     assert spin['value']['special_fx']['pulse_beats'] == 1
+    assert strobe['value']['id'] == DROP_ACCENT_ID
 
 
 async def test_a_soft_drop_plays_no_intense_special(caplog):
@@ -419,13 +427,17 @@ async def test_a_soft_drop_plays_no_intense_special(caplog):
 async def test_a_drop_special_rests_the_intense_cooldown(caplog):
     controller, lighting, clock = with_specials([SPIN], settings=BALANCED)
     fired = []
-    for wait in (0, 30, 31):
+    half = STROBE_COOLDOWN_SECONDS / 2
+    for wait in (0, half, half + 1):
         start = len(lighting.events)
         with caplog.at_level(logging.INFO):
             await _drop_after(controller, lighting, clock, wait)
         fired.append([c['value']['id'] for c in accents(lighting, start) if 'value' in c])
     assert fired == [[SPECIAL_ID], [], [SPECIAL_ID]]
-    assert 'intense special suppressed | cooldown 30s of 60s left' in caplog.text
+    assert (
+        f'intense special suppressed | cooldown {half:.0f}s of {STROBE_COOLDOWN_SECONDS:.0f}s left'
+        in caplog.text
+    )
 
 
 async def test_capabilities_are_read_when_an_intent_starts_not_when_built():
@@ -444,12 +456,78 @@ async def test_at_or_below_the_strobe_gate_no_intense_special_is_sent(caplog):
     assert 'intense special suppressed | intensity 0.29 at or below 0.30' in caplog.text
 
 
-async def test_standby_releases_the_special_at_once():
+async def test_standby_releases_the_special_and_the_drop_strobe_at_once():
     controller, lighting, _ = with_specials([DRIFT])
     await controller.change_effect(LightIntent.ATMOSPHERIC)
     start = len(lighting.events)
     controller.enter_standby(120.0)
-    assert accents(lighting, start) == [CUT]
+    assert accents(lighting, start) == [{'kind': 'clear_override', 'id': DROP_ACCENT_ID}, CUT]
+
+
+STROBE = Special('strobe_burst', (LightIntent.DROP,), 'all', strobe_hz=8.0)
+
+
+async def enter_cued_drop(controller, *, arrival=None, bpm=128.0):
+    context = SelectionContext(LightIntent.DROP, arrival_of_peak=arrival)
+    moment = object()
+    request = SectionRequest(
+        64, LightIntent.DROP, context, controller.clock.monotonic(), bpm, beats_per_bar=4
+    )
+    controller.plan_cue(moment, request)
+    await controller.change_effect(LightIntent.DROP, bpm, context, moment)
+
+
+def strobe_specials(lighting, start=0):
+    return [
+        command['value']
+        for command in accents(lighting, start)
+        if command['kind'] == 'set_override' and command['value']['id'] == DROP_ACCENT_ID
+    ]
+
+
+@pytest.mark.parametrize(
+    ('intensity', 'burst', 'hz', 'beats'),
+    [
+        (INTENSITY_WILD, 60.0, 8.0, 8),
+        (INTENSITY_BALANCED, 60.0, 0.7 * 8.0, 5),
+        (INTENSITY_WILD, 1.0, 8.0, 2),
+    ],
+    ids=['two-bars', 'the-burst-cap-at-balanced', 'the-burst-setting'],
+)
+async def test_a_drop_strobes_the_burst_setting_in_whole_beats_up_to_two_bars_inside_the_caps(
+    intensity, burst, hz, beats
+):
+    settings = ShowSettings(intensity=intensity, strobe_burst_seconds=burst)
+    controller, lighting, _ = with_specials([STROBE], settings=settings)
+    await enter_cued_drop(controller)
+    [strobe] = strobe_specials(lighting)
+    assert strobe['target'] == 'all' and strobe['priority'] == SPECIAL_PRIORITY
+    assert strobe['values'] == {'strobe_hz': pytest.approx(hz)}
+    seconds = beats * 60 / 128
+    assert strobe['lifetime'] == {'kind': 'seconds', 'duration_seconds': pytest.approx(seconds)}
+
+
+async def test_calm_and_weak_drops_fire_no_strobe_special():
+    calm = ShowSettings(intensity=INTENSITY_CALM)
+    controller, lighting, _ = with_specials([STROBE], settings=calm)
+    await enter_cued_drop(controller)
+    assert strobe_specials(lighting) == []
+    controller, lighting, _ = with_specials([STROBE], settings=BALANCED)
+    await enter_cued_drop(controller, arrival=0.4)
+    assert strobe_specials(lighting) == []
+    await enter_cued_drop(controller, arrival=0.5)
+    assert len(strobe_specials(lighting)) == 1
+
+
+async def test_back_to_back_drops_fire_one_strobe_special_on_the_intense_cooldown():
+    controller, lighting, clock = with_specials([STROBE], settings=BALANCED)
+    await enter_cued_drop(controller)
+    clock.advance(30.0)
+    await enter_cued_drop(controller)
+    assert len(strobe_specials(lighting)) == 1
+    clock.advance(STROBE_COOLDOWN_SECONDS)
+    await enter_cued_drop(controller)
+    assert len(strobe_specials(lighting)) == 2
 
 
 async def test_the_event_buffer_shows_the_active_special_and_the_capable_groups():
@@ -502,7 +580,11 @@ async def test_an_intense_special_blocks_a_later_intense_drop_special(caplog):
     with caplog.at_level(logging.INFO):
         await controller.change_effect(LightIntent.DROP)
     assert accents(lighting, start) == [{'kind': 'clear_override', 'id': SPECIAL_ID}]
-    assert 'intense special suppressed | cooldown 50s of 60s left' in caplog.text
+    remaining = STROBE_COOLDOWN_SECONDS - 10
+    assert (
+        f'intense special suppressed | cooldown {remaining:.0f}s of '
+        f'{STROBE_COOLDOWN_SECONDS:.0f}s left' in caplog.text
+    )
 
 
 async def test_a_held_intent_resends_a_released_special_without_choosing_or_charging_again():
@@ -737,16 +819,17 @@ async def test_the_snapshot_carries_each_special_cooldown_on_the_engine_clock():
     assert (first['fx']['last'], first['fx']['ready']) == ('spin', True)
     assert first['all']['last'] == 'strobe'
     assert first['venue']['label'] == 'venue · accents 1/2'
-    assert first['all']['cooldown_seconds'] == pytest.approx(60.0)
-    assert first['all']['remaining_seconds'] == pytest.approx(50.0)
-    assert later['all']['remaining_seconds'] == pytest.approx(20.0)
+    assert first['all']['cooldown_seconds'] == pytest.approx(STROBE_COOLDOWN_SECONDS)
+    assert first['all']['remaining_seconds'] == pytest.approx(STROBE_COOLDOWN_SECONDS - 10.0)
+    assert later['all']['remaining_seconds'] == pytest.approx(STROBE_COOLDOWN_SECONDS - 40.0)
     assert not later['all']['ready']
     await controller.change_effect(LightIntent.ATMOSPHERIC)
     clock.advance(100.0)
     rested = cooldowns()['fx']
     assert (rested['last'], rested['cooldown_seconds']) == ('drift', 240)
     assert rested['remaining_seconds'] == pytest.approx(140.0)
-    clock.advance(140.0)
+    # Clears both fx's 240s cooldown and all's STROBE_COOLDOWN_SECONDS, elapsed since the drop.
+    clock.advance(max(140.0, STROBE_COOLDOWN_SECONDS - 140.0))
     assert all(row['ready'] for row in cooldowns().values())
 
 
