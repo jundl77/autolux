@@ -15,6 +15,7 @@ from autolux.lighting.palettes import (
     MONO_COLD_LEVEL,
     PALETTES,
     VARIANT_SUFFIXES,
+    WHITE,
     Palette,
     PaletteError,
     base_palette_name,
@@ -29,6 +30,7 @@ from proto.starfire import rig_pb2 as rig_wire
 
 REPO = Path(__file__).resolve().parents[2]
 GDTF_DIR = REPO / 'autolux' / 'tests' / 'data' / 'gdtf'
+STAGE_RIG = REPO / 'autolux' / 'tests' / 'data' / 'generic_rig' / 'stage.rig.pb'
 
 
 @pytest.mark.parametrize('palette', PALETTES + BREAKDOWN_PALETTES, ids=lambda p: p.name)
@@ -138,21 +140,51 @@ def test_a_palette_of_one_hue_on_purpose_is_not_reported():
     assert wheel_warnings(rig(('wheel', wheel_spinner())), (mono,)) == []
 
 
-def test_colours_landing_on_a_white_slot_are_reported_in_one_line_per_fixture_type():
+def test_a_pale_colour_takes_its_nearest_coloured_slot_and_only_white_takes_open():
+    [slots] = wheel_slots(white_for_green())
     pale = (1.0, 0.95, 0.9)
-    palettes = (
-        palette('pale', pale, BLUE),
-        palette('pale_drop', pale, BLUE),
-        palette('one_slot', RED, ORANGE, accent=(0.9, 0.9, 1.0)),
-    )
+    assert nearest_slot(slots, pale) == 'Red'
+    assert nearest_slot(slots, WHITE) == nearest_slot(slots, (0.5, 0.5, 0.5)) == 'Open'
+    # A wheel with no coloured slot keeps the plain nearest rule: a pale colour shows white.
+    assert nearest_slot([('Black', BLACK), ('Open', WHITE)], pale) == 'Open'
+    palettes = (palette('pale_red', pale, RED), palette('fire', RED, ORANGE))
     patched = rig(('wheel', white_for_green()), ('plain', wheel_spinner()))
     assert wheel_warnings(patched, palettes) == [
-        (
-            'wheel: primary and secondary share one wheel slot in one_slot (Red); a white slot, '
-            'kept for hits, would show the primary of pale, pale_drop; the accent of one_slot.'
-        ),
-        'plain: primary and secondary share one wheel slot in one_slot (Red).',
+        'wheel: primary and secondary share one wheel slot in pale_red (Red), fire (Red).',
+        'plain: primary and secondary share one wheel slot in pale_red (Red), fire (Red).',
     ]
+
+
+def rust_table(name: str) -> list[tuple[tuple[float, ...], int]]:
+    rust = (REPO / 'starfire/tests/vocabulary_tests.rs').read_text(encoding='utf-8')
+    block = re.search(rf'const {name}[^=]*= \[(.*?)\];', rust, re.DOTALL).group(1)
+    return [
+        (tuple(float(channel) for channel in colour.split(',')), int(dmx))
+        for colour, dmx in re.findall(r'\(\[([^\]]*)\], (\d+)\)', block)
+    ]
+
+
+def test_the_stage_spot_takes_the_slots_starfires_encode_picks():
+    stage = rig_wire.RigDefinition.FromString((STAGE_RIG).read_bytes())
+    spot = next(p for p in stage.profiles if 'Intimidator Spot 110' in p.profile_id)
+    [slots] = wheel_slots(spot.mode)
+    by_dmx = {
+        s.dmx_from: s.name
+        for channel in spot.mode.channels
+        for function in channel.functions
+        if function.attribute == 'Color1'
+        for s in function.sets
+    }
+    picks = rust_table('SPOT_PICKS')
+    assert len(picks) == 9
+    for colour, dmx in picks:
+        assert nearest_slot(slots, colour) == by_dmx[dmx], colour
+
+
+def test_the_white_slot_threshold_matches_starfires():
+    gdtf = (REPO / 'starfire/src/gdtf.rs').read_text(encoding='utf-8')
+    threshold = re.search(r'const WHITE_SLOT_SATURATION: f64 = ([0-9.]+);', gdtf).group(1)
+    assert float(threshold) == MIN_COLOUR_SATURATION
 
 
 def two_wheels() -> rig_wire.DmxMode:
@@ -199,14 +231,11 @@ def test_slot_colours_and_nearest_slots_match_starfires_encode():
     expected = {'Black': BLACK, 'Red': (1, 0, 0), 'Green': (0, 1, 0), 'Blue': (0, 0, 1)}
     for name, rgb in slots:
         assert rgb == pytest.approx(expected[name], abs=1e-6)
-    rust = (REPO / 'starfire/tests/vocabulary_tests.rs').read_text(encoding='utf-8')
-    block = re.search(r'const WHEEL_SPINNER_PICKS[^=]*= \[(.*?)\];', rust, re.DOTALL).group(1)
-    picks = re.findall(r'\(\[([^\]]*)\], (\d+)\)', block)
+    picks = rust_table('WHEEL_SPINNER_PICKS')
     assert len(picks) == 9
     by_dmx = {s.dmx_from: s.name for s in wheel_spinner().channels[0].functions[0].sets}
     for colour, dmx in picks:
-        requested = tuple(float(channel) for channel in colour.split(','))
-        assert nearest_slot(slots, requested) == by_dmx[int(dmx)], colour
+        assert nearest_slot(slots, colour) == by_dmx[dmx], colour
 
 
 def test_mixing_and_unpatched_wheels_are_not_reported():
