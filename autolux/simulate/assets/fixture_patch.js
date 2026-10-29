@@ -14,6 +14,8 @@
     const PREVIEW_BEAM_MM = 3000;
     // Where the overview's tracks start: its label column plus gap in PREVIEW_CSS.
     const OVERVIEW_TRACK_LEFT = "118px";
+    // The strip's overlay marks by bank: a hit near white, as white is kept for hits.
+    const OVERLAY_COLOURS = { hit: "#f5f7fa", fill: "#73b6ff", riser: "#f0c674", dip: "#e5534b", accent: "#b083f0" };
     const NAME_BYTES = 128;
     const TEST_REFRESH_MS = 15000;
     const APPLY_CONFIRM_MS = 5000;
@@ -851,15 +853,20 @@
             );
         });
         const faults = overview.faults.map((value, index) => share(value, index * slice, slice * 1.02, "#e5534b"));
-        const banks = overview.sections
-            .filter((section) => section.bank)
-            .map(({ start, end, bank }) => {
-                const drop = bank === "drop";
-                return `<span class="${drop ? "drop" : ""}" style="left:${(100 * start) / frameCount}%;width:${(100 * (end - start)) / frameCount}%">${drop ? "▼ " : ""}${escapeXml(bank)}</span>`;
-            });
+        const span = (start, end) => `left:${(100 * start) / frameCount}%;width:${(100 * (end - start)) / frameCount}%`;
+        const intents = overview.intents.map(({ name, start, end }) => {
+            const drop = name === "drop";
+            return `<span class="${drop ? "drop" : ""}" style="${span(start, end)}">${drop ? "▼ " : ""}${escapeXml(name)}</span>`;
+        });
+        // Each sounding overlay, coloured by its bank; a one-frame hit still gets a mark.
+        const overlays = overview.overlays.map(
+            ({ name, start, end }) =>
+                `<rect class="preview-overlay" x="${start}" y="0" width="${Math.max(end - start, frameCount / 400)}" height="1" fill="${OVERLAY_COLOURS[name.split("/")[0]] || "#8293a6"}"><title>${escapeXml(name)}</title></rect>`
+        );
         const at = (frame) => `calc(${OVERVIEW_TRACK_LEFT} + ${frame / frameCount} * (100% - ${OVERVIEW_TRACK_LEFT}))`;
         strip.innerHTML = [
-            `<div></div><div class="preview-banks">${banks.join("")}</div>`,
+            `<div></div><div class="preview-banks">${intents.join("")}</div>`,
+            row("overlays", "Overlays as they sound: hits, fills, risers, dips and accents", frameCount, overlays.join("")),
             row("sections", "Base loop runs in their two strongest colours; red where a script fault left them dark", frameCount, sections.join("") + faults.join("")),
             ...Object.entries(overview.groups).map(([group, { low, high }]) =>
                 row(group, `${group}: lowest to highest cell level, line at ${overview.headroom}; strobe ${overview.group_strobe_seconds[group]} s`, columns, low.map((value, index) => band(value, high[index], index, "#e6edf3")).join("") + headroom, "band")
@@ -981,7 +988,8 @@
             const flash = !struck ? "preview-beat" : perBar && inBar === 0 ? "preview-beat on bar" : "preview-beat on";
             const where = perBar ? `bar ${Math.floor(whole / perBar) + 1}.${inBar + 1}` : `beat ${whole + 1}`;
             const base = [frame.bank, frame.autoloop].filter(Boolean).join("/") || "idle";
-            return [`${previewClock(frame.t)} · ${where} · ${base}${frame.fault ? " · dark from a script fault" : ""}`, flash];
+            const layers = [frame.intent, frame.overlays?.length ? `${base} + ${frame.overlays.join(", ")}` : base].filter(Boolean).join(" · ");
+            return [`${previewClock(frame.t)} · ${where} · ${layers}${frame.fault ? " · dark from a script fault" : ""}`, flash];
         },
 
         // Play shows the frame due by the time since Play, so playback runs at real time however

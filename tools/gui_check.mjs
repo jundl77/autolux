@@ -1690,12 +1690,13 @@ const SUITES = {
         const [lit, strobing] = (await rigFiles()).fixtures;
         const cell = (fixture) => ({id: fixture.fixture_uuid, fixture: fixture.fixture_uuid,
             x: fixture.matrix[9] / 1000, y: fixture.matrix[10] / 1000, z: 3});
-        const frame = (t, cells) => ({t, beat: t * 2, bank: 'drop', autoloop: 'chase', c: cells});
+        const frame = (t, cells, overlays) => ({t, beat: t * 2, intent: 'drop', bank: 'drop', autoloop: 'chase', c: cells,
+            ...(overlays ? {overlays} : {})});
         const lines = [
             {kind: 'starfire_preview', frame_rate_hz: 10, duration_seconds: 0.1, frames: 2, beats_per_bar: 4,
                 cells: [cell(lit), cell(strobing)], groups: {pair: [0, 1]}},
             frame(0, [[1, 1, 0, 0, 0, [0.6, -0.8, 0]], [0, 1, 1, 1, 0]]),
-            frame(0.1, [[0.5, 1, 0, 0, 0, [0, 0, -1], 'Dots'], [1, 0, 0, 1, 8]]),
+            frame(0.1, [[0.5, 1, 0, 0, 0, [0, 0, -1], 'Dots'], [1, 0, 0, 1, 8]], ['hit/flash']),
         ];
         const file = join(PROFILE, 'preview.jsonl');
         writeFileSync(file, lines.map((line) => JSON.stringify(line)).join('\n') + '\n');
@@ -1718,11 +1719,14 @@ const SUITES = {
         await check('preview', 'the yaw arrows hide while a recording is shown',
             (await ev(`document.querySelectorAll('#mvr-plan svg.plan .mvr-object line:not(.plan-beam)').length`)) === 0);
         await check('preview', 'a front elevation stands beside the plan', await ev(`document.querySelectorAll('#mvr-plan svg.elevation circle.preview-cell').length === 2`));
-        await check('preview', 'the label names time, bar and base loop', (await text('#preview-label')) === '0:00.0 · bar 1.1 · drop/chase', {label: await text('#preview-label')});
+        await check('preview', 'the label names time, bar, section and base loop', (await text('#preview-label')) === '0:00.0 · bar 1.1 · drop · drop/chase', {label: await text('#preview-label')});
         const rows = await ev(`[...document.querySelectorAll('#preview-overview > div')].map((d) => d.textContent)`);
         await check('preview', 'the strip shows banks, sections, the group band, white and strobe rows',
-            same(rows, ['', '▼ drop', 'sections', 'pair', 'white', 'strobe 0.1 s'])
+            same(rows, ['', '▼ drop', 'overlays', 'sections', 'pair', 'white', 'strobe 0.1 s'])
             && !!(await ev(`!!document.querySelector('#preview-overview svg.band .preview-headroom')`)), {rows});
+        const marker = await ev(`(() => { const mark = document.querySelector('#preview-overview rect.preview-overlay');
+            return mark && {title: mark.querySelector('title').textContent, x: Number(mark.getAttribute('x'))}; })()`);
+        await check('preview', 'the strip marks the overlay where it sounds', sub(marker, {title: 'hit/flash', x: 1}), {marker});
         await shot('config_preview', '.mvr-card');
         await shot('config_preview_strip', '#preview-card');
 
@@ -1730,6 +1734,8 @@ const SUITES = {
         const second = await waitFor(`(() => { const g = ${markOfUuid(strobing)}; return !!g?.querySelector('.plan-strobe'); })()`, 4000);
         await check('preview', 'scrubbing to the next frame rings the strobing cell and names its rate', second
             && (await look(strobing))?.title === `${strobing.name} · 100% · strobe 8 Hz`, {second: await look(strobing)});
+        await check('preview', 'the label adds the sounding overlay to the base loop',
+            (await text('#preview-label')) === '0:00.1 · bar 1.1 · drop · drop/chase + hit/flash', {label: await text('#preview-label')});
         await check('preview', 'a gobo other than Open dashes the beam and is named', sub(await look(lit), {dashed: true, title: `${lit.name} · 50% · gobo Dots`}), {lit: await look(lit)});
         // Thrown straight down from 3 m: a dot on the plan, a beam ending on the elevation's floor.
         const down = await ev(`(() => {

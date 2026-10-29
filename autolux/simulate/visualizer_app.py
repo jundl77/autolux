@@ -2025,12 +2025,14 @@ PREVIEW_CSS = '''
 def render_recording(report: dict, rig_path: Path) -> str:
     """The report's preview frames, converted here and rendered by `starfire preview` on the
     saved patch."""
+    from autolux.lighting.special_catalogue import read_venue
     from cli.starfire import DEFAULT_AUTOLOOPS, DEFAULT_BINARY
     from cli.starfire_assets import native_rig
 
     if not DEFAULT_BINARY.is_file():
         raise ValueError(f'the Starfire binary is missing: {DEFAULT_BINARY}; build it first')
-    replay = report_to_replay(report)
+    # The show's catalogue and venue; a report records neither the session seed nor the level.
+    replay = report_to_replay(report, venue=read_venue(), autoloops=DEFAULT_AUTOLOOPS)
     with (
         tempfile.TemporaryDirectory(prefix='autolux-preview-') as directory,
         native_rig(rig_path) as rig,
