@@ -556,6 +556,7 @@ impl LuaAutoloop {
         let render: Function = definition
             .get("render")
             .context("autoloop must return a table with a render function")?;
+        freeze_globals(&lua)?;
         Ok(Self {
             lua,
             render,
@@ -593,6 +594,7 @@ impl LuaAutoloop {
         .into_iter()
         .chain(context.section_elapsed_beats)
         .chain(context.beats_until_next)
+        .chain(context.beats_until_dip)
         .chain(context.overlay_length_beats)
         {
             ensure!(
@@ -703,6 +705,29 @@ fn cell_fact<T>(
     let name = cell_name(value)?;
     let id = rig.uuid_of_label(&name).unwrap_or(&name);
     fact(id).ok_or_else(|| mlua::Error::RuntimeError(format!("unknown cell {name}")))
+}
+
+/// One VM serves every layer naming the loop and outlives reselection, so a render must not
+/// keep state in globals: they move behind the read-only metatable once the chunk has loaded.
+fn freeze_globals(lua: &Lua) -> mlua::Result<()> {
+    let globals = lua.globals();
+    let backing = lua.create_table()?;
+    let mut names = Vec::new();
+    for pair in globals.pairs::<Value, Value>() {
+        let (name, value) = pair?;
+        backing.raw_set(name.clone(), value)?;
+        names.push(name);
+    }
+    for name in names {
+        globals.raw_set(name, Value::Nil)?;
+    }
+    let frozen = read_only(
+        lua,
+        Value::Table(backing),
+        "globals are read-only after load",
+    )?;
+    globals.set_metatable(frozen.metatable())?;
+    Ok(())
 }
 
 fn read_only(lua: &Lua, value: Value, error: &'static str) -> mlua::Result<Table> {

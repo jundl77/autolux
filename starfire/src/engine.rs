@@ -50,6 +50,8 @@ struct ActiveAutoloop {
     script: Rc<RefCell<LuaAutoloop>>,
     start_beat: f64,
     start_animation_beats: f64,
+    /// Fixed when the loop starts, so sf.random never jumps under it on a re-cue.
+    seed: u32,
 }
 
 impl ActiveAutoloop {
@@ -66,6 +68,7 @@ impl ActiveAutoloop {
                 autoloop_speed_scaled_elapsed_beats: (time.animation_beats
                     - self.start_animation_beats)
                     .max(0.0),
+                seed: self.seed,
                 ..*frame
             },
             palette,
@@ -141,6 +144,9 @@ pub struct Engine {
     cues: CueTimeline,
     /// The newest measured beat's features, held until the next measurement.
     features: Option<BeatFeatures>,
+    /// The bar line at or before a selection without a cue: phrase time counts from a bar
+    /// line, never from the selection instant.
+    phrase_start: Option<f64>,
     palettes: PaletteTable,
     clock: MusicalClock,
     last_time_seconds: f64,
@@ -182,6 +188,7 @@ impl Engine {
             scripts,
             cues: CueTimeline::default(),
             features: None,
+            phrase_start: None,
             palettes,
             clock: MusicalClock::default(),
             last_time_seconds: 0.0,
@@ -244,10 +251,13 @@ impl Engine {
             }
             Command::CueSection { value } => {
                 self.validate_cue(value, time)?;
-                let sample = self.cue_sample(at_seconds)?;
-                self.cues.receive((**value).clone(), sample)?;
+                self.cues
+                    .receive((**value).clone(), self.cue_sample(time))?;
             }
-            Command::ClearCues => self.cues.clear(time.elapsed_musical_beats, true),
+            Command::ClearCues => {
+                self.cues.clear(time.elapsed_musical_beats, true);
+                self.phrase_start = None;
+            }
             Command::Select {
                 bank,
                 autoloop,
@@ -265,6 +275,8 @@ impl Engine {
                     .is_some_and(|active| active.bank == *bank && active.name == *autoloop)
                 {
                     self.select(at_seconds, time, bank, autoloop, transition)?;
+                    let bar = f64::from(time.beats_per_bar);
+                    self.phrase_start = Some((time.beat_position / bar).floor() * bar);
                 }
                 self.cues.clear(time.elapsed_musical_beats, true);
                 let duration_beats = match transition {
@@ -359,6 +371,7 @@ impl Engine {
             }
             Command::Stop => {
                 self.cues.clear(time.elapsed_musical_beats, false);
+                self.phrase_start = None;
                 self.active = None;
                 self.fade = None;
                 self.overrides.clear();
@@ -410,21 +423,23 @@ impl Engine {
         self.cues.overlay_error()
     }
 
-    fn cue_sample(&self, seconds: f64) -> Result<CueSample> {
-        let time = self.clock.sample_at(seconds)?;
-        Ok(CueSample {
+    fn cue_sample(&self, time: ClockSample) -> CueSample {
+        CueSample {
             beat_position: time.beat_position,
             elapsed_musical_beats: time.elapsed_musical_beats,
             beats_per_bar: time.beats_per_bar,
             anchor: self.clock.last_beat(),
-        })
+        }
     }
 
-    /// Everything a script sees this frame except its own layer's elapsed beats.
-    fn frame_context(&self, seconds: f64, time: ClockSample) -> Result<RenderContext> {
-        let section = self.cues.context(&self.cue_sample(seconds)?);
+    /// Everything a script sees this frame except its own layer's elapsed beats and seed.
+    fn frame_context(&self, seconds: f64, time: ClockSample) -> RenderContext {
+        let section = self.cues.context(&self.cue_sample(time));
+        let phrase = self
+            .phrase_start
+            .map(|start| (time.beat_position - start).max(0.0));
         let features = self.features;
-        Ok(RenderContext {
+        RenderContext {
             time_seconds: self.paused_at_seconds.unwrap_or(seconds),
             beat_position: time.beat_position,
             bar_phase: time.bar_phase,
@@ -436,9 +451,10 @@ impl Engine {
             intensity: self.intensity,
             bpm: self.clock.tempo_bpm(),
             section_intent: section.section_intent,
-            section_elapsed_beats: section.section_elapsed_beats,
+            section_elapsed_beats: section.section_elapsed_beats.or(phrase),
             next_intent: section.next_intent,
             beats_until_next: section.beats_until_next,
+            beats_until_dip: section.beats_until_dip,
             drop_strength: section.drop_strength,
             next_drop_strength: section.next_drop_strength,
             seed: section.seed,
@@ -447,12 +463,12 @@ impl Engine {
             mid: features.map(|features| features.mid),
             high: features.map(|features| features.high),
             overlay_length_beats: None,
-        })
+        }
     }
 
     /// Activates due cues and steps the rotation; runs first on every frame.
     fn advance_cues(&mut self, seconds: f64, time: ClockSample) -> Result<()> {
-        let Some(step) = self.cues.advance(self.cue_sample(seconds)?) else {
+        let Some(step) = self.cues.advance(self.cue_sample(time)) else {
             return Ok(());
         };
         let BaseStep {
@@ -460,8 +476,12 @@ impl Engine {
             autoloop,
             transition,
             begin_beat,
+            seed,
             palette,
         } = step;
+        if palette.is_some() {
+            self.phrase_start = None;
+        }
         let transition = self.resolve_transition(&transition);
         if !self
             .active
@@ -480,6 +500,7 @@ impl Engine {
                 &transition,
                 begin_beat,
                 time.animation_beats - behind,
+                seed,
             )?;
         }
         if let Some(palette) = palette {
@@ -542,15 +563,20 @@ impl Engine {
                     "overlay attack and release are outside the supported range"
                 );
             }
+            let period = f64::from(overlay.every_bars) * bar;
             let begins = if overlay.every_bars == 0 {
-                (-MAX_PREROLL_BEATS..=0.0).contains(&overlay.begin_beats)
+                (-MAX_PREROLL_BEATS..=MAX_TRANSITION_BEATS).contains(&overlay.begin_beats)
             } else {
-                overlay.begin_beats >= 0.0
-                    && overlay.begin_beats < f64::from(overlay.every_bars) * bar
+                (0.0..period).contains(&overlay.begin_beats)
             };
             ensure!(
                 overlay.begin_beats.is_finite() && begins,
                 "overlay begin is outside its pre-roll or repeat period"
+            );
+            // A repetition that outlasts its period would overlap the next one.
+            ensure!(
+                overlay.every_bars == 0 || overlay.length_beats + overlay.release_beats <= period,
+                "a repeating overlay's length and release exceed its period"
             );
             self.scripts
                 .get(&overlay.bank, &overlay.autoloop)
@@ -619,8 +645,9 @@ impl Engine {
     pub fn render_at(&mut self, time_seconds: f64) -> Result<RenderedFrame> {
         self.validate_time(time_seconds)?;
         let time = self.clock.sample_at(time_seconds)?;
-        // A failed step has already stopped the show through its script error.
-        let _ = self.advance_cues(time_seconds, time);
+        if let Err(error) = self.advance_cues(time_seconds, time) {
+            self.stop_on_script_error(&error);
+        }
         let mut states = if self.script_error.is_some() {
             self.dark_states()
         } else {
@@ -800,6 +827,7 @@ impl Engine {
             transition,
             time.beat_position,
             time.animation_beats,
+            0,
         )
     }
 
@@ -816,6 +844,7 @@ impl Engine {
         transition: &Transition,
         start_beat: f64,
         start_animation_beats: f64,
+        seed: u32,
     ) -> Result<()> {
         let frozen_source = if matches!(transition, Transition::Crossfade { .. })
             && self.fade.is_some()
@@ -856,6 +885,7 @@ impl Engine {
             script,
             start_beat,
             start_animation_beats,
+            seed,
         });
         self.script_error = None;
         Ok(())
@@ -869,7 +899,10 @@ impl Engine {
         {
             self.fade = None;
         }
-        let frame = self.frame_context(seconds, time)?;
+        if self.active.is_none() {
+            return Ok(self.dark_states());
+        }
+        let frame = self.frame_context(seconds, time);
         let palette = self.palette.slots_at(time.elapsed_musical_beats);
         let Some(active) = &mut self.active else {
             return Ok(self.dark_states());

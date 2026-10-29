@@ -3,7 +3,10 @@
 mod support;
 
 use prost::Message;
-use starfire::cue::{MAX_ACTIVE_OVERLAYS, MAX_OVERLAYS, MAX_PENDING_CUES, MAX_ROTATION};
+use starfire::cue::{
+    CueSample, CueTimeline, InstanceState, MAX_ACTIVE_OVERLAYS, MAX_OVERLAYS, MAX_PENDING_CUES,
+    MAX_ROTATION,
+};
 use starfire::engine::{Engine, RenderedFrame};
 use starfire::model::{
     BeatFeatures, Command, OverlayCue, RenderContext, Rgb, RotationEntry, SectionCue,
@@ -200,7 +203,8 @@ fn a_cue_activates_on_the_first_frame_at_its_start_beat() {
     .unwrap();
     let before = probe(&mut engine, 7.95);
     assert_eq!(before.autoloop.as_deref(), Some("other"));
-    assert_eq!(before.section_elapsed, None);
+    assert_eq!(before.intent, 0.0);
+    near(before.section_elapsed, 7.95);
     assert_eq!(before.next_intent, 0.8);
     near(before.until_next, 0.05);
     // No beat message: the extrapolated clock reaches the start.
@@ -557,8 +561,9 @@ fn invalid_cues_are_refused_before_anything_changes() {
     cases.push(cue);
     for bad in [
         overlay(-65.0, 1.0, 0, 0.0),
-        overlay(1.0, 1.0, 0, 0.0),
+        overlay(1025.0, 1.0, 0, 0.0),
         overlay(4.0, 1.0, 1, 0.0),
+        overlay(0.0, 3.0, 1, 2.0),
         overlay(0.0, 0.0, 0, 0.0),
         overlay(0.0, 1.0, 0, -1.0),
         overlay(0.0, f64::NAN, 0, 0.0),
@@ -895,8 +900,13 @@ fn sf_random_is_a_pure_hash_of_the_seed_and_integer_indices() {
     assert_ne!(first, other_cell);
     let [reseeded, ..] = lua("sf.random(ctx, 1, 2), 0, 0", seeded(8)).unwrap();
     assert_ne!(first, reseeded);
-    let [unset, zeros, _] = lua("sf.random(ctx), sf.random(ctx, 0, 0), 0", seeded(7)).unwrap();
+    let [unset, zeros, third] = lua(
+        "sf.random(ctx), sf.random(ctx, 0, 0, 0), sf.random(ctx, 1, 2, 3)",
+        seeded(7),
+    )
+    .unwrap();
     assert_eq!(unset, zeros);
+    assert_ne!(third, first);
     for value in [first, other_cell, reseeded, unset] {
         assert!((0.0..1.0).contains(&value));
     }
@@ -923,27 +933,31 @@ fn sf_countdown_steps_once_per_beat_over_the_last_beats() {
 }
 
 #[test]
-fn sf_tension_counts_from_the_section_or_the_entry_and_steps_on_downbeats() {
-    let tension = |section: Option<f64>, entry: f64| {
+fn sf_tension_eases_in_over_the_section_or_over_the_known_build() {
+    let tension = |section: Option<f64>, entry: f64, left: Option<f64>| {
         lua(
-            "0, sf.tension(ctx, 64)",
+            "0, sf.tension(ctx)",
             with(|context| {
                 context.section_elapsed_beats = section;
                 context.autoloop_elapsed_beats = entry;
+                context.beats_until_next = left;
             }),
         )
         .unwrap()
     };
-    let half = 0.5;
-    assert_eq!(tension(Some(32.0), 0.0)[1..], [half, half]);
-    let [_, level, stepped] = tension(Some(35.0), 0.0);
-    assert!(level > half && stepped == half);
-    assert_eq!(tension(None, 32.0)[1..], [half, half]);
-    assert_eq!(tension(Some(100.0), 0.0)[1..], [1.0, 1.0]);
+    // Without a next cue: (elapsed / 128)^3, the entry's beats without a section.
+    assert_eq!(tension(Some(64.0), 0.0, None)[1..], [0.125, 0.125]);
+    assert_eq!(tension(None, 64.0, None)[1..], [0.125, 0.125]);
+    assert_eq!(tension(Some(200.0), 0.0, None)[1..], [1.0, 1.0]);
+    let [_, level, stepped] = tension(Some(66.0), 0.0, None);
+    assert!(level > 0.125 && stepped == 0.125, "held at the bar line");
+    // A known next cue: the share of the real build played, eased in.
+    assert_eq!(tension(Some(16.0), 0.0, Some(16.0))[1], 0.125);
+    assert_eq!(tension(Some(32.0), 0.0, Some(0.0))[1], 1.0);
 }
 
 #[test]
-fn sf_finale_hands_over_continuously_from_the_unknown_build() {
+fn sf_finale_hands_over_continuously_and_its_last_bar_is_full() {
     let finale = |left: Option<f64>| {
         lua(
             "sf.finale(ctx, 16), sf.finale(ctx, 16, 0.7)",
@@ -953,15 +967,60 @@ fn sf_finale_hands_over_continuously_from_the_unknown_build() {
     };
     // No next cue, or one further than the finale: exactly the base level, so no jump.
     assert_eq!(finale(None), [0.0, 0.7, 0.7]);
-    assert_eq!(finale(Some(20.0)), [0.0, 0.7, 0.7]);
-    assert_eq!(finale(Some(16.0)), [0.0, 0.7, 0.7]);
+    assert_eq!(finale(Some(20.0))[..2], [0.0, 0.7]);
+    assert_eq!(finale(Some(16.0))[..2], [0.0, 0.7]);
     let [bare, driven, stepped] = finale(Some(7.0));
+    assert!((bare - 9.0 / 16.0).abs() < 1e-12);
     assert!((driven - (0.7 + 0.3 * (9.0 / 16.0))).abs() < 1e-12);
     assert!(
-        (stepped - (0.7 + 0.3 * 0.5)).abs() < 1e-12,
-        "held at the bar's value"
+        (stepped - (0.7 + 0.3 * 0.75)).abs() < 1e-12,
+        "each bar at its end's level"
     );
-    assert!((bare - 9.0 / 16.0).abs() < 1e-12);
+    assert_eq!(finale(Some(3.5))[2], 1.0, "the last bar is full");
+}
+
+#[test]
+fn phrase_helpers_count_from_the_section_start() {
+    let at = |section: Option<f64>, beat: f64, left: Option<f64>| {
+        with(|context| {
+            context.section_elapsed_beats = section;
+            context.beat_position = beat;
+            context.bar_index = (beat / 4.0) as u64;
+            context.beats_until_next = left;
+        })
+    };
+    const BAR_AND_PHRASE: &str = "sf.bar(ctx) / 100,
+        (function() local index, phase = sf.phrase(ctx, 4) return index / 100, phase end)()";
+    let [bar, index, phase] = lua(BAR_AND_PHRASE, at(Some(36.0), 100.0, None)).unwrap();
+    assert_eq!((bar, index, phase), (0.09, 0.02, 0.25));
+    let [bar, index, phase] = lua(BAR_AND_PHRASE, at(None, 100.0, None)).unwrap();
+    assert_eq!((bar, index, phase), (0.25, 0.06, 0.25));
+    let until = |left| {
+        lua(
+            "(sf.bars_until_next(ctx) or 10) / 10, 0, 0",
+            at(None, 0.0, left),
+        )
+    };
+    assert_eq!(until(Some(6.0)).unwrap()[0], 0.15);
+    assert_eq!(until(None).unwrap()[0], 1.0);
+}
+
+#[test]
+fn render_cannot_keep_state_in_globals() {
+    assert!(lua("0, 0, 0", RenderContext::default()).is_ok());
+    let error = lua(
+        "(function() leak = 1 end)() or 0, 0, 0",
+        RenderContext::default(),
+    )
+    .unwrap_err();
+    assert!(format!("{error:#}").contains("read-only"), "{error:#}");
+    assert!(
+        lua(
+            "(function() sf = nil end)() or 0, 0, 0",
+            RenderContext::default()
+        )
+        .is_err()
+    );
 }
 
 #[test]
@@ -985,4 +1044,190 @@ fn music_helpers_read_the_beat_and_fall_back_to_a_mid_level() {
     )
     .unwrap();
     assert_eq!((intent_known, elapsed), (1.0, 0.12));
+}
+
+/// Beat `beat` of a clock whose index n is grid beat n and that never re-anchored.
+fn sample(beat: f64) -> CueSample {
+    CueSample {
+        beat_position: beat,
+        elapsed_musical_beats: beat,
+        beats_per_bar: 4,
+        anchor: Some((0, 0)),
+    }
+}
+
+#[test]
+fn a_late_cue_skips_its_preroll_as_past_and_enters_with_its_entry_rows() {
+    let mut timeline = CueTimeline::default();
+    let mut late = section(4, SectionIntent::Drop, &[("probe", 16)]);
+    late.overlays = vec![overlay(-1.0, 1.0, 0, 0.0), overlay(0.0, 2.0, 0, 0.0)];
+    timeline.receive(late, sample(5.0)).unwrap();
+    for beat in [5.0, 7.0, 7.5] {
+        timeline.advance(sample(beat));
+        assert_eq!(
+            timeline.active_overlay_count(),
+            0,
+            "beat {beat}: no dip mid-bar"
+        );
+    }
+    timeline.advance(sample(8.0));
+    let [hit] = timeline.instances() else {
+        panic!("only the entry hit plays")
+    };
+    assert_eq!(hit.overlay.begin_beats, 0.0);
+    assert_eq!(hit.nominal_end(&sample(8.0)), Some(10.0));
+}
+
+#[test]
+fn a_resent_cue_carries_its_running_overlays_on() {
+    let mut timeline = CueTimeline::default();
+    let mut drop = section(16, SectionIntent::Drop, &[("probe", 16)]);
+    drop.overlays = vec![overlay(-8.0, 8.0, 0, 2.0), overlay(0.0, 6.0, 2, 0.0)];
+    timeline.receive(drop.clone(), sample(1.0)).unwrap();
+    timeline.advance(sample(10.0));
+    let riser = timeline.instances()[0].clone();
+    assert!(matches!(riser.state, InstanceState::Running(_)));
+    // A level change re-sends the cue: the riser neither restarts nor releases.
+    drop.seed = 9;
+    timeline.receive(drop.clone(), sample(10.0)).unwrap();
+    timeline.advance(sample(10.5));
+    let [carried] = timeline.instances() else {
+        panic!("one riser")
+    };
+    assert_eq!((carried.order, carried.state), (riser.order, riser.state));
+    assert_eq!(carried.seed, 9);
+
+    timeline.advance(sample(17.0));
+    let fill = timeline
+        .instances()
+        .iter()
+        .find(|instance| instance.overlay.every_bars == 2)
+        .unwrap()
+        .clone();
+    timeline.receive(drop, sample(17.0)).unwrap();
+    // The re-sent cue takes over on the next bar line; the fill playing then carries on.
+    timeline.advance(sample(20.0));
+    let fills: Vec<_> = timeline
+        .instances()
+        .iter()
+        .filter(|instance| instance.overlay.every_bars == 2)
+        .collect();
+    assert_eq!(fills.len(), 1);
+    assert_eq!((fills[0].order, fills[0].state), (fill.order, fill.state));
+    timeline.advance(sample(24.0));
+    assert_eq!(
+        timeline
+            .instances()
+            .iter()
+            .filter(|instance| instance.overlay.every_bars == 2)
+            .count(),
+        1,
+        "the next repetition starts once"
+    );
+}
+
+#[test]
+fn a_stopped_row_never_repeats_while_its_cue_plays() {
+    let mut timeline = CueTimeline::default();
+    let mut drop = section(0, SectionIntent::Drop, &[("probe", 16)]);
+    drop.overlays = vec![overlay(0.0, 1.0, 1, 0.0)];
+    timeline.receive(drop, sample(0.0)).unwrap();
+    timeline.advance(sample(0.0));
+    let order = timeline.instances()[0].order;
+    timeline.stop_row(order);
+    for beat in [0.5, 4.0, 8.0, 12.0] {
+        timeline.advance(sample(beat));
+        assert_eq!(timeline.instances().len(), 0, "beat {beat}");
+    }
+}
+
+#[test]
+fn a_resent_cue_is_no_next_section_and_the_dip_sets_the_finale_target() {
+    let mut timeline = CueTimeline::default();
+    let buildup = section(0, SectionIntent::Buildup, &[("probe", 16)]);
+    timeline.receive(buildup.clone(), sample(0.0)).unwrap();
+    timeline.advance(sample(0.0));
+    timeline.receive(buildup, sample(2.0)).unwrap();
+    let context = timeline.context(&sample(2.0));
+    assert_eq!(
+        (context.next_intent, context.beats_until_next),
+        (None, None)
+    );
+
+    let mut drop = section(32, SectionIntent::Drop, &[("probe", 16)]);
+    drop.overlays = vec![
+        OverlayCue {
+            bank: "dip".into(),
+            ..overlay(-2.0, 2.0, 0, 0.0)
+        },
+        overlay(-16.0, 16.0, 0, 0.0),
+    ];
+    timeline.receive(drop, sample(3.0)).unwrap();
+    let context = timeline.context(&sample(20.0));
+    assert_eq!(context.next_intent, Some(SectionIntent::Drop));
+    assert_eq!(
+        (context.beats_until_next, context.beats_until_dip),
+        (Some(12.0), Some(10.0))
+    );
+    assert_eq!(timeline.context(&sample(31.0)).beats_until_dip, Some(0.0));
+}
+
+#[test]
+fn a_resent_cue_keeps_the_running_loops_seed() {
+    let mut engine = engine();
+    beat(&mut engine, 0);
+    send(
+        &mut engine,
+        at(0.5),
+        section(4, SectionIntent::Drop, &[("probe", 16)]),
+    )
+    .unwrap();
+    assert_eq!(probe(&mut engine, 5.0).seed, 7.0);
+    let mut recue = section(4, SectionIntent::Drop, &[("probe", 16)]);
+    recue.seed = 11;
+    send(&mut engine, at(5.0), recue).unwrap();
+    assert_eq!(
+        probe(&mut engine, 9.0).seed,
+        7.0,
+        "sf.random never jumps under a loop"
+    );
+}
+
+#[test]
+fn a_selection_without_a_cue_counts_phrase_time_from_its_bar_line() {
+    let mut engine = engine();
+    beat(&mut engine, 0);
+    select(&mut engine, at(6.25), "probe");
+    let frame = probe(&mut engine, 7.0);
+    near(frame.section_elapsed, 3.0);
+    near(frame.autoloop_elapsed, 0.75);
+    assert_eq!(frame.intent, 0.0, "no section intent without a cue");
+}
+
+#[test]
+fn metrics_at_their_largest_fit_the_realtime_cap() {
+    use starfire::cue::MAX_OVERLAY_ERROR_BYTES;
+    use starfire::engine::MAX_SCRIPT_ERROR_BYTES;
+    use starfire::protocol::MAX_ERROR_BYTES;
+    let metrics = wire::Metrics {
+        elapsed_seconds: f64::MAX,
+        rendered_frames: u64::MAX,
+        missed_render_deadlines: u64::MAX,
+        queued_commands: u32::MAX,
+        last_render_duration_seconds: f64::MAX,
+        active_bank: "b".repeat(64),
+        active_autoloop: "a".repeat(128),
+        script_error: "s".repeat(MAX_SCRIPT_ERROR_BYTES),
+        runtime_error: "r".repeat(MAX_ERROR_BYTES),
+        last_processed_command_id: u64::MAX,
+        run_id: u64::MAX,
+        pending_cues: u32::MAX,
+        overlay_error: "o".repeat(MAX_OVERLAY_ERROR_BYTES),
+        active_overlay_count: u32::MAX,
+    };
+    assert!(
+        metrics.encoded_len() <= MAX_MESSAGE_BYTES,
+        "{}",
+        metrics.encoded_len()
+    );
 }
