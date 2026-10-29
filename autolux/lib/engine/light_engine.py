@@ -347,17 +347,16 @@ class LightEngine(IMusicAnalyserHandler):
         if live_crossfade_beats(self._settings()) != self._sent_crossfade_beats:
             self._send_crossfade()
             LOGGER.info('[engine] crossfade %g beats', self._sent_crossfade_beats)
+        cued = self.effect_controller.cue_for(self._current_plan) is not None
+        if not (self._holding() or self._showing_standby or self._entered_intent is None or cued):
+            context = self._selection_context(
+                self._entered_intent, self._entered_label, self._clock.monotonic()
+            )
+            self.effect_controller.apply_intensity(
+                dataclasses.replace(context, new_track=False), self._last_bpm
+            )
+        # After any swap: its selection would end the cues sent before it.
         self._revise_cues(palette=False)
-        if self._holding() or self._showing_standby or self._entered_intent is None:
-            return
-        if self.effect_controller.cue_for(self._current_plan) is not None:
-            return  # re-cued above, its rotation kept
-        context = self._selection_context(
-            self._entered_intent, self._entered_label, self._clock.monotonic()
-        )
-        self.effect_controller.apply_intensity(
-            dataclasses.replace(context, new_track=False), self._last_bpm
-        )
 
     def _send_brightness(self, fade_seconds: float = BRIGHTNESS_FADE_SECONDS) -> None:
         quiet = self._room_quiet and not self._static_mode
@@ -974,13 +973,19 @@ class LightEngine(IMusicAnalyserHandler):
         elif self._section_closes_track_mood(intent):
             self._finish_track_mood()
         bpm = self._last_bpm
-        if await self.effect_controller.change_effect(intent, bpm, context=context, moment=planned):
+        changed = await self.effect_controller.change_effect(
+            intent, bpm, context=context, moment=planned
+        )
+        if changed:
             self._note_new_look(intent, now)
         self._entered_label = label
+        # A selection (this one, or standby's before it) ended every cue sent before it.
+        selected = changed and self.effect_controller.cue_for(planned) is None
         if self._showing_standby:
             self._showing_standby = False
             self._send_brightness()
-            # Standby's selection ended every cue sent before it.
+            selected = True
+        if selected:
             self._resend_cues(current=False)
 
     def _selection_context(

@@ -2221,3 +2221,17 @@ async def test_a_new_source_never_places_the_old_sources_sections():
     light.on_sound_start()
     await beat_at_phase(light, decoder, 0)
     assert planned.start_beat_index is None and planned.unplaceable
+
+
+@pytest.mark.parametrize('standby', [False, True])
+async def test_a_selection_or_leaving_standby_sends_the_planned_cues_again(standby):
+    decoder = FakeDecoder()
+    light, _, clock, lighting = engine(decoder=decoder)
+    planned = await planned_drop(light, decoder, clock)
+    light._showing_standby = standby
+    # A room-side switch with no plan behind it selects a loop, which ends every cue.
+    light._held_intent = LightIntent.ATMOSPHERIC
+    await light._switch_held_intent()
+    *_, select, again = lighting.events
+    assert select['command']['kind'] == 'select'
+    assert again['command'] == light.effect_controller.cue_for(planned).command()
