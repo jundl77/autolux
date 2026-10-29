@@ -13,6 +13,7 @@ from autolux.lib.engine.effect_definitions import (
     BEAT_LOSS_SECONDS,
     PREFERRED_AUTOLOOPS,
     QUIET_BRIGHTNESS,
+    STANDBY_AUTOLOOP,
     LightIntent,
     ShowSettings,
     intent_for_class,
@@ -20,6 +21,7 @@ from autolux.lib.engine.effect_definitions import (
 from autolux.lib.engine.event_buffer import SILENCE_TRIGGER, STOP_PERSISTENCE_SEC
 from autolux.lib.engine.light_engine import LightEngine
 from autolux.lib.engine.section_decoder import BarDecision, BarObservation
+from autolux.lib.engine.static_mode import AUTOMATION_REST_ID
 from autolux.lighting.palettes import PALETTE_NAMES
 from autolux.simulate.lighting_recorder import RecordingStarfireClient
 
@@ -1645,19 +1647,14 @@ async def test_standby_undims_a_quiet_room_and_return_finds_the_quiet_state_clea
     assert show.light._room_quiet is False
 
 
-LOOK_COMMANDS = {
-    'select',
-    'set_palette',
-    'set_override',
-    'clear_override',
-    'set_master',
-    'stop',
-    'cue_section',
-}
-
-
-def _look_commands(commands):
-    return [c for c in commands if c['kind'] in LOOK_COMMANDS]
+def _static_look_changes(commands):
+    return [
+        c
+        for c in commands
+        if c['kind'] in ('set_master', 'stop', 'cue_section')
+        or (c['kind'] == 'clear_override' and c['id'].startswith('static_'))
+        or (c['kind'] == 'set_override' and c['value']['id'].startswith('static_'))
+    ]
 
 
 async def _static_red_show() -> _Show:
@@ -1675,7 +1672,7 @@ async def test_a_pause_under_static_leaves_the_static_look_and_brightness_alone(
     show.light.pause()
     await show.play(3.0, 0.0)
     assert show.light.standby
-    assert _look_commands(show.commands(held)) == []
+    assert _static_look_changes(show.commands(held)) == []
 
 
 async def test_a_resume_under_static_leaves_the_static_look_and_brightness_alone():
@@ -1686,7 +1683,8 @@ async def test_a_resume_under_static_leaves_the_static_look_and_brightness_alone
     show.analyser.leave_standby()
     await show.play(20.0, 0.2)
     assert not show.light.standby and show.light.current_intent is not None
-    assert _look_commands(show.commands(held)) == []
+    assert _static_look_changes(show.commands(held)) == []
+    assert show.lighting.selected_autoloop == ('atmospheric', 'dawn')
 
 
 @pytest.mark.parametrize('playing', [False, True])
@@ -1701,7 +1699,11 @@ async def test_leaving_static_returns_to_what_the_automation_does_now(playing):
     show.light.static_looks.clear()
     await show.light.sync_static()
     assert {'kind': 'clear_override', 'id': 'static_all'} in show.commands(held)
-    standby = ('standby', 'white') in _selections(show.commands(held))
+    assert not any(
+        c['kind'] == 'set_override' and c['value']['id'] == AUTOMATION_REST_ID
+        for c in show.commands(held)
+    )
+    standby = show.lighting.selected_autoloop == STANDBY_AUTOLOOP
     assert standby is not playing
     assert show.light._showing_standby is not playing
 

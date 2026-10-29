@@ -176,6 +176,10 @@ class EffectController:
         if self.palette_listener is not None:
             self.palette_listener()
 
+    @property
+    def entered_autoloop(self) -> tuple[str, str] | None:
+        return None if self._entered is None else (self._entered[1].bank, self._entered[1].autoloop)
+
     def _palette_for_current_look(self) -> str | None:
         plan = self._entered_plan()
         if plan is not None:
