@@ -34,6 +34,10 @@ const PULSE_DEPTH: f64 = 0.05;
 /// Never divides the beat, so a sampled pulse can land anywhere in it.
 const SAMPLE_BEATS: f64 = 0.07;
 const MIN_PULSE_GAP_BEATS: f64 = 0.5 - SAMPLE_BEATS;
+/// A buildup's last two bars before a cued drop may flash on quarter beats, the role strobe
+/// plays in overlays; everywhere else a base loop pulses on half beats at most.
+const FLASH_BEATS: f64 = 8.0;
+const MIN_FLASH_GAP_BEATS: f64 = 0.25 - SAMPLE_BEATS;
 /// The finale replay cues the drop for beat 128; its dip blacks out beat 127.
 const DROP_BEAT: f64 = 128.0;
 const DIP_BEAT: f64 = 127.0;
@@ -962,6 +966,16 @@ fn assert_pulses_at_most_half_beats(
     rig: &FixtureRig,
     when: &str,
 ) {
+    assert_pulse_gaps(look, frames, rig, when, MIN_PULSE_GAP_BEATS);
+}
+
+fn assert_pulse_gaps(
+    look: &Look,
+    frames: &[&RenderedFrame],
+    rig: &FixtureRig,
+    when: &str,
+    min_gap_beats: f64,
+) {
     for group in LOOP_GROUPS {
         for id in rig.groups().get(group).into_iter().flatten() {
             let samples: Vec<_> = frames
@@ -975,7 +989,7 @@ fn assert_pulses_at_most_half_beats(
                 .collect();
             for pair in pulse_beats(&samples).windows(2) {
                 assert!(
-                    pair[1] - pair[0] >= MIN_PULSE_GAP_BEATS,
+                    pair[1] - pair[0] >= min_gap_beats,
                     "{look}: {id} pulses at beats {} and {} {when}",
                     pair[0],
                     pair[1]
@@ -1004,8 +1018,16 @@ fn base_loops_pulse_no_faster_than_half_beat_steps() {
         if look.ramps() {
             let finale = without_overlays(finale_for(&look), &["riser", "hit"]);
             let frames = render_replay(&finale, stage.clone(), support::show_catalog()).unwrap();
-            let last = frames_between(&frames, DIP_BEAT - BEATS, DIP_BEAT);
-            assert_pulses_at_most_half_beats(&look, &last, &stage, "into a cued drop");
+            let approach = frames_between(&frames, DIP_BEAT - BEATS, DIP_BEAT - FLASH_BEATS);
+            assert_pulses_at_most_half_beats(&look, &approach, &stage, "into a cued drop");
+            let last = frames_between(&frames, DIP_BEAT - FLASH_BEATS, DIP_BEAT);
+            assert_pulse_gaps(
+                &look,
+                &last,
+                &stage,
+                "in the last bars",
+                MIN_FLASH_GAP_BEATS,
+            );
         }
     }
 }
