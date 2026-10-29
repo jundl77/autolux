@@ -32,7 +32,7 @@ drop, outro. Inside a section the look changes on phrase lines, never on a rando
   turn over together.
 - **Fills** mark phrase ends: a small one on bar 8, a bigger one on bar 16.
 - **Into a drop:** the build rises, a riser rides its last bars, the dip blacks out the last beat
-  (half a beat to two bars, measured from the audio), and an entry hit lands on the one.
+  (one beat to two bars, measured from the audio; half a beat at Calm), and an entry hit lands on the one.
 - **Into a breakdown:** `dip/fade` settles the room before the breakdown's base takes over.
 - **Restraint means smaller, never absent.** Calm keeps the dip and bumps in a palette colour
   (no white, no strobe); Balanced allows white hits but no strobing riser; Wild adds strobe.
