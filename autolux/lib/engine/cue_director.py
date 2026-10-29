@@ -17,6 +17,7 @@ from autolux.lib.engine.autoloop_policy import (
 )
 from autolux.lib.engine.cue import (
     MAX_OVERLAYS,
+    MAX_PREROLL_BEATS,
     CueSection,
     Envelope,
     Overlay,
@@ -101,7 +102,6 @@ class SectionRequest:
 @dataclass(frozen=True)
 class OverlayPicks:
     hits: tuple[tuple[str, str], ...] = ()
-    strobe_hit: tuple[str, str] | None = None
     riser: tuple[str, str] | None = None
     strobe_riser: tuple[str, str] | None = None
     calm_riser: tuple[str, str] | None = None
@@ -157,13 +157,6 @@ def dip_beats(levels_before: Sequence[float], beats_per_bar: int) -> float:
 def drop_strength(request: SectionRequest) -> float | None:
     arrival = request.context.arrival_of_peak
     return None if arrival is None else min(1.0, max(0.0, arrival))
-
-
-def strobe_hit_beats(bpm: float | None, settings: ShowSettings, beats_per_bar: int) -> float:
-    if not bpm or bpm <= 0:
-        return 1.0
-    seconds = min(settings.strobe_burst_seconds, settings.strobe_max_burst_seconds)
-    return float(min(beats_per_bar, max(1, math.floor(seconds * bpm / 60.0))))
 
 
 def cue_seed(seed: int, track: int, start_beat_index: int) -> int:
@@ -435,7 +428,6 @@ class CueDirector:
         risers = self._bank('riser', strobe=False, under=build)
         return OverlayPicks(
             hits=first_drop.picks.hits if first_drop is not None else white_hits,
-            strobe_hit=next(iter(self._bank('hit', strobe=True)), None),
             riser=BALANCED_RISER
             if BALANCED_RISER in risers
             else self._pick([loop for loop in risers if loop != CALM_RISER]),
@@ -563,11 +555,8 @@ class CueDirector:
         hits = [self._shipped(COLOUR_HIT)]
         if white and plan.picks.hits:
             hits = list(plan.picks.hits)
+        # The strobe_burst special strobes the drop; a strobing hit would lose its rate to it.
         rows += [_row(hit, 0.0, HIT_BEATS, release=HIT_BEATS) for hit in hits if hit is not None]
-        if strobing and plan.picks.strobe_hit is not None:
-            intense = True
-            beats = strobe_hit_beats(bpm, settings, plan.request.beats_per_bar)
-            rows.append(_row(plan.picks.strobe_hit, 0.0, beats))
         lit = [row for row in rows if row.bank == 'hit' and (row.bank, row.autoloop) != COLOUR_HIT]
         events = EntryEvents(intense=intense, accent=bool(lit))
 
@@ -582,7 +571,7 @@ class CueDirector:
 
     @staticmethod
     def _riser_beats(plan: SectionPlan, dip: float) -> float | None:
-        longest = RISER_BARS * plan.request.beats_per_bar
+        longest = min(RISER_BARS * plan.request.beats_per_bar, MAX_PREROLL_BEATS - dip)
         beats = min(longest, plan.previous_beats - dip, math.floor(plan.request.lead_beats - dip))
         return beats if beats >= MIN_RISER_BEATS else None
 

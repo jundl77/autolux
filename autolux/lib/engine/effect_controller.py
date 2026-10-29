@@ -58,14 +58,17 @@ DROP_ACCENT_ID = 'drop_arrival'
 OPERATOR_FADE_SECONDS = 0.1
 
 
-def strobe_burst_seconds(
+def drop_strobe_seconds(
     bpm: float | None, settings: ShowSettings, beats_per_bar: int | None
 ) -> float:
     # Starfire scales its burst cap by intensity and holds a longer strobe dark, never steady.
-    duration = settings.strobe_max_burst_seconds * settings.intensity
-    if bpm and bpm > 0 and beats_per_bar:
-        duration = min(duration, STROBE_BURST_BARS * beats_per_bar * 60.0 / bpm)
-    return duration
+    seconds = min(
+        settings.strobe_burst_seconds, settings.strobe_max_burst_seconds * settings.intensity
+    )
+    if not bpm or bpm <= 0 or not beats_per_bar:
+        return seconds
+    beats = min(STROBE_BURST_BARS * beats_per_bar, math.floor(seconds * bpm / 60.0))
+    return beats * 60.0 / bpm if beats >= 1 else seconds
 
 
 def strobe_override(special: Special, duration_seconds: float, settings: ShowSettings) -> dict:
@@ -510,7 +513,7 @@ class EffectController:
     def _strobe(
         self, special: Special, bpm: float | None, settings: ShowSettings, beats_per_bar: int | None
     ) -> None:
-        duration = strobe_burst_seconds(bpm, settings, beats_per_bar)
+        duration = drop_strobe_seconds(bpm, settings, beats_per_bar)
         self.lighting_client.set_override(strobe_override(special, duration, settings))
         if self.event_buffer:
             self.event_buffer.add_effect(DROP_ACCENT_ID, 'ACCENT', duration_seconds=duration)

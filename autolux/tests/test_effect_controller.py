@@ -477,17 +477,24 @@ def strobe_specials(lighting, start=0):
 
 
 @pytest.mark.parametrize(
-    ('intensity', 'hz', 'seconds'),
-    [(INTENSITY_WILD, 8.0, 8 * 60 / 128), (INTENSITY_BALANCED, 0.7 * 8.0, 0.7 * 4.0)],
+    ('intensity', 'burst', 'hz', 'beats'),
+    [
+        (INTENSITY_WILD, 60.0, 8.0, 8),
+        (INTENSITY_BALANCED, 60.0, 0.7 * 8.0, 5),
+        (INTENSITY_WILD, 1.0, 8.0, 2),
+    ],
+    ids=['two-bars', 'the-burst-cap-at-balanced', 'the-burst-setting'],
 )
-async def test_a_drop_fires_the_strobe_special_for_two_bars_inside_the_engine_caps(
-    intensity, hz, seconds
+async def test_a_drop_strobes_the_burst_setting_in_whole_beats_up_to_two_bars_inside_the_caps(
+    intensity, burst, hz, beats
 ):
-    controller, lighting, _ = with_specials([STROBE], settings=ShowSettings(intensity=intensity))
+    settings = ShowSettings(intensity=intensity, strobe_burst_seconds=burst)
+    controller, lighting, _ = with_specials([STROBE], settings=settings)
     await enter_cued_drop(controller)
     [strobe] = strobe_specials(lighting)
     assert strobe['target'] == 'all' and strobe['priority'] == SPECIAL_PRIORITY
     assert strobe['values'] == {'strobe_hz': pytest.approx(hz)}
+    seconds = beats * 60 / 128
     assert strobe['lifetime'] == {'kind': 'seconds', 'duration_seconds': pytest.approx(seconds)}
 
 
