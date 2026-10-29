@@ -52,6 +52,11 @@ struct Placement {
 
 type DegreeRange = (f64, f64);
 
+/// The physical pan (0..1 of the GDTF range) each moving cell was last sent. A beam direction
+/// has a pan solution every whole turn the range allows; the encoder keeps each head on the one
+/// nearest this, so a beam crossing where one solution meets an end stop does not swing round.
+pub type PanMemory = BTreeMap<String, f64>;
+
 impl Placement {
     fn from_wire(fixture: &wire::Fixture) -> Result<Self> {
         let home = home_orientation(&fixture.matrix)?;
@@ -628,6 +633,14 @@ impl FixtureRig {
         Some((placement.pan.unmap(position), tilt))
     }
 
+    /// How far apart two pan states are that throw the same beam a whole turn of travel apart,
+    /// when the soft limits leave room for one.
+    pub fn pan_turn(&self, cell_id: &str) -> Option<f64> {
+        let (placement, (from, to), _) = self.pan_tilt_travel(cell_id)?;
+        let span = (placement.pan.max - placement.pan.min) * (to - from).abs();
+        (span >= FULL_TURN_DEGREES).then(|| FULL_TURN_DEGREES / span)
+    }
+
     pub fn beam_direction(&self, cell_id: &str, pan: f64, tilt: f64) -> Option<[f64; 3]> {
         let (placement, (from, to), tilt_travel) = self.pan_tilt_travel(cell_id)?;
         let heading = (from + placement.pan.map(pan) * (to - from)).to_radians();
@@ -717,7 +730,18 @@ impl FixtureRig {
             .collect()
     }
 
+    /// A frame on its own: each head takes the pan solution nearest its soft-limit centre.
     pub fn encode(&self, states: &FixtureStates) -> Result<BTreeMap<u16, Vec<u8>>> {
+        self.encode_following(states, &mut PanMemory::new())
+    }
+
+    /// The next frame of a show: each head takes the pan solution nearest the one `memory`
+    /// recorded for it, and `memory` records this frame's.
+    pub fn encode_following(
+        &self,
+        states: &FixtureStates,
+        memory: &mut PanMemory,
+    ) -> Result<BTreeMap<u16, Vec<u8>>> {
         ensure!(
             states.len() == self.cells.len(),
             "cell state does not match rig"
@@ -804,6 +828,15 @@ impl FixtureRig {
                     calibrated.attribute_brightness = scale(state.attribute_brightness);
                 }
                 calibrated.pan = pan(state.pan);
+                if let Some((from, to)) = pan_range {
+                    calibrated.pan = nearest_turn(
+                        calibrated.pan,
+                        FULL_TURN_DEGREES / (to - from).abs(),
+                        &placement.pan,
+                        memory.get(id).copied(),
+                    );
+                    memory.insert(id.clone(), calibrated.pan);
+                }
                 calibrated.tilt = tilt(state.tilt);
                 cell.profile
                     .encode_calibrated(
@@ -836,6 +869,26 @@ fn declares(declared: &[wire::fixture::Cell], cells: &[GdtfCell]) -> bool {
                     .iter()
                     .map(|&offset| offset as usize)
                     .eq(cell.offsets.iter().copied())
+        })
+}
+
+/// `position` or a whole `turn` (both 0..1 of the pan range) either side of it, nearest
+/// `previous`, else nearest the soft-limit centre. A turn away must stay inside the soft limits;
+/// `position` itself is what the yaw offset already chose, so it is always a candidate.
+fn nearest_turn(position: f64, turn: f64, limits: &MovementRange, previous: Option<f64>) -> f64 {
+    let reference = previous.unwrap_or((limits.min + limits.max) / 2.0);
+    let lowest = ((limits.min - position) / turn).ceil() as i32;
+    let highest = ((limits.max - position) / turn).floor() as i32;
+    (lowest..=highest)
+        .map(|turns| position + f64::from(turns) * turn)
+        .filter(|candidate| (0.0..=1.0).contains(candidate))
+        .fold(position, |best, candidate| {
+            // Strictly nearer only: a tie keeps the yaw offset's own choice.
+            if (candidate - reference).abs() < (best - reference).abs() - 1e-9 {
+                candidate
+            } else {
+                best
+            }
         })
 }
 

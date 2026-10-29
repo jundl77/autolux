@@ -10,7 +10,7 @@ use crate::clock::{BeatFact, ClockSample, MusicalClock, validate_time};
 use crate::cue::{
     CueSample, CueTimeline, DueStep, InstanceState, MAX_OVERLAYS, MAX_PREROLL_BEATS, MAX_ROTATION,
 };
-use crate::fixtures::FixtureRig;
+use crate::fixtures::{FixtureRig, PanMemory};
 use crate::gdtf::{GdtfProfile, SNAP_POINT};
 use crate::intensity;
 use crate::model::{
@@ -162,6 +162,7 @@ pub struct Engine {
     blackout: bool,
     script_error: Option<String>,
     last_output_states: FixtureStates,
+    pan_memory: PanMemory,
     paused_at_seconds: Option<f64>,
     default_crossfade_beats: f64,
     strobe_max_rate_hz: f64,
@@ -219,6 +220,7 @@ impl Engine {
             blackout: false,
             script_error: None,
             last_output_states,
+            pan_memory: PanMemory::new(),
             paused_at_seconds: None,
             default_crossfade_beats: 0.0,
             strobe_max_rate_hz: MAX_STROBE_HZ,
@@ -738,13 +740,13 @@ impl Engine {
             .filter_map(|active| active.posed.as_ref().map(|rig| (active.order, rig)))
             .max_by_key(|(order, _)| *order)
             .map_or(&self.rig, |(_, rig)| rig);
-        let universes = match rig.encode(&encoded_states) {
+        let universes = match rig.encode_following(&encoded_states, &mut self.pan_memory) {
             Ok(universes) => universes,
             Err(error) => {
                 self.stop_on_script_error(&error);
                 states = self.dark_states();
                 self.rig
-                    .encode(&states)
+                    .encode_following(&states, &mut self.pan_memory)
                     .context("encode safe darkness after render failure")?
             }
         };
@@ -857,7 +859,22 @@ impl Engine {
                 continue;
             }
             if let Some(previous) = self.last_output_states.get(id) {
-                state.pan = step_toward(previous.pan, state.pan, max_step);
+                state.pan = match self.rig.pan_turn(id) {
+                    // Whole turns apart throw the same beam: slew the short way round and come
+                    // back inside 0..1 by a turn, which the encoder's pan memory follows.
+                    Some(turn) => {
+                        let target = state.pan + ((previous.pan - state.pan) / turn).round() * turn;
+                        let stepped = step_toward(previous.pan, target, max_step);
+                        if stepped > 1.0 {
+                            (stepped - turn).max(0.0)
+                        } else if stepped < 0.0 {
+                            (stepped + turn).min(1.0)
+                        } else {
+                            stepped
+                        }
+                    }
+                    None => step_toward(previous.pan, state.pan, max_step),
+                };
                 state.tilt = step_toward(previous.tilt, state.tilt, max_step);
             }
         }

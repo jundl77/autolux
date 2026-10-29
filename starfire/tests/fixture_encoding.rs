@@ -92,14 +92,15 @@ fn blackout_preserves_movement_and_disables_all_device_programs() {
     let rig = rig(json!([fixture("chauvet_intimidator_spot_110_12ch", 1)]));
     let mut states = rig.empty_states();
     let state = states.get_mut("test").unwrap();
-    state.pan = 0.125;
+    // Pan 0.375 has no whole-turn alias nearer mid-range, so the encoder keeps it as given.
+    state.pan = 0.375;
     state.tilt = 0.875;
     state.intensity = 1.0;
     let lit_frame = rig.encode(&states).unwrap();
     states.get_mut("test").unwrap().intensity = 0.0;
     let dark_frame = rig.encode(&states).unwrap();
     assert_eq!(&dark_frame[&0][..4], &lit_frame[&0][..4]);
-    assert_eq!(&dark_frame[&0][..4], &[32, 0, 223, 255]);
+    assert_eq!(&dark_frame[&0][..4], &[96, 0, 223, 255]);
     assert_eq!(&dark_frame[&0][6..12], &[7, 0, 0, 0, 0, 0]);
 }
 
