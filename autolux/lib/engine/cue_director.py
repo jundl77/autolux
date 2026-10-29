@@ -62,6 +62,8 @@ GAP_LEVEL_SHARE = 0.25
 SILENT_GAP_SHARE = 0.1
 GAP_REFERENCE_BEATS = 16
 BREAKDOWN_DIP_BEATS = 2.0
+# Half a beat, the no-gap default, reads as a flicker between the riser's white and the hit's.
+DROP_DIP_BEATS = 1.0
 
 HIT_BEATS = 2.0
 RISER_BEATS = 16
@@ -542,12 +544,12 @@ class CueDirector:
             and not soft_drop(plan.request.context.arrival_of_peak)
         )
         rows: list[Overlay] = []
-        dip = plan.dip_beats
+        dip = plan.dip_beats if level == CALM else max(plan.dip_beats, DROP_DIP_BEATS)
         if self._shipped(DROP_DIP):
             rows.append(_row(DROP_DIP, -dip, dip, dip=True))
         intense = False
 
-        riser_beats = self._riser_beats(plan)
+        riser_beats = self._riser_beats(plan, dip)
         if plan.previous is LightIntent.BUILDUP and riser_beats is not None:
             riser = plan.picks.calm_riser if level == CALM else plan.picks.riser
             fits = (
@@ -581,8 +583,7 @@ class CueDirector:
         return rows, events, accent
 
     @staticmethod
-    def _riser_beats(plan: SectionPlan) -> float | None:
-        dip = plan.dip_beats
+    def _riser_beats(plan: SectionPlan, dip: float) -> float | None:
         long_build = LONG_BUILD_BARS * plan.request.beats_per_bar
         longest = LONG_RISER_BEATS if plan.previous_beats >= long_build else RISER_BEATS
         beats = min(longest, plan.previous_beats - dip, math.floor(plan.request.lead_beats - dip))

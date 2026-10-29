@@ -396,7 +396,7 @@ def test_a_riser_only_after_a_buildup():
         (64, (0.8,) * 8 + (0.0,) * 8, 16.0, 8),
         (64, LOUD_BUILD, 6.0, 5),
         (64, LOUD_BUILD, 4.0, None),
-        (10, LOUD_BUILD, 18.0, 9.5),
+        (10, LOUD_BUILD, 18.0, 9),
         (128, LOUD_BUILD, 40.0, 32),
         (128, LOUD_BUILD, 24.0, 23),
     ],
@@ -473,9 +473,17 @@ def test_a_filtered_build_is_no_gap_and_only_near_silence_earns_two_bars():
     assert dip_beats((), 4) == 0.5, 'nothing measured: the shortest'
 
 
+@pytest.mark.parametrize(('level', 'dip'), [('calm', 0.5), ('balanced', 1.0), ('wild', 1.0)])
+def test_a_drop_with_no_gap_before_it_still_goes_dark(level, dip):
+    drop = drop_after_build(level=level)
+    assert (row(drop, 'dip').begin_beats, row(drop, 'dip').duration_beats) == (-dip, dip)
+    riser = row(drop, 'riser')
+    assert riser.begin_beats + riser.duration_beats == -dip
+
+
 def test_dip_shapes_land_in_the_drop_cue():
     for levels, dip in (
-        (LOUD_BUILD, 0.5),
+        (LOUD_BUILD, 1.0),
         ((0.8,) * 15 + (0.1,), 1.0),
         ((0.7,) * 12 + (0.05,) * 4, 4.0),
         ((0.9,) * 8 + (0.05,) * 8, 8.0),
