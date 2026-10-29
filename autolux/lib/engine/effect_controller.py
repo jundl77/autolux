@@ -109,6 +109,9 @@ class EffectController:
         self.special_capabilities()
         if event_buffer is not None:
             event_buffer.set_cooldown_source(self.special_cooldowns)
+            # The director's plans follow from this seed, the venue and the settings over time.
+            event_buffer.set_planning(seed, dataclasses.asdict(venue or Venue()))
+            event_buffer.record_settings(settings().to_dict())
 
     def special_capabilities(self) -> SpecialCapabilities:
         capabilities = SpecialCapabilities.from_groups(self.lighting_client.groups())

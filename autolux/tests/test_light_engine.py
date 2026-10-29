@@ -2350,3 +2350,28 @@ async def test_a_late_section_without_a_phase_switches_on_starfires_next_bar_lin
     await elapse(light, clock, 0.5)
     await beat_at_phase(light, decoder, None)
     assert planned.switch_beat_index == 5
+
+
+def test_the_report_records_what_the_director_planned_from():
+    from autolux.lib.engine.event_buffer import EventBuffer
+
+    clock = VirtualClock()
+    buffer = EventBuffer(window_sec=float('inf'), clock=clock)
+    buffer.start()
+    settings = ShowSettings()
+    lighting = RecordingStarfireClient(clock=clock)
+    controller = EffectController(lighting, event_buffer=buffer, settings=lambda: settings, seed=41)
+    light = LightEngine(
+        lighting, controller, event_buffer=buffer, clock=clock, settings=lambda: settings
+    )
+    clock.advance(30.0)
+    settings = ShowSettings(intensity=0.2)
+    light.settings_changed()
+    light.settings_changed()
+    planning = buffer.to_report()['planning']
+    assert planning['seed'] == 41
+    assert planning['venue'] == {'max_accent_events_per_minute': 2}
+    assert [(change['t'], change['settings']['intensity']) for change in planning['settings']] == [
+        (0.0, ShowSettings().intensity),
+        (30.0, 0.2),
+    ]
