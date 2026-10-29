@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import math
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -19,6 +20,7 @@ from autolux.lib.engine.autoloop_policy import (
     SelectionContext,
     loudness_trend,
 )
+from autolux.lib.engine.cue import Cue
 from autolux.lib.engine.cue_director import GAP_REFERENCE_BEATS, SectionRequest
 from autolux.lib.engine.effect_controller import EffectController
 from autolux.lib.engine.effect_definitions import (
@@ -103,12 +105,58 @@ def _levels_before(levels: list[tuple[float, float]], start: tuple[float, int, f
     return tuple(before[-max(GAP_REFERENCE_BEATS, LOUDNESS_TREND_BEATS) :])
 
 
+@dataclass(frozen=True)
+class _Planning:
+    """What the show's director planned from, as the report's `planning` records it."""
+
+    seed: int
+    venue: Venue
+    # (song seconds, the settings from then on), in recorded order.
+    settings: tuple[tuple[float, ShowSettings], ...]
+
+    def settings_at(self, at: float) -> ShowSettings:
+        current = self.settings[0][1]
+        for since, settings in self.settings:
+            if since <= at:
+                current = settings
+        return current
+
+
+def _planning(report: dict) -> _Planning:
+    planning = report.get('planning')
+    if planning is None:
+        # Only a show whose controller had no event buffer leaves it out: the defaults it ran.
+        return _Planning(0, Venue(), ((0.0, ShowSettings()),))
+    if not isinstance(planning, dict):
+        raise TypeError('report.planning must be an object')
+    seed = planning.get('seed')
+    if type(seed) is not int or seed < 0:
+        raise ValueError('report.planning.seed must be a nonnegative integer')
+    venue = planning.get('venue')
+    if not isinstance(venue, dict):
+        raise TypeError('report.planning.venue must be an object')
+    changes = planning.get('settings')
+    if not isinstance(changes, list) or not changes:
+        raise ValueError('report.planning.settings must list the settings in force')
+    if not all(isinstance(change, dict) for change in changes):
+        raise TypeError('report.planning.settings entries must be objects')
+    settings = tuple(
+        (
+            _nonnegative(change.get('t'), 'report.planning.settings.t'),
+            ShowSettings.from_dict(change.get('settings')),
+        )
+        for change in changes
+    )
+    return _Planning(seed, Venue(**venue), settings)
+
+
 def _cue_events(
     sections: list[_Section],
     placed: list[tuple[float, int, float]],
     levels: list[tuple[float, float]],
     delay: float,
-    controller: EffectController,
+    plan: Callable[[int, SectionRequest], Cue],
+    reset: Callable[[], None],
 ) -> list[dict]:
     """The director's cue for each section, sent `delay` before its start beat as the show
     sends it once that beat is analysed ahead of the room; a silence clears
@@ -120,7 +168,7 @@ def _cue_events(
         at, intent = section.at, section.intent
         if intent is None:
             events.append({'at_seconds': at, 'command': {'kind': 'clear_cues'}})
-            controller.reset_cues()
+            reset()
             previous = drop_ended_at = build_started_at = None
             new_track = True
             continue
@@ -159,7 +207,7 @@ def _cue_events(
                 levels_before=levels_before,
                 lead_beats=(beat_at - sent_at) * bpm / 60.0,
             )
-            cue = controller.plan_cue(moment, request)
+            cue = plan(moment, request)
             events.append({'at_seconds': sent_at, 'command': cue.command()})
             new_track = False
         if intent not in BUILD_INTENTS:
@@ -174,16 +222,14 @@ def report_to_replay(
     report: dict,
     *,
     frame_rate_hz: int = DEFAULT_FRAME_RATE_HZ,
-    seed: int = 0,
-    settings: ShowSettings | None = None,
-    venue: Venue | None = None,
     autoloops: Path = AUTOLOOP_DIRECTORY,
 ) -> dict:
     """Return source-time beats and the director's section cues, with a terminal stop.
 
     Each recorded section is planned by the show's director over the catalogue in
-    `autoloops`, with `seed`, `settings` and `venue` as the show ran (reports record none of
-    them), so the replay plays its dips, risers, hits, fills and accents. Reports do not
+    `autoloops`, from the seed, venue and settings the report's `planning` recorded (the
+    settings in force when the room heard the section start), so the replay plays its dips,
+    risers, hits, fills and accents. Reports do not
     retain beat ordinals, downbeats or accents. Beat positions are reconstructed from
     detection order, not a known bar/downbeat origin. Zero-tempo warm-up detections do not
     anchor the clock; later zero tempo holds the last known positive tempo.
@@ -267,16 +313,25 @@ def report_to_replay(
         # A repeated intent is no new section; the show keeps playing the one it has.
         if not sections or sections[-1].intent is not LightIntent(name):
             sections.append(_Section(at, LightIntent(name)))
+    planning = _planning(report)
+    in_force = [planning.settings_at(0.0)]
     controller = EffectController(
         _NoLights(),
-        settings=lambda: settings or ShowSettings(),
+        settings=lambda: in_force[0],
         autoloops=discover_autoloops(autoloops),
         autoloop_meta=read_autoloop_meta(autoloops),
         overlay_meta=read_overlay_meta(autoloops),
-        seed=seed,
-        venue=venue,
+        seed=planning.seed,
+        venue=planning.venue,
     )
-    events += _cue_events(sections, placed, levels, delay, controller) + stops
+
+    def plan(moment: int, request: SectionRequest) -> Cue:
+        # The show re-cues a planned section on a level change, so the section plays at the
+        # level in force when the room hears its start.
+        in_force[0] = planning.settings_at(request.room_sec + delay)
+        return controller.plan_cue(moment, request)
+
+    events += _cue_events(sections, placed, levels, delay, plan, controller.reset_cues) + stops
     # Stable ordering preserves supplied intent order; beat anchors precede controls.
     events.sort(key=lambda event: (event['at_seconds'], event['command']['kind'] != 'beat'))
     if not events or events[-1] != {'at_seconds': duration, 'command': {'kind': 'stop'}}:

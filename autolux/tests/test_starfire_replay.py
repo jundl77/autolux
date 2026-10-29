@@ -148,23 +148,42 @@ def a_set():
     }
 
 
+def planned(seed=7, settings=({'t': 0.0, 'settings': {}},)):
+    return {**a_set(), 'planning': {'seed': seed, 'venue': {}, 'settings': list(settings)}}
+
+
 def test_the_director_cues_every_section_with_its_overlays_deterministically(tmp_path):
     catalogue = overlay_catalogue(tmp_path / 'autoloops')
-    first = report_to_replay(a_set(), seed=7, autoloops=catalogue)
-    assert json.dumps(first) == json.dumps(report_to_replay(a_set(), seed=7, autoloops=catalogue))
-    planned = [event['command']['value'] for event in cues(first)]
-    assert [cue['intent'] for cue in planned] == ['atmospheric', 'buildup', 'drop', 'breakdown']
+    first = report_to_replay(planned(), autoloops=catalogue)
+    assert json.dumps(first) == json.dumps(report_to_replay(planned(), autoloops=catalogue))
+    cued = [event['command']['value'] for event in cues(first)]
+    assert [cue['intent'] for cue in cued] == ['atmospheric', 'buildup', 'drop', 'breakdown']
     # Each cue goes out the look-ahead before its start beat.
     assert [event['at_seconds'] for event in cues(first)] == [0.0, 21.5, 53.5, 85.5]
     assert sections(first) == [0.5, 30.5, 62.5, 94.5]
-    drop_rows = {(row['bank'], row['autoloop']) for row in planned[2]['overlays']}
+    drop_rows = {(row['bank'], row['autoloop']) for row in cued[2]['overlays']}
     assert ('dip', 'last_beat') in drop_rows
     assert {bank for bank, _ in drop_rows} >= {'dip', 'hit'}
-    # The seed is the show's: another one plans the same sections with other draws.
-    assert [cue['seed'] for cue in planned] != [
-        event['command']['value']['seed']
-        for event in cues(report_to_replay(a_set(), seed=8, autoloops=catalogue))
+    # The recorded seed is the show's: another one keys the cues differently.
+    other = report_to_replay(planned(seed=8), autoloops=catalogue)
+    assert [cue['seed'] for cue in cued] != [
+        event['command']['value']['seed'] for event in cues(other)
     ]
+
+
+def test_each_section_is_planned_at_the_level_in_force_when_the_room_hears_it(tmp_path):
+    catalogue = overlay_catalogue(tmp_path / 'autoloops')
+    wild = {'t': 0.0, 'settings': {'intensity': 1.0}}
+    # The drop starts at 62.5 s and is heard 9 s later; calm from 70 s is in force by then.
+    calm_by_the_drop = [wild, {'t': 70.0, 'settings': {'intensity': 0.3}}]
+    calm_after_it = [wild, {'t': 72.0, 'settings': {'intensity': 0.3}}]
+
+    def drop(settings):
+        replay = report_to_replay(planned(settings=settings), autoloops=catalogue)
+        return [event['command']['value'] for event in cues(replay)][2]
+
+    assert drop(calm_by_the_drop) != drop([wild])
+    assert drop(calm_after_it) == drop([wild])
 
 
 def test_replay_preserves_measured_loudness_instead_of_a_fixed_strength():
