@@ -77,6 +77,10 @@ class StubShow:
         self._lock = threading.Lock()
         self._base = EventBuffer().snapshot()
         self.rig_path = Path(rig_path)
+        # Commands take effect in arrival order, each ECHO_SECONDS after it arrived: separate
+        # timers could wake out of order and leave a test lit behind the clear that ended it.
+        self._due = queue.Queue()
+        threading.Thread(target=self._apply_in_order, daemon=True).start()
         self.reset()
 
     def reset(self) -> None:
@@ -158,7 +162,13 @@ class StubShow:
     def take(self, command: dict) -> None:
         with self._lock:
             self.commands.append({'t': time.time(), 'cmd': command})
-        threading.Timer(ECHO_SECONDS, self._apply, args=(command,)).start()
+        self._due.put((time.monotonic() + ECHO_SECONDS, command))
+
+    def _apply_in_order(self) -> None:
+        while True:
+            due, command = self._due.get()
+            time.sleep(max(0.0, due - time.monotonic()))
+            self._apply(command)
 
     def _apply(self, c: dict) -> None:
         with self._lock:
