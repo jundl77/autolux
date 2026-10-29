@@ -31,8 +31,9 @@ drop, outro. Inside a section the look changes on phrase lines, never on a rando
 - **Accents** run for 16 bars and change 8 bars offset from the base rotation, so the two never
   turn over together.
 - **Fills** mark phrase ends: a small one on bar 8, a bigger one on bar 16.
-- **Into a drop:** the build rises, a riser rides its last bars, the dip blacks out the last beat
-  (one beat to two bars, measured from the audio; half a beat at Calm), and an entry hit lands on the one.
+- **Into a drop:** the build rises, a riser rides its last eight bars (as far as the lead allows),
+  the dip blacks out the last beat (one beat to two bars, measured from the audio; half a beat at
+  Calm), and an entry hit lands on the one.
 - **Into a breakdown:** `dip/fade` settles the room before the breakdown's base takes over.
 - **Restraint means smaller, never absent.** Calm keeps the dip and bumps in a palette colour
   (no white, no strobe); Balanced allows white hits but no strobing riser; Wild adds strobe.
@@ -45,12 +46,14 @@ its one.
 
 Every buildup reads one shared state, `sf.build(ctx)` (below), and implements both regimes:
 
-- **Regime U, the drop unknown.** `drive = 0.25 + 0.65 * tension`, with tension `e / (e + 48)`
-  of section time: 0.3 in bar 1, 0.51 at bar 8, 0.62 at bar 16 (twice bar 1), 0.72 at bar 32,
-  still rising, so an uncued build climbs from its first bar and never restarts.
+- **Regime U, the drop unknown.** `drive = 0.35 + 0.65 * tension`, with tension `e / (e + 24)`
+  of section time: 0.35 on bar 1, 0.70 on bar 8, 0.81 on bar 16, 0.89 on bar 32, still rising,
+  so an uncued build climbs from its first bar and never restarts. Live, the drop is known only
+  about 9 s ahead, so most of a build plays in this regime.
 - **Regime K, a drop cued.** `drive` hands over continuously to 1 over the last 16 beats before
-  the dip (`drive + (1 - drive) * finale`); a cue that arrives with fewer than 16 beats to go
-  hands over across what is left (`build.span`, `sf.approach`), never in a jump. Counts move one step
+  the dip and holds full over the last 4 (`drive + (1 - drive) * finale`); a cue that arrives with
+  fewer than 16 beats to go hands over across what is left, full for its last half at most 4
+  (`build.span`, `sf.approach`), never in a jump. Counts move one step
   per beat (`math.ceil(build.left)`) and land on the dip, not the drop.
 - **A cued non-drop** eases `drive` down by half instead of building a finale.
 - **Steps land on the one:** compare thresholds with `build.step`, the tension at the last
@@ -223,7 +226,7 @@ Section and music helpers:
 ```lua
 sf.random(ctx, i, j, k)        -- 0..1, a pure hash of ctx.seed and up to three integers.
 sf.section_beats(ctx)          -- phrase time: beats since the section start, else the layer's.
-sf.tension(ctx, half_beats)    -- 0..1 build progress (e / (e + 48) until the next change is
+sf.tension(ctx, half_beats)    -- 0..1 build progress (e / (e + 24) until the next change is
                                -- known, then linear to it), and its value at the last downbeat.
 sf.finale(ctx, beats, from)    -- 0..1 over the last `beats` before the next cue (0 when none);
                                -- with `from`, from + (1 - from) x that. The second value holds
@@ -237,9 +240,9 @@ Show helpers, shared by the banks (the show-helpers section of `lighting.lua`):
 
 ```lua
 sf.build(ctx) -> { drive, finale, tension, step, stage, measure, left, span }
--- A buildup's shared state: drive 0..1 (regime U 0.25 + 0.65 x tension, handed over to 1 by a
+-- A buildup's shared state: drive 0..1 (regime U 0.35 + 0.65 x tension, handed over to 1 by a
 -- cued drop's finale, eased down before a cued non-drop), finale 0..1, tension and step (the
--- tension at the last downbeat), stage 0, 1, 2 (from step at a third and a half), measure (the
+-- tension at the last downbeat), stage 0, 1, 2 (from step at a half and two thirds), measure (the
 -- 8, 4, 2-beat rate ladder by stage, moving on 8-beat lines), left = beats until a cued drop's
 -- dip begins (nil while no drop is cued), span = the beats the finale runs over.
 sf.approach(build, beats)      -- 0..1 over the last `beats` before the dip, over less after a

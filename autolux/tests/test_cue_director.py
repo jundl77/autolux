@@ -325,7 +325,11 @@ def test_the_entry_rows_land_on_the_one():
     assert (dip.begin_beats + dip.duration_beats, dip.envelope.attack_beats) == (0.0, 0.0)
     assert [o.bank for o in drop.cue.overlays if o.dip] == ['dip'], 'the dip blacks out'
     assert riser.begin_beats + riser.duration_beats == dip.begin_beats, 'the riser ends at the dip'
-    assert (riser.duration_beats, riser.every_bars, riser.envelope.release_beats) == (16, 0, 2.0)
+    assert (riser.duration_beats, riser.every_bars, riser.envelope.release_beats) == (
+        LEAD_BEATS - 1,
+        0,
+        2.0,
+    )
     hits = [o for o in drop.cue.overlays if o.bank == 'hit']
     assert [o.autoloop for o in hits] == ['white']
     assert {(o.begin_beats, o.envelope.attack_beats, o.every_bars) for o in hits} == {(0.0, 0.0, 0)}
@@ -391,7 +395,8 @@ def test_a_riser_only_after_a_buildup():
 @pytest.mark.parametrize(
     ('build_beats', 'levels', 'lead', 'riser_beats'),
     [
-        (64, LOUD_BUILD, 18.0, 16),
+        (64, LOUD_BUILD, 18.0, 17),
+        (64, LOUD_BUILD, 40.0, 32),
         (64, (0.8,) * 12 + (0.0,) * 4, 18.0, 14),
         (64, (0.8,) * 8 + (0.0,) * 8, 16.0, 8),
         (64, LOUD_BUILD, 6.0, 5),
@@ -401,7 +406,8 @@ def test_a_riser_only_after_a_buildup():
         (128, LOUD_BUILD, 24.0, 23),
     ],
     ids=[
-        'usual-16',
+        'usual-lead',
+        'eight-bars-when-the-lead-allows',
         'bar-of-dip',
         'short-lead',
         'late-commit',
@@ -424,6 +430,15 @@ def test_the_riser_starts_after_starfire_has_the_cue_and_inside_the_build(
     assert riser.duration_beats == riser_beats
     assert riser.begin_beats + riser.duration_beats == dip.begin_beats, 'never inside the dip'
     assert -riser.begin_beats <= lead and -riser.begin_beats <= build_beats
+
+
+def test_a_balanced_build_rides_white_from_eight_bars_out_into_a_white_hit_and_never_strobes():
+    drop = drop_after_build(level='balanced', lead=40.0)
+    riser = row(drop, 'riser')
+    assert (riser.autoloop, riser.begin_beats) == ('white_rise', -33.0)
+    assert entry_of(drop.cue) == 'white' and row(drop, 'hit').autoloop == 'white'
+    assert not any(OVERLAYS[o.bank, o.autoloop].strobe for o in drop.cue.overlays)
+    assert not drop.events.intense
 
 
 def test_an_overlay_never_fights_its_base_loop():

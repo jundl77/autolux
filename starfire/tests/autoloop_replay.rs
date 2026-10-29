@@ -1071,8 +1071,8 @@ fn buildup_regime_u_never_restarts() {
             peak_light(&frames, 60.0, 64.0, &cells),
         );
         assert!(
-            bar_16 >= 2.0 * bar_1,
-            "{look}: bar 16 peaks {bar_16}, under twice bar 1's {bar_1}"
+            bar_16 >= 1.6 * bar_1,
+            "{look}: bar 16 peaks {bar_16}, under 1.6 times bar 1's {bar_1}"
         );
     }
 }

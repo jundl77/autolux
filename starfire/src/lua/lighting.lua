@@ -181,7 +181,7 @@ function sf.section_beats(ctx)
     return ctx.section_elapsed_beats or ctx.autoloop_elapsed_beats
 end
 
-local TENSION_HALF_BEATS = 48
+local TENSION_HALF_BEATS = 24
 
 function sf.tension(ctx, half_beats)
     half_beats = half_beats or TENSION_HALF_BEATS
@@ -465,9 +465,9 @@ function sf.drop_levels(ctx, floor_quiet, floor_loud)
     return sf.loudness_gain(energy), sf.lerp(floor_quiet, floor_loud, energy), energy
 end
 
-local FINALE_BEATS, EASE_BEATS, LADDER_BEATS = 16, 8, 8
-local DRIVE_FLOOR, DRIVE_GAIN = 0.25, 0.65
-local STAGE_TENSIONS = { 1 / 3, 1 / 2 }
+local FINALE_BEATS, FULL_BEATS, EASE_BEATS, LADDER_BEATS = 16, 4, 8, 8
+local DRIVE_FLOOR, DRIVE_GAIN = 0.35, 0.65
+local STAGE_TENSIONS = { 1 / 2, 2 / 3 }
 
 local function stage_of(tension)
     return tension < STAGE_TENSIONS[1] and 0 or tension < STAGE_TENSIONS[2] and 1 or 2
@@ -495,7 +495,8 @@ function sf.build(ctx)
     if left ~= nil then
         local known = ctx.next_known_at
         span = known and math.min(FINALE_BEATS, left + sf.section_beats(ctx) - known) or FINALE_BEATS
-        finale = ramp_to_dip(left, span)
+        local full = math.min(FULL_BEATS, span / 2)
+        finale = ramp_to_dip(left - full, span - full)
         drive = drive + (1 - drive) * finale
     elseif ctx.next_intent ~= nil then
         drive = drive * (1 - 0.5 * sf.finale(ctx, EASE_BEATS))
