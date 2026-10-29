@@ -1,5 +1,6 @@
 //! Bounded Lua autoloops operating on musical time and fixture properties.
 
+use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs::{self, File};
 use std::io::Read;
@@ -17,8 +18,8 @@ use serde::Serialize;
 use crate::fixtures::{FixtureRig, MAX_CELLS};
 use crate::gdtf::GOBO_ATTRIBUTE;
 use crate::intensity;
-use crate::model::{Effect, MAX_STROBE_HZ, PropertyValues, RenderContext, Target};
-use crate::palette::{PaletteSlots, PaletteTable};
+use crate::model::{Effect, MAX_STROBE_HZ, PropertyValues, RenderContext, Rgb, Target};
+use crate::palette::{PaletteSlots, PaletteTable, WHITE, WHITE_SLOT};
 use crate::protocol::wire;
 use crate::spatial::MM_PER_METRE;
 
@@ -43,6 +44,72 @@ pub struct AutoloopInfo {
 pub struct AutoloopCatalog {
     sources: BTreeMap<(String, String), String>,
     identities: BTreeMap<String, (String, String)>,
+    /// Loops whose intensity composes HTP as an overlay (Login metadata).
+    intensity_htp: BTreeSet<(String, String)>,
+}
+
+/// Banks whose loops play as cue overlays; their header must say how they compose.
+const OVERLAY_BANKS: [&str; 5] = ["hit", "fill", "riser", "dip", "accent"];
+const OVERLAY_HEADER: [(&str, [&str; 2]); 2] =
+    [("strobe", ["yes", "no"]), ("intensity", ["htp", "ltp"])];
+
+/// An overlay's `-- strobe:` and `-- intensity:` lines, read as Autolux reads them for Login:
+/// the `-- key: value` block right after the first line, each key once, both required.
+fn overlay_htp(source: &str) -> Result<bool> {
+    let mut values: BTreeMap<&str, &str> = BTreeMap::new();
+    for line in source.split('\n').skip(1) {
+        let line = line.strip_suffix('\r').unwrap_or(line);
+        let Some((key, value)) = line
+            .strip_prefix("-- ")
+            .and_then(|entry| entry.split_once(": "))
+        else {
+            break;
+        };
+        let Some((_, allowed)) = OVERLAY_HEADER.iter().find(|(name, _)| *name == key) else {
+            break;
+        };
+        ensure!(
+            allowed.contains(&value),
+            "{key} {value:?} is not one of {}",
+            allowed.join(", ")
+        );
+        ensure!(values.insert(key, value).is_none(), "{key} declared twice");
+    }
+    for (key, _) in OVERLAY_HEADER {
+        ensure!(
+            values.contains_key(key),
+            "missing {key} in the header block after the first line"
+        );
+    }
+    Ok(values["intensity"] == "htp")
+}
+
+/// A base loop's `-- intensity: htp` header line; base loops never play as overlays.
+fn declares_htp(source: &str) -> bool {
+    source
+        .lines()
+        .map_while(|line| line.strip_prefix("--"))
+        .any(|line| line.trim().replace(' ', "") == "intensity:htp")
+}
+
+/// Every catalogue script compiled once at Login; cues and selections only look identities up,
+/// so nothing compiles on the render thread. One VM serves every layer naming the loop, which
+/// Lua purity allows: a render is a function of its ctx alone.
+pub struct CompiledScripts {
+    scripts: BTreeMap<(String, String), Compiled>,
+}
+
+/// A shared VM, or the compile error a command naming the loop reports.
+type Compiled = std::result::Result<Rc<RefCell<LuaAutoloop>>, String>;
+
+impl CompiledScripts {
+    pub fn get(&self, bank: &str, autoloop: &str) -> Result<Rc<RefCell<LuaAutoloop>>> {
+        match self.scripts.get(&(bank.to_owned(), autoloop.to_owned())) {
+            Some(Ok(script)) => Ok(Rc::clone(script)),
+            Some(Err(error)) => bail!("{error}"),
+            None => bail!("unknown autoloop {bank}/{autoloop}"),
+        }
+    }
 }
 
 impl AutoloopCatalog {
@@ -118,9 +185,22 @@ impl AutoloopCatalog {
                 )
             })
             .collect();
+        let mut intensity_htp = BTreeSet::new();
+        for ((bank, autoloop), source) in &sources {
+            let htp = if OVERLAY_BANKS.contains(&bank.as_str()) {
+                overlay_htp(source)
+                    .with_context(|| format!("invalid overlay header in {bank}/{autoloop}.lua"))?
+            } else {
+                declares_htp(source)
+            };
+            if htp {
+                intensity_htp.insert((bank.clone(), autoloop.clone()));
+            }
+        }
         Ok(Self {
             sources,
             identities,
+            intensity_htp,
         })
     }
 
@@ -131,6 +211,7 @@ impl AutoloopCatalog {
         );
         let mut sources = BTreeMap::new();
         let mut identities = BTreeMap::new();
+        let mut intensity_htp = BTreeSet::new();
         let mut source_bytes = 0;
         for script in scripts {
             validate_identifier(&script.bank)?;
@@ -159,12 +240,37 @@ impl AutoloopCatalog {
                 "duplicate autoloop ID {}",
                 script.autoloop_id
             );
+            if script.intensity_htp {
+                intensity_htp.insert(identity.clone());
+            }
             sources.insert(identity, script.lua_source.clone());
         }
         Ok(Self {
             sources,
             identities,
+            intensity_htp,
         })
+    }
+
+    pub fn intensity_htp(&self, bank: &str, autoloop: &str) -> bool {
+        self.intensity_htp
+            .contains(&(bank.to_owned(), autoloop.to_owned()))
+    }
+
+    /// A script that fails to compile is kept as its error, reported when a command names it.
+    pub fn compile(&self, rig: &FixtureRig, palettes: &PaletteTable) -> CompiledScripts {
+        CompiledScripts {
+            scripts: self
+                .sources
+                .iter()
+                .map(|((bank, autoloop), source)| {
+                    let script = LuaAutoloop::new(bank, autoloop, source, rig, palettes)
+                        .map(|script| Rc::new(RefCell::new(script)))
+                        .map_err(|error| format!("{error:#}"));
+                    ((bank.clone(), autoloop.clone()), script)
+                })
+                .collect(),
+        }
     }
 
     pub fn resolve(&self, autoloop_id: &str) -> Result<&(String, String)> {
@@ -329,24 +435,32 @@ impl LuaAutoloop {
             .set_name("starfire lighting API")
             .set_mode(ChunkMode::Text)
             .eval()?;
+        let colour_table = |colour: &Rgb| -> Result<Table> {
+            lua.to_value(colour)?
+                .as_table()
+                .cloned()
+                .context("palette slot is a table")
+        };
+        // One white table for every palette, reset each frame like the active palette's slots.
+        let white = colour_table(&WHITE)?;
         for (name, slots) in palettes.iter() {
+            let table = colour_table_of(&lua, slots)?;
+            table.set(WHITE_SLOT, &white)?;
             named_palettes.set(
                 name,
-                read_only(&lua, lua.to_value(slots)?, "palettes are read-only")?,
+                read_only(&lua, Value::Table(table), "palettes are read-only")?,
             )?;
         }
         let initial_slots = palettes.slots(palettes.initial())?;
         let active_palette = lua.create_table()?;
         let mut active_palette_slots = Vec::new();
         for (slot, colour) in initial_slots.named_slots() {
-            let table: Table = lua
-                .to_value(&colour)?
-                .as_table()
-                .cloned()
-                .context("palette slot is a table")?;
+            let table = colour_table(&colour)?;
             active_palette.set(slot, &table)?;
             active_palette_slots.push(table);
         }
+        active_palette.set(WHITE_SLOT, &white)?;
+        active_palette_slots.push(white);
         use_active_palette.call::<()>(read_only(
             &lua,
             Value::Table(active_palette),
@@ -530,6 +644,7 @@ impl LuaAutoloop {
         let render: Function = definition
             .get("render")
             .context("autoloop must return a table with a render function")?;
+        freeze_globals(&lua)?;
         Ok(Self {
             lua,
             render,
@@ -562,13 +677,42 @@ impl LuaAutoloop {
             context.bar_phase,
             context.autoloop_elapsed_beats,
             context.autoloop_speed_scaled_elapsed_beats,
-        ] {
+            context.bpm,
+        ]
+        .into_iter()
+        .chain(context.section_elapsed_beats)
+        .chain(context.beats_until_next)
+        .chain(context.beats_until_dip)
+        .chain(context.next_known_at)
+        .chain(context.overlay_length_beats)
+        {
             ensure!(
                 value.is_finite() && value >= 0.0,
                 "render context must contain finite nonnegative time"
             );
         }
-        for (table, (_, colour)) in self.active_palette_slots.iter().zip(palette.named_slots()) {
+        for value in [
+            context.drop_strength,
+            context.next_drop_strength,
+            context.onset,
+            context.bass,
+            context.mid,
+            context.high,
+        ]
+        .into_iter()
+        .flatten()
+        {
+            ensure!(
+                value.is_finite() && (0.0..=1.0).contains(&value),
+                "render context levels must be finite and between zero and one"
+            );
+        }
+        let colours = palette.named_slots().map(|(_, colour)| colour);
+        for (table, colour) in self
+            .active_palette_slots
+            .iter()
+            .zip(colours.iter().chain([&WHITE]))
+        {
             table.set("red", colour.red)?;
             table.set("green", colour.green)?;
             table.set("blue", colour.blue)?;
@@ -655,6 +799,36 @@ fn cell_fact<T>(
     let name = cell_name(value)?;
     let id = rig.uuid_of_label(&name).unwrap_or(&name);
     fact(id).ok_or_else(|| mlua::Error::RuntimeError(format!("unknown cell {name}")))
+}
+
+/// One VM serves every layer naming the loop and outlives reselection, so a render must not
+/// keep state in globals: they move behind the read-only metatable once the chunk has loaded.
+fn freeze_globals(lua: &Lua) -> mlua::Result<()> {
+    let globals = lua.globals();
+    let backing = lua.create_table()?;
+    let mut names = Vec::new();
+    for pair in globals.pairs::<Value, Value>() {
+        let (name, value) = pair?;
+        backing.raw_set(name.clone(), value)?;
+        names.push(name);
+    }
+    for name in names {
+        globals.raw_set(name, Value::Nil)?;
+    }
+    let frozen = read_only(
+        lua,
+        Value::Table(backing),
+        "globals are read-only after load",
+    )?;
+    globals.set_metatable(frozen.metatable())?;
+    Ok(())
+}
+
+fn colour_table_of(lua: &Lua, slots: &PaletteSlots) -> Result<Table> {
+    lua.to_value(slots)?
+        .as_table()
+        .cloned()
+        .context("palette is a table")
 }
 
 fn read_only(lua: &Lua, value: Value, error: &'static str) -> mlua::Result<Table> {

@@ -15,7 +15,6 @@ from autolux.lib.engine.effect_definitions import DEFAULT_AUTOLOOPS
 from autolux.lib.engine.section_decoder import BEATS_PER_BAR
 from autolux.lighting.palettes import DEFAULT_PALETTE, palette_records
 
-REPLAY_SCHEMA_VERSION = 1
 DEFAULT_FRAME_RATE_HZ = 40
 MAX_FRAME_RATE_HZ = 100
 MAX_TEMPO_BPM = 1_000.0
@@ -145,7 +144,6 @@ def report_to_replay(report: dict, *, frame_rate_hz: int = DEFAULT_FRAME_RATE_HZ
     if not commands or commands[-1] != {'at_seconds': duration, 'command': {'kind': 'stop'}}:
         commands.append({'at_seconds': duration, 'command': {'kind': 'stop'}})
     return {
-        'schema_version': REPLAY_SCHEMA_VERSION,
         'duration_seconds': duration,
         'frame_rate_hz': frame_rate_hz,
         'palettes': palette_records(),

@@ -280,6 +280,7 @@ fn autoloop(rig: &FixtureRig, body: &str) -> LuaAutoloop {
         autoloop_id: "autoloop".into(),
         bank: "test".into(),
         lua_source: format!("return {{render = function(ctx)\n{body}\nend}}"),
+        intensity_htp: false,
     }])
     .unwrap()
     .instantiate("test", "autoloop", rig, &support::palettes())

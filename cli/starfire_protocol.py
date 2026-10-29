@@ -39,6 +39,8 @@ COMMAND_MESSAGES = {
     wire.UPDATE_BEAT: wire.UpdateBeat,
     wire.SET_PARAMETER: wire.SetParameter,
     wire.DISCARD_DELAYED_AUDIO: wire.DiscardDelayedAudio,
+    wire.CUE_SECTION: wire.CueSection,
+    wire.CLEAR_CUES: wire.ClearCues,
     wire.HEARTBEAT: wire.Heartbeat,
 }
 EVENT_MESSAGES = {
@@ -95,6 +97,8 @@ def build_command(command: dict | Message) -> Message:
             kind = value.pop('kind')
             if kind == 'beat':
                 bar_phase = value.pop('bar_phase', None)
+                if (features := value.pop('features', None)) is not None:
+                    value['features'] = wire.BeatFeatures(**features)
                 message = wire.UpdateBeat(
                     beat_index=value.pop('beat_index'),
                     beats_per_bar=value.pop('beats_per_bar'),
@@ -131,6 +135,15 @@ def build_command(command: dict | Message) -> Message:
                 if value:
                     raise ValueError('Idle playback command contains unexpected fields')
                 message = wire.PlayAutoloop()
+            elif kind == 'cue_section':
+                cue = value.pop('value')
+                if value:
+                    raise ValueError('cue_section requires exactly one value')
+                message = _cue_section(cue)
+            elif kind == 'clear_cues':
+                if value:
+                    raise ValueError('Clearing cues takes no fields')
+                message = wire.ClearCues()
             elif kind == 'discard_delayed_audio':
                 if value:
                     raise ValueError('Discarding delayed audio takes no fields')
@@ -142,6 +155,34 @@ def build_command(command: dict | Message) -> Message:
         except (KeyError, TypeError, ValueError) as error:
             raise ValueError(f'Invalid Starfire command: {error}') from error
     return message
+
+
+def _cue_section(value):
+    value = dict(value)
+    rotation = [
+        wire.CueSection.BaseLook(
+            autoloop_id=f'{entry.pop("bank")}/{entry.pop("autoloop")}',
+            **(
+                {'transition': _transition(entry.pop('transition'))}
+                if 'transition' in entry
+                else {}
+            ),
+            **entry,
+        )
+        for entry in map(dict, value.pop('rotation'))
+    ]
+    overlays = [
+        wire.CueSection.Overlay(
+            autoloop_id=f'{overlay.pop("bank")}/{overlay.pop("autoloop")}', **overlay
+        )
+        for overlay in map(dict, value.pop('overlays', ()))
+    ]
+    return wire.CueSection(
+        intent=wire.SectionIntent.Value(value.pop('intent').upper()),
+        rotation=rotation,
+        overlays=overlays,
+        **value,
+    )
 
 
 def _transition(value):

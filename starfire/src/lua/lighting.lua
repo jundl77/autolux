@@ -50,8 +50,14 @@ function sf.beat_in_bar(ctx_or_beats)
     return ctx_or_beats % BEATS_PER_BAR
 end
 
+-- Given ctx, bars since the section start (the bar line at or before a selection without a
+-- cue); the absolute bar index before any.
 function sf.bar(ctx_or_beats)
-    if type(ctx_or_beats) == "table" then return ctx_or_beats.bar_index end
+    if type(ctx_or_beats) == "table" then
+        local elapsed = ctx_or_beats.section_elapsed_beats
+        if elapsed == nil then return ctx_or_beats.bar_index end
+        return math.floor(elapsed / ctx_or_beats.beats_per_bar)
+    end
     return math.floor(ctx_or_beats / BEATS_PER_BAR)
 end
 
@@ -177,6 +183,127 @@ function sf.each(target, make_effect)
     return sf.scene(result)
 end
 
+-- ==== W1 context ====
+-- Section lookahead and per-beat music. Starfire derives these from the cue Autolux sent ahead
+-- of the room; every ctx field here is nil until there is something to say.
+
+-- The active section's intent ("atmospheric", "breakdown", "buildup", "drop") and the beats
+-- since it started (since the bar line at or before a selection without a cue); nil without
+-- either.
+function sf.section(ctx)
+    return ctx.section_intent, ctx.section_elapsed_beats
+end
+
+local TENSION_BEATS = 128
+
+local function phrase_beats(ctx)
+    return ctx.section_elapsed_beats or ctx.autoloop_elapsed_beats
+end
+
+-- 0..1, an ease-in (cubic) over `beats` (128) of section time until the next change becomes
+-- known (at ctx.next_known_at); from there it bends linearly to full at that change, so the
+-- curve fills the real build without a jump. The second value is the tension at the last
+-- downbeat, for loops that step against it.
+function sf.tension(ctx, beats)
+    beats = beats or TENSION_BEATS
+    assert(finite(beats) and beats > 0, "tension length must be positive and finite")
+    local elapsed, left, known = phrase_beats(ctx), ctx.beats_until_next, ctx.next_known_at
+    local function ease(played) return math.min(1, played / beats) ^ 3 end
+    local function at(played)
+        if left == nil or known == nil or played < known then return ease(played) end
+        local rest = elapsed - known + left
+        if rest <= 0 then return 1 end
+        local base = ease(known)
+        return base + (1 - base) * (played - known) / rest
+    end
+    local bar = ctx.beats_per_bar
+    return at(elapsed), at(math.floor(elapsed / bar) * bar)
+end
+
+-- 0..1 over the last `beats` before the next cue starts, 0 while none is pending. Given `from`
+-- (the level the loop builds to without a known next section), the result hands over from it
+-- continuously: from + (1 - from) * fin. The second value holds each bar at the level its end
+-- reaches, so the last bar is full.
+function sf.finale(ctx, beats, from)
+    assert(finite(beats) and beats > 0, "finale length must be positive and finite")
+    assert(from == nil or (finite(from) and from >= 0 and from <= 1), "finale base must be within 0..1")
+    local remaining = ctx.beats_until_next
+    local function level(left)
+        local fin = left and 1 - math.min(1, left / beats) or 0
+        return from and from + (1 - from) * fin or fin
+    end
+    local bar = ctx.beats_per_bar
+    local stepped = remaining and math.max(0, (math.ceil(remaining / bar) - 1) * bar)
+    return level(remaining), level(stepped)
+end
+
+-- Whole beats left before the next cue starts, one step per beat, within the last `steps`
+-- beats; nil otherwise.
+function sf.countdown(ctx, steps)
+    assert(math.type(steps) == "integer" and steps > 0, "countdown needs a positive whole step count")
+    local remaining = ctx.beats_until_next
+    if remaining == nil or remaining > steps then return nil end
+    return math.ceil(remaining)
+end
+
+-- Bars left before the next cue starts (fractional), nil while none is pending.
+function sf.bars_until_next(ctx)
+    return ctx.beats_until_next and ctx.beats_until_next / ctx.beats_per_bar
+end
+
+-- Which `bars`-long phrase of the section this is (0 first) and the position in it, 0..1.
+function sf.phrase(ctx, bars)
+    assert(finite(bars) and bars > 0, "phrase length must be positive and finite")
+    local length = bars * ctx.beats_per_bar
+    local elapsed = ctx.section_elapsed_beats or ctx.beat_position
+    return math.floor(elapsed / length), (elapsed % length) / length
+end
+
+local function random_index(value)
+    if value == nil then return 0 end
+    assert(math.type(value) == "integer", "sf.random takes integer indices (use the sf.each index)")
+    return value
+end
+
+-- 0..1, a pure hash of the cue's seed and up to three integer indices (say phrase, cell, step):
+-- the same arguments give the same value on every frame and every run. SplitMix64's
+-- finaliser, two rounds.
+function sf.random(ctx, i, j, k)
+    local x = ctx.seed ~ (random_index(i) * 0x9E3779B97F4A7C15) ~ (random_index(j) << 21)
+        ~ (random_index(k) << 42)
+    for _ = 1, 2 do
+        x = (x ~ (x >> 30)) * 0xBF58476D1CE4E5B9
+        x = (x ~ (x >> 27)) * 0x94D049BB133111EB
+        x = x ~ (x >> 31)
+    end
+    return (x >> 11) / 2.0 ^ 53
+end
+
+-- A neutral mid level before the analyser has measured a beat.
+local UNMEASURED_FEATURE = 0.5
+
+-- The newest beat's onset strength, 0..1.
+function sf.onset(ctx)
+    return ctx.onset or UNMEASURED_FEATURE
+end
+
+-- The newest beat's level in "bass", "mid" or "high", 0..1.
+function sf.band(ctx, name)
+    assert(name == "bass" or name == "mid" or name == "high", "band is bass, mid or high")
+    return ctx[name] or UNMEASURED_FEATURE
+end
+
+-- The newest beat's tempo; 0 before the first beat.
+function sf.bpm(ctx)
+    return ctx.bpm
+end
+
+-- A beat-related rate in Hz: `per_beat` cycles every beat (2 is eighths).
+function sf.beat_hz(ctx, per_beat)
+    assert(finite(per_beat) and per_beat >= 0, "beats division must be finite and nonnegative")
+    return ctx.bpm / 60 * per_beat
+end
+
 -- ==== W3 aim ====
 -- sf.aim(cell, x, y, z) -> pan, tilt (nil, nil for a cell without a pan range) and
 -- sf.focus(cell) -> x, y, z are native (starfire::fixtures). Points are metres in the MVR scene
@@ -245,19 +372,6 @@ function sf.aim_direction(cell, dx, dy, dz)
     return sf.aim(cell, x + dx, y + dy, z + dz)
 end
 
--- Stands in for sf.random(ctx, a, b) until it lands; the same SplitMix64 recipe over ctx.seed.
-local function _w3_hash(ctx, a, b)
-    b = b or 0
-    assert(math.type(a) == "integer" and math.type(b) == "integer", "hash arguments must be integers")
-    local x = (ctx.seed or 0) ~ (a * 0x9E3779B97F4A7C15) ~ (b << 21)
-    for _ = 1, 2 do
-        x = (x ~ (x >> 30)) * 0xBF58476D1CE4E5B9
-        x = (x ~ (x >> 27)) * 0x94D049BB133111EB
-        x = x ~ (x >> 31)
-    end
-    return (x >> 11) / 2.0 ^ 53
-end
-
 -- Each shape gives (spread, elevation) per unit size at cycle position t (nil when static), for
 -- a member at signed stage position u (wings: outermost +-1, centreline 0; else 1) on side w.
 local PHASER_SHAPES = {
@@ -270,9 +384,9 @@ local PHASER_SHAPES = {
     tilt_wave = function(t) return 0, math.sin(FULL_TURN * t) end,
     -- Each member's own phase on the fundamental keeps partners from reading as one mirrored circle.
     ballyhoo = function(t, _, w, ctx, index)
-        local fundamental = FULL_TURN * (t + _w3_hash(ctx, index, 2))
-        return w * (0.7 * math.sin(fundamental) + 0.3 * math.sin(3 * FULL_TURN * t + FULL_TURN * _w3_hash(ctx, index))),
-            0.7 * math.cos(fundamental) + 0.3 * math.sin(2 * FULL_TURN * t + FULL_TURN * _w3_hash(ctx, index, 1))
+        local fundamental = FULL_TURN * (t + sf.random(ctx, index, 2))
+        return w * (0.7 * math.sin(fundamental) + 0.3 * math.sin(3 * FULL_TURN * t + FULL_TURN * sf.random(ctx, index))),
+            0.7 * math.cos(fundamental) + 0.3 * math.sin(2 * FULL_TURN * t + FULL_TURN * sf.random(ctx, index, 1))
     end,
 }
 local STATIC_SHAPES = { fan = true, cross = true }
@@ -372,6 +486,12 @@ function sf.phaser(target, ctx, spec)
     end
     return effects
 end
+
+-- ==== W4 vocabulary ====
+
+-- Full white, every palette's reserved "white" slot, for hits only: it ignores palette changes
+-- and alone may put a colour wheel on its open slot.
+function sf.white() return active_palette.white end
 
 -- ==== W6 show helpers ====
 

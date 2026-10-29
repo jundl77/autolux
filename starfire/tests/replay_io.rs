@@ -11,7 +11,6 @@ use starfire::replay::{Replay, dmx_digest, render_replay, write_capture};
 
 fn replay(duration_seconds: f64) -> Replay {
     Replay {
-        schema_version: 1,
         duration_seconds,
         frame_rate_hz: 40,
         palettes: support::palette_definitions(),
@@ -23,6 +22,7 @@ fn replay(duration_seconds: f64) -> Replay {
                     bar_phase: None,
                     beats_per_bar: 4,
                     bpm: 120.0,
+                    features: None,
                 },
             },
             TimedCommand {

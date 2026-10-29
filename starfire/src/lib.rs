@@ -1,5 +1,6 @@
 pub mod artnet;
 pub mod clock;
+pub mod cue;
 pub mod engine;
 pub mod fixtures;
 pub mod gdtf;
