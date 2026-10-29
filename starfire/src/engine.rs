@@ -6,7 +6,7 @@ use std::rc::Rc;
 use anyhow::{Context, Result, ensure};
 use serde::Serialize;
 
-use crate::clock::{BeatFact, ClockSample, MusicalClock, validate_time};
+use crate::clock::{BeatFact, ClockSample, MusicalClock, SECONDS_PER_MINUTE, validate_time};
 use crate::cue::{
     CueSample, CueTimeline, DueStep, InstanceState, MAX_OVERLAYS, MAX_PREROLL_BEATS, MAX_ROTATION,
 };
@@ -156,9 +156,9 @@ pub struct Engine {
     releasing: Vec<ReleasingSpecial>,
     special_maps: BTreeMap<String, CellMap>,
     override_order: u64,
-    master: MasterFade,
+    master: Glide,
     group_masters: BTreeMap<String, f64>,
-    normalized_rms_level: Option<f64>,
+    normalized_rms_level: Option<Glide>,
     blackout: bool,
     script_error: Option<String>,
     last_output_states: FixtureStates,
@@ -214,7 +214,7 @@ impl Engine {
             releasing: Vec::new(),
             special_maps,
             override_order: 0,
-            master: MasterFade::steady(1.0),
+            master: Glide::steady(1.0),
             group_masters: BTreeMap::new(),
             normalized_rms_level: None,
             blackout: false,
@@ -337,7 +337,17 @@ impl Engine {
             }
             Command::SetNormalizedRmsLevel { level } => {
                 validate_unit(*level, "normalized RMS level")?;
-                self.normalized_rms_level = Some(*level);
+                // The level arrives once a beat; a loop scaling dimmers or phaser sizes by it
+                // would jump every beat, so it glides to each reading over one beat instead.
+                let beat_seconds = if self.clock.tempo_bpm() > 0.0 {
+                    SECONDS_PER_MINUTE / self.clock.tempo_bpm()
+                } else {
+                    0.0
+                };
+                match &mut self.normalized_rms_level {
+                    Some(glide) => glide.retarget(at_seconds, *level, beat_seconds),
+                    None => self.normalized_rms_level = Some(Glide::steady(*level)),
+                }
             }
             Command::SetSpeed { multiplier } => self.clock.set_speed(at_seconds, *multiplier)?,
             Command::SetBlackout { enabled } => self.blackout = *enabled,
@@ -491,7 +501,9 @@ impl Engine {
             beats_per_bar: time.beats_per_bar,
             autoloop_elapsed_beats: 0.0,
             autoloop_speed_scaled_elapsed_beats: 0.0,
-            normalized_rms_level: self.normalized_rms_level,
+            normalized_rms_level: self
+                .normalized_rms_level
+                .map(|glide| glide.level_at(seconds)),
             intensity: self.intensity,
             bpm: self.clock.tempo_bpm(),
             strobe_max_hz: self.strobe_rate_cap_hz(),
@@ -1556,14 +1568,14 @@ impl ActivePalette {
 }
 
 #[derive(Clone, Copy, Debug)]
-struct MasterFade {
+struct Glide {
     from: f64,
     to: f64,
     start_seconds: f64,
     duration_seconds: f64,
 }
 
-impl MasterFade {
+impl Glide {
     fn steady(level: f64) -> Self {
         Self {
             from: level,

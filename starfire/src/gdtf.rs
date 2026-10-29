@@ -9,6 +9,8 @@ use crate::protocol::wire;
 const MAX_CHANNEL_BYTES: usize = 4;
 const CURVE_SAMPLES: u32 = 1024;
 const CURVE_TOLERANCE: f64 = 1e-9;
+/// Keeps a level that lands on a step (0.2 x 255 = 51.000…01) from rounding up a whole step.
+const SPREAD_TOLERANCE: f64 = 1e-9;
 const MAX_FUNCTIONS: usize = 4096;
 const MAX_ATTRIBUTE_VALUES: usize = 512;
 const MAX_ATTRIBUTE_ID_BYTES: usize = 512;
@@ -115,32 +117,46 @@ impl DmxCurve {
             })
     }
 
-    fn dmx(&self, amount: f64, first: u32, last: u32) -> u32 {
-        let position = |value: u32| {
-            if last == first {
-                0.0
-            } else {
-                f64::from(value - first) / f64::from(last - first)
-            }
-        };
+    fn output_at(&self, value: u32, first: u32, last: u32) -> f64 {
+        self.output(if last == first {
+            0.0
+        } else {
+            f64::from(value - first) / f64::from(last - first)
+        })
+    }
+
+    /// The lowest DMX value whose output reaches `amount`.
+    fn dmx_at_least(&self, amount: f64, first: u32, last: u32) -> u32 {
         let (mut low, mut high) = (first, last);
         while low < high {
             let middle = low + (high - low) / 2;
-            if self.output(position(middle)) < amount {
+            if self.output_at(middle, first, last) < amount {
                 low = middle + 1;
             } else {
                 high = middle;
             }
         }
+        low
+    }
+
+    fn dmx(&self, amount: f64, first: u32, last: u32) -> u32 {
+        let low = self.dmx_at_least(amount, first, last);
         if low > first
-            && (amount - self.output(position(low - 1))).abs()
-                <= (self.output(position(low)) - amount).abs()
+            && (amount - self.output_at(low - 1, first, last)).abs()
+                <= (self.output_at(low, first, last) - amount).abs()
         {
             low - 1
         } else {
             low
         }
     }
+}
+
+#[derive(Clone, Copy, Debug)]
+struct DimmerSpread {
+    channel: usize,
+    dimmer: u32,
+    colour_gain: f64,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -596,18 +612,29 @@ impl GdtfProfile {
             .collect();
         let mut active_function_ends = vec![Vec::new(); self.channels.len()];
         let mut resolved_attributes = BTreeSet::new();
+        let spread = self.dimmer_spread(state);
+        let colour_gain = spread.map_or(1.0, |spread| spread.colour_gain);
         for &index in &self.order {
             let channel = &self.channels[index];
             active_function_ends[index] =
                 channel.active_function_ends(&values, &active_function_ends, &self.channels);
             let dimmer = channel.has_dimmer;
-            let requested = channel
-                .functions_by_dmx_start
-                .iter()
-                .find_map(|&function_index| {
-                    let last = active_function_ends[index][function_index]?;
-                    semantic_value(&channel.functions[function_index], last, state, channel)
-                });
+            let requested = match spread {
+                Some(spread) if spread.channel == index => Some(spread.dimmer),
+                _ => channel
+                    .functions_by_dmx_start
+                    .iter()
+                    .find_map(|&function_index| {
+                        let last = active_function_ends[index][function_index]?;
+                        semantic_value(
+                            &channel.functions[function_index],
+                            last,
+                            state,
+                            channel,
+                            colour_gain,
+                        )
+                    }),
+            };
             let mut explicit = None;
             for (key, value) in &state.attributes {
                 for (function_index, function) in channel.functions.iter().enumerate() {
@@ -675,6 +702,46 @@ impl GdtfProfile {
             }
         }
         Ok(())
+    }
+
+    /// An 8-bit dimmer has a few dozen steps across a low fade, each a visible jump on an
+    /// LED. Where one dimmer governs RGB emitters, round the dimmer up and take the
+    /// remainder off the colour channels: light is dimmer x colour, so a dimmer at d/255
+    /// steps 255/d times finer (ten times at 10 %) without changing the colour.
+    fn dimmer_spread(&self, state: &FixtureState) -> Option<DimmerSpread> {
+        let mut dimmers = self.channels.iter().enumerate().filter(|(_, channel)| {
+            channel
+                .functions
+                .iter()
+                .any(|function| function.attribute == "Dimmer")
+        });
+        let (index, channel) = dimmers.next()?;
+        if dimmers.next().is_some() || !channel.has_rgb || state.intensity <= 0.0 {
+            return None;
+        }
+        let function = &channel.functions[0];
+        if state.attributes.keys().any(|key| function.matches(key)) {
+            return None;
+        }
+        let last = function.maximum_dmx_value;
+        let (dimmer, emitted) = match &function.curve {
+            Some(curve) => {
+                let dimmer = curve.dmx_at_least(state.intensity, function.first, last);
+                (dimmer, curve.output_at(dimmer, function.first, last))
+            }
+            None => {
+                let span = f64::from(last - function.first);
+                let steps = (state.intensity * span - SPREAD_TOLERANCE)
+                    .ceil()
+                    .clamp(0.0, span);
+                (function.first + steps as u32, steps / span)
+            }
+        };
+        (emitted > 0.0).then(|| DimmerSpread {
+            channel: index,
+            dimmer,
+            colour_gain: (state.intensity / emitted).min(1.0),
+        })
     }
 
     pub fn functions(&self) -> Vec<FunctionInfo> {
@@ -1015,10 +1082,11 @@ fn semantic_value(
     last: u32,
     state: &FixtureState,
     channel: &Channel,
+    colour_gain: f64,
 ) -> Option<u32> {
     let rgb = channel.has_rgb;
     let gain = if channel.has_dimmer {
-        1.0
+        colour_gain
     } else {
         state.intensity
     };
