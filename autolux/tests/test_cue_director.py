@@ -37,13 +37,13 @@ META = {
     ('atmospheric', 'glow'): AutoloopMeta(1, 'still', 'wash'),
     ('atmospheric', 'drift'): AutoloopMeta(1, 'sweep', 'beam'),
     ('breakdown', 'pulse'): AutoloopMeta(1, 'still', 'wash'),
-    ('breakdown', 'float'): AutoloopMeta(1, 'sweep', 'mixed'),
+    ('breakdown', 'float'): AutoloopMeta(1, 'still', 'mixed'),
     ('buildup', 'climb'): AutoloopMeta(2, 'sweep', 'mixed'),
     ('buildup', 'rise'): AutoloopMeta(2, 'still', 'wash'),
     ('drop', 'stomp'): AutoloopMeta(2, 'snap', 'wash'),
     ('drop', 'stomp_twin'): AutoloopMeta(2, 'snap', 'wash'),
-    ('drop', 'fan'): AutoloopMeta(2, 'sweep', 'mixed'),
-    ('drop', 'lift'): AutoloopMeta(3, 'sweep', 'mixed'),
+    ('drop', 'fan'): AutoloopMeta(2, 'still', 'mixed'),
+    ('drop', 'lift'): AutoloopMeta(3, 'still', 'mixed'),
 }
 
 
@@ -59,7 +59,8 @@ OVERLAYS = {
     ('hit', 'strobe'): overlay(strobe=True),
     ('riser', 'strip_fill'): overlay(texture='pixel'),
     ('riser', 'strobe_ramp'): overlay(strobe=True),
-    ('fill', 'wipe'): overlay(htp=False, movement='sweep', texture='pixel'),
+    ('fill', 'wipe'): overlay(htp=False, movement='sweep'),
+    ('fill', 'flick'): overlay(htp=False, movement='sweep', texture='beam'),
     ('fill', 'turnaround'): overlay(htp=False, movement='sweep'),
     ('accent', 'sparkle'): overlay(texture='pixel'),
     ('accent', 'mover_shapes'): overlay(htp=False, movement='sweep', texture='beam'),
@@ -68,6 +69,8 @@ LEVELS = {'calm': INTENSITY_CALM, 'balanced': INTENSITY_BALANCED, 'wild': INTENS
 # Atmospheric, buildup, drop, breakdown, buildup, drop: start beats, 16 or 32 bars apart.
 SET = ((A, 0), (B, 64), (D, 128), (BR, 256), (B, 384), (D, 448))
 LOUD_BUILD = (0.8,) * 16
+# About the commit's 9 s lead at 120 bpm.
+LEAD_BEATS = 18.0
 
 
 class Gate:
@@ -91,9 +94,9 @@ def director(seed=0, overlays=OVERLAYS, meta=META):
     return CueDirector(AutoloopPolicy(table(meta), meta, random.Random(seed)), overlays, seed)
 
 
-def request(intent, start, *, new_track=False, levels=LOUD_BUILD, arrival=None):
+def request(intent, start, *, new_track=False, levels=LOUD_BUILD, arrival=None, lead=LEAD_BEATS):
     context = SelectionContext(intent, new_track=new_track, arrival_of_peak=arrival)
-    return SectionRequest(start, intent, context, start * BEAT_SEC, BPM, levels)
+    return SectionRequest(start, intent, context, start * BEAT_SEC, BPM, levels, lead)
 
 
 def play(sections=SET, *, level='balanced', gate=None, cues=None, seed=0):
@@ -130,7 +133,7 @@ def test_each_section_is_one_cue_on_its_start_beat_with_its_intent_seed_and_stre
     assert (first.cue.start_beat_index, first.cue.intent) == (0, A)
     assert (drop.cue.start_beat_index, drop.cue.intent, drop.cue.drop_strength) == (64, D, 0.82)
     assert first.cue.drop_strength is None
-    assert (first.cue.seed, drop.cue.seed) == (cue_seed(0, 1, 1), cue_seed(0, 1, 2))
+    assert (first.cue.seed, drop.cue.seed) == (cue_seed(0, 1, 0), cue_seed(0, 1, 64))
     assert first.cue.seed != drop.cue.seed
     command = drop.cue.command()['value']
     assert set(command) == {
@@ -151,12 +154,19 @@ def test_a_set_plays_the_same_cues_for_the_same_seed():
     assert [plan.cue for plan in play(seed=8)] != first
 
 
-def test_a_new_track_restarts_the_section_count_of_the_seed():
+def test_seeds_follow_the_track_and_the_start_not_the_plan_count():
     cues = director()
     play(cues=cues)
     [opening] = play(((A, 600),), cues=cues)
-    assert (opening.track, opening.section) == (2, 1)
-    assert opening.cue.seed == cue_seed(0, 2, 1)
+    assert (opening.track, opening.cue.seed) == (2, cue_seed(0, 2, 600))
+    settings = ShowSettings(intensity=INTENSITY_BALANCED)
+    again = director()
+    again.plan('first', request(A, 0, new_track=True), settings, 'ice', Gate())
+    again.plan('wrong', request(B, 64), settings, 'ice', Gate())
+    again.drop('wrong')
+    replanned = again.plan('right', request(D, 64), settings, 'ice', Gate())
+    later = again.plan('later', request(BR, 192), settings, 'ice', Gate())
+    assert (replanned.cue.seed, later.cue.seed) == (cue_seed(0, 1, 64), cue_seed(0, 1, 192))
 
 
 def test_rotation_per_intent_with_phrase_transitions():
@@ -228,7 +238,6 @@ def test_mono_until_the_first_drop_and_in_every_breakdown_and_buildup():
                 'hit/colour_bump',
                 'fill/wipe',
                 'accent/mover_shapes',
-                'accent/sparkle',
             ],
         ),
         (
@@ -299,7 +308,7 @@ def test_the_entry_rows_land_on_the_one():
     dip, riser, hit = row(drop, 'dip'), row(drop, 'riser'), row(drop, 'hit')
     assert (dip.begin_beats + dip.length_beats, dip.attack_beats) == (0.0, 0.0)
     assert riser.begin_beats + riser.length_beats == dip.begin_beats, 'the riser ends at the dip'
-    assert (riser.length_beats, riser.every_bars) == (16, 0)
+    assert (riser.length_beats, riser.every_bars, riser.release_beats) == (16, 0, 2.0)
     assert (hit.begin_beats, hit.attack_beats, hit.every_bars) == (0.0, 0.0, 0)
     priorities = {overlay.bank: overlay.priority for overlay in drop.cue.overlays}
     assert priorities['fill'] < priorities['accent'] < priorities['riser']
@@ -338,9 +347,9 @@ def test_fills_on_bar_8_and_a_bigger_one_on_bar_16_and_accents_8_bars_off_the_ba
 
 def test_breakdown_and_atmospheric_rows():
     atmos, build, _, breakdown, _, _ = play()
-    assert rows(breakdown) == ['dip/fade', 'fill/wipe']
+    assert [o.bank for o in breakdown.cue.overlays] == ['dip', 'fill']
     assert (row(breakdown, 'dip').begin_beats, row(breakdown, 'fill').begin_beats) == (-2.0, 60.0)
-    assert rows(atmos) == ['fill/wipe'] and rows(build) == []
+    assert [o.bank for o in atmos.cue.overlays] == ['fill'] and rows(build) == []
     calm_atmos, _, _, calm_breakdown, _, _ = play(level='calm')
     assert rows(calm_atmos) == []
     assert row(calm_breakdown, 'fill').every_bars == 32
@@ -351,6 +360,37 @@ def test_a_riser_only_after_a_buildup():
     assert 'riser' not in {o.bank for o in drop.cue.overlays}
     _, short = play(((B, 0), (D, 2)))
     assert 'riser' not in {o.bank for o in short.cue.overlays}, 'no room for a pre-roll'
+
+
+@pytest.mark.parametrize(
+    ('build_beats', 'levels', 'lead', 'riser_beats'),
+    [
+        (64, LOUD_BUILD, 18.0, 16),  # the usual 16 beats
+        (64, (0.8,) * 12 + (0.0,) * 4, 18.0, 14),  # a bar of dip leaves 14 beats of lead
+        (64, (0.8,) * 8 + (0.0,) * 8, 16.0, 8),  # two bars at a short lead
+        (64, LOUD_BUILD, 6.0, 5),  # a late commit: only what Starfire still has time for
+        (64, LOUD_BUILD, 4.0, None),  # under the 4-beat floor: none
+        (10, LOUD_BUILD, 18.0, 9.5),  # a short build: never before it
+        (128, LOUD_BUILD, 40.0, 32),  # a 32-bar build carries a 32-beat riser
+        (128, LOUD_BUILD, 24.0, 23),  # still inside the lead
+    ],
+)
+def test_the_riser_starts_after_starfire_has_the_cue_and_inside_the_build(
+    build_beats, levels, lead, riser_beats
+):
+    cues = director()
+    settings = ShowSettings(intensity=INTENSITY_BALANCED)
+    cues.plan(0, request(B, 0, new_track=True), settings, 'ice', Gate())
+    drop = cues.plan(1, request(D, build_beats, levels=levels, lead=lead), settings, 'ice', Gate())
+    risers = [o for o in drop.cue.overlays if o.bank == 'riser']
+    if riser_beats is None:
+        assert risers == []
+        return
+    [riser] = risers
+    dip = row(drop, 'dip')
+    assert riser.length_beats == riser_beats
+    assert riser.begin_beats + riser.length_beats == dip.begin_beats, 'never inside the dip'
+    assert -riser.begin_beats <= lead and -riser.begin_beats <= build_beats
 
 
 def test_an_overlay_never_fights_its_base_loop():
@@ -375,7 +415,7 @@ def test_an_accent_or_riser_never_leads_with_the_base_loops_own_layer():
         **{loop: value for loop, value in META.items() if loop[0] not in ('buildup', 'drop')},
         ('buildup', 'pixels'): AutoloopMeta(2, 'sweep', 'pixel'),
         ('drop', 'chase'): AutoloopMeta(2, 'snap', 'pixel'),
-        ('drop', 'scan'): AutoloopMeta(2, 'sweep', 'pixel'),
+        ('drop', 'scan'): AutoloopMeta(2, 'still', 'pixel'),
     }
     _, drop = play(SET[1:3], cues=director(meta=meta))
     assert [name for name in rows(drop) if name.split('/')[0] in ('accent', 'riser')] == [
@@ -388,23 +428,32 @@ def test_an_accent_or_riser_never_leads_with_the_base_loops_own_layer():
     [(0, 0.5), (1, 1.0), (3, 1.0), (4, 4.0), (6, 4.0), (8, 8.0), (12, 8.0)],
 )
 def test_the_dip_follows_the_energy_gap_before_the_drop(quiet_beats, dip):
-    levels = (0.8,) * (16 - quiet_beats) + (0.1,) * quiet_beats
+    levels = (0.8,) * (16 - quiet_beats) + (0.05,) * quiet_beats
     assert dip_beats(levels) == dip
+
+
+def test_a_filtered_build_is_no_gap_and_only_near_silence_earns_two_bars():
+    assert dip_beats((0.8,) * 8 + (0.3,) * 8) == 0.5, 'a high-passed roll keeps playing'
+    assert dip_beats((0.8,) * 8 + (0.15,) * 8) == 4.0, 'quiet but not silent: one bar'
+    assert dip_beats((0.0,) * 16) == 8.0, 'the build stopped: the longest dip'
+    assert dip_beats(()) == 0.5, 'nothing measured: the shortest'
 
 
 def test_dip_shapes_land_in_the_drop_cue():
     for levels, dip in (
         (LOUD_BUILD, 0.5),  # the build runs into the one
-        ((0.8,) * 15 + (0.2,), 1.0),  # a one-beat breath
+        ((0.8,) * 15 + (0.1,), 1.0),  # a one-beat breath
         ((0.7,) * 12 + (0.05,) * 4, 4.0),  # a bar of silence
-        ((0.9,) * 8 + (0.1,) * 8, 8.0),  # two bars stripped back
+        ((0.9,) * 8 + (0.05,) * 8, 8.0),  # two bars of near silence
     ):
         cues = director()
         settings = ShowSettings(intensity=INTENSITY_BALANCED)
         cues.plan(0, request(B, 0, new_track=True), settings, 'ice', Gate())
         drop = cues.plan(1, request(D, 64, levels=levels), settings, 'ice', Gate())
         assert (row(drop, 'dip').begin_beats, row(drop, 'dip').length_beats) == (-dip, dip)
-        assert row(drop, 'riser').begin_beats == -(dip + 16)
+        riser = row(drop, 'riser')
+        assert riser.begin_beats + riser.length_beats == -dip
+        assert -riser.begin_beats <= LEAD_BEATS
     assert dip_beats(()) == 0.5, 'nothing measured: the shortest dip'
 
 
@@ -420,8 +469,77 @@ def test_a_second_drop_opens_on_the_first_drops_look_and_hit_and_adds_one_layer(
     assert [o.bank for o in once[0]] == ['dip', 'riser', 'hit']
     assert once[1][: len(once[0])] == once[0] and len(once[1]) == len(once[0]) + 1
     [added] = once[1][len(once[0]) :]
-    assert (added.bank, added.begin_beats, added.length_beats) == ('accent', 0.0, 32.0)
+    meta = OVERLAYS[added.bank, added.autoloop]
+    # An accent that takes the heads waits out the hit, so it never moves them lit.
+    begin = 0.0 if meta.intensity_htp and meta.movement == 'still' else 2.0
+    assert (added.bank, added.begin_beats, added.length_beats) == ('accent', begin, 32.0 - begin)
     assert second.drop_number == 2
+
+
+@pytest.mark.parametrize(
+    ('accent', 'begin'), [(('accent', 'sparkle'), 0.0), (('accent', 'mover_shapes'), 2.0)]
+)
+def test_the_second_drops_entry_layer_waits_out_the_hit_when_it_takes_the_heads(accent, begin):
+    overlays = {
+        loop: value for loop, value in OVERLAYS.items() if loop[0] != 'accent' or loop == accent
+    }
+    second = play(cues=director(overlays=overlays))[5]
+    [entry] = [o for o in second.cue.overlays if o.bank == 'accent' and o.every_bars == 0]
+    assert (entry.autoloop, entry.begin_beats) == (accent[1], begin)
+    fills = sorted(o.begin_beats for o in second.cue.overlays if o.bank == 'fill')
+    assert fills == [60.0], 'a single accent from the one: no bar-8 fill across it'
+
+
+def test_a_drop_split_in_two_goes_on_with_its_next_look_and_no_second_entry():
+    _, _, drop, again = play(((A, 0), (B, 64), (D, 128), (D, 192)))
+    assert again.continued and not drop.continued
+    assert [c.autoloop for c in again.choices] == [c.autoloop for c in drop.choices][::-1]
+    assert again.cue.rotation[0].transition == {'kind': 'crossfade', 'duration_beats': 4.0}
+    assert {o.bank for o in again.cue.overlays} <= {'fill', 'accent'}
+    assert all(o.every_bars > 0 for o in again.cue.overlays), 'no dip, riser or hit mid-drop'
+    assert not again.events.intense and not again.events.accent
+
+
+def test_a_soft_drop_keeps_its_white_but_never_strobes():
+    cues = director()
+    settings = ShowSettings(intensity=INTENSITY_WILD)
+    cues.plan(0, request(B, 0, new_track=True), settings, 'ice', Gate())
+    soft = cues.plan(1, request(D, 64, arrival=0.6), settings, 'ice', Gate())
+    assert (row(soft, 'hit').autoloop, row(soft, 'riser').autoloop) == ('blinder', 'strip_fill')
+    assert not soft.events.intense and soft.events.accent
+
+
+def test_a_fill_never_shares_an_accents_layer():
+    for seed in range(8):
+        for plan in play(seed=seed):
+            accents = {o.autoloop for o in plan.cue.overlays if o.bank == 'accent'}
+            if 'mover_shapes' in accents:
+                assert 'fill/flick' not in rows(plan), 'beam fill under a beam accent'
+
+
+def test_an_accent_never_moves_the_heads_the_way_the_base_does():
+    meta = {
+        **{loop: value for loop, value in META.items() if loop[0] != 'drop'},
+        ('drop', 'stomp'): AutoloopMeta(2, 'snap', 'wash'),
+        ('drop', 'sway'): AutoloopMeta(2, 'sweep', 'mixed'),
+    }
+    for seed in range(4):
+        drop = play(SET[:3], cues=director(seed, meta=meta))[2]
+        assert {c.autoloop for c in drop.choices} == {'stomp', 'sway'}
+        assert 'accent/mover_shapes' not in rows(drop), 'sway sweeps the heads already'
+
+
+def test_look_b_contrasts_in_movement_and_texture_when_one_does():
+    meta = {
+        ('drop', 'a'): AutoloopMeta(2, 'snap', 'wash'),
+        ('drop', 'texture_only'): AutoloopMeta(2, 'snap', 'beam'),
+        ('drop', 'both'): AutoloopMeta(2, 'sweep', 'beam'),
+    }
+    for seed in range(6):
+        policy = AutoloopPolicy({D: tuple(meta)}, meta, random.Random(seed))
+        short_build = SelectionContext(D, seconds_since_drop=10.0)
+        choice = policy.choose(short_build, exclude=('drop', 'a'), contrast=meta['drop', 'a'])
+        assert choice.autoloop == 'both'
 
 
 def test_a_level_change_refilters_rows_and_keeps_start_seed_and_rotation():

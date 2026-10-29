@@ -224,18 +224,26 @@ class AutoloopPolicy:
     def _contrasting(
         self, loops, candidates, tiers, contrast: AutoloopMeta, reason: str
     ) -> tuple[list[tuple[str, str]], str]:
-        def differs(loop) -> bool:
+        """Loops differing in both movement and texture first, then in either; the energy tier
+        before the contrast."""
+
+        def differs_in(loop) -> int:
             meta = self._meta[loop]
-            return meta.movement != contrast.movement or meta.texture != contrast.texture
+            return (meta.movement != contrast.movement) + (meta.texture != contrast.texture)
+
+        def strongest(pool):
+            best = max((differs_in(loop) for loop in pool), default=0)
+            return [loop for loop in pool if differs_in(loop) == best] if best else []
 
         against = f'{contrast.movement}/{contrast.texture}'
-        within = [loop for loop in candidates if differs(loop)]
+        within = strongest(candidates)
         if within:
             return within, f'{reason}; contrasts {against}'
-        others = [loop for loop in loops if differs(loop)]
+        others = [loop for loop in loops if differs_in(loop)]
         if not others:
             return candidates, f'{reason}; nothing contrasts {against}'
         neighbours, _ = self._nearest_tier(others, tiers)
+        neighbours = strongest(neighbours)
         energies = '/'.join(
             str(e) for e in sorted({self._meta[loop].energy for loop in neighbours})
         )

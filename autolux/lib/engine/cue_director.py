@@ -18,6 +18,7 @@ from autolux.lib.engine.autoloop_policy import (
     AutoloopPolicy,
     SelectionContext,
     look_intent,
+    soft_drop,
 )
 from autolux.lib.engine.cue import BaseLook, Cue, Overlay
 from autolux.lib.engine.effect_definitions import (
@@ -54,24 +55,30 @@ BREAKDOWN_DIP = ('dip', 'fade')
 COLOUR_HIT = ('hit', 'colour_bump')
 # The bar-16 fill, bigger than the bar-8 one.
 TURNAROUND_FILL = ('fill', 'turnaround')
-# Pairs the shared texture does not catch: the overlay fights these loops' lead layer.
-CLASHES: dict[tuple[str, str], frozenset[tuple[str, str]]] = {
-    ('accent', 'mover_shapes'): frozenset({('drop', 'ballyhoo'), ('drop', 'wide_fan')}),
-    ('riser', 'strip_fill'): frozenset({('buildup', 'countdown')}),
-}
-# A texture that leads no single layer, so it fights none.
+# A texture that leads no single layer and a movement that moves nothing fight nothing.
 MIXED_TEXTURE = 'mixed'
+STILL_MOVEMENT = 'still'
+# Banks that also yield the heads to a base loop moving them the same way.
+MOVEMENT_PAIRED_BANKS = ('accent', 'riser')
 
 # The dip before a drop, by the quiet beats before the one: half a beat, a beat, a bar, two bars.
 DIP_BEATS = (0.5, 1.0, float(BEATS_PER_BAR), 2.0 * BEATS_PER_BAR)
-# A beat this far below the build's loudest is part of the gap.
-GAP_LEVEL_SHARE = 0.5
+# A beat this far below the build's loudest is part of the gap; RMS falls on a high-passed
+# build, so a filtered roll must stay out of it.
+GAP_LEVEL_SHARE = 0.25
+# Two bars of dark only for a gap that is close to silence.
+SILENT_GAP_SHARE = 0.1
 GAP_REFERENCE_BEATS = 16
 BREAKDOWN_DIP_BEATS = 2.0
 
 HIT_BEATS = 2.0
 RISER_BEATS = 16
+# A long build may carry a longer riser, still inside the cue's lead.
+LONG_BUILD_BEATS = 32 * BEATS_PER_BAR
+LONG_RISER_BEATS = 32
 MIN_RISER_BEATS = 4
+# A decoder re-decision must not snap a lit riser off; at the drop the dip covers it.
+RISER_RELEASE_BEATS = 2.0
 # A strobing riser strobes in its last 8 beats; it plays only when those fit the burst cap.
 RISER_STROBE_BEATS = 8
 FILL_BEATS = 4.0
@@ -103,6 +110,8 @@ class SectionRequest:
     bpm: float | None = None
     # Analysed beat levels before the start, oldest first.
     levels_before: tuple[float, ...] = ()
+    # Beats from planning to the start: no row may begin before Starfire has the cue.
+    lead_beats: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -135,6 +144,8 @@ class SectionPlan:
     previous_beats: int
     # 1 for a track's first drop, 2 for its second; 0 for any other section.
     drop_number: int
+    # A drop right after a drop is one drop the decoder split: no entry of its own.
+    continued: bool
     after_first_drop: bool
     choices: tuple[AutoloopChoice, ...]
     picks: OverlayPicks
@@ -151,13 +162,19 @@ def dip_beats(levels_before: Sequence[float]) -> float:
     """The dip a drop earns from the energy gap before it: the quiet beats right before the one,
     against the loudest beat of the build."""
     window = list(levels_before)[-GAP_REFERENCE_BEATS:]
-    reference = max(window, default=0.0)
-    gap = 0
+    if not window:
+        return DIP_BEATS[0]
+    reference = max(window)
+    if reference <= 0:
+        return DIP_BEATS[-1]  # the build stopped: the room goes dark with it
+    gap = []
     for level in reversed(window):
         if level >= GAP_LEVEL_SHARE * reference:
             break
-        gap += 1
-    return max((beats for beats in DIP_BEATS if beats <= gap), default=DIP_BEATS[0])
+        gap.append(level)
+    silent = all(level < SILENT_GAP_SHARE * reference for level in gap)
+    choices = DIP_BEATS if silent else DIP_BEATS[:-1]
+    return max((beats for beats in choices if beats <= len(gap)), default=DIP_BEATS[0])
 
 
 def drop_strength(request: SectionRequest) -> float | None:
@@ -174,8 +191,9 @@ def strobe_hit_beats(bpm: float | None, settings: ShowSettings) -> float:
     return float(min(BEATS_PER_BAR, max(1, math.floor(seconds * bpm / 60.0))))
 
 
-def cue_seed(seed: int, track: int, section: int) -> int:
-    return zlib.crc32(f'{seed}/{track}/{section}'.encode())
+def cue_seed(seed: int, track: int, start_beat_index: int) -> int:
+    """Keyed on the start, so a superseded re-plan never shifts a later section's seed."""
+    return zlib.crc32(f'{seed}/{track}/{start_beat_index}'.encode())
 
 
 def _row(
@@ -240,9 +258,12 @@ class CueDirector:
         drops = [plan for plan in earlier if plan.request.intent is LightIntent.DROP]
         first_drop = min(drops, key=lambda plan: plan.cue.start_beat_index, default=None)
         is_drop = request.intent is LightIntent.DROP
-        choices = self._rotation(request, settings, first_drop if is_drop else None)
+        continued = is_drop and previous is not None and previous.request.intent is LightIntent.DROP
+        choices = self._rotation(
+            request, settings, first_drop if is_drop else None, previous if continued else None
+        )
         picks = self._picks_for(request.intent, first_drop, choices, previous)
-        seed = cue_seed(self._seed, self._track, self._sections)
+        seed = cue_seed(self._seed, self._track, request.start_beat_index)
         draft = SectionPlan(
             request=request,
             track=self._track,
@@ -252,6 +273,7 @@ class CueDirector:
             if previous is None
             else request.start_beat_index - previous.cue.start_beat_index,
             drop_number=len(drops) + 1 if is_drop else 0,
+            continued=continued,
             after_first_drop=bool(drops),
             choices=choices,
             picks=picks,
@@ -259,7 +281,7 @@ class CueDirector:
             cue=Cue(
                 request.start_beat_index,
                 request.intent,
-                self._looks(request, choices, settings, previous),
+                self._looks(request, choices, settings, previous, continued),
                 section_palette(
                     palette, choices[0].look, request.intent, after_first_drop=bool(drops)
                 ),
@@ -282,7 +304,8 @@ class CueDirector:
         palette: str | None = None,
     ) -> SectionPlan | None:
         """The stored plan at a new level or palette: same start, seed and rotation. A started
-        section keeps its one-shot rows and their events, since Starfire never re-fires them."""
+        section keeps its one-shot rows and their events as planned; only its recurring rows
+        are ever sent again."""
         plan = self._plans.get(moment)
         if plan is None:
             return None
@@ -302,10 +325,18 @@ class CueDirector:
         return revised
 
     def _rotation(
-        self, request: SectionRequest, settings: ShowSettings, first_drop: SectionPlan | None
+        self,
+        request: SectionRequest,
+        settings: ShowSettings,
+        first_drop: SectionPlan | None,
+        split_from: SectionPlan | None,
     ) -> tuple[AutoloopChoice, ...]:
         context, intensity = request.context, settings.intensity
-        if first_drop is not None and first_drop.look == look_intent(request.intent, intensity):
+        look = look_intent(request.intent, intensity)
+        if split_from is not None and split_from.look == look:
+            # The drop goes on: its next look shows, not its first again.
+            return split_from.choices[1:] + split_from.choices[:1]
+        if first_drop is not None and first_drop.look == look:
             # A track's second drop opens on the first drop's look; its added layer is new.
             first = dataclasses.replace(
                 first_drop.choices[0], reason="the track's first drop again, one layer more"
@@ -336,11 +367,12 @@ class CueDirector:
         choices: tuple[AutoloopChoice, ...],
         settings: ShowSettings,
         previous: SectionPlan | None,
+        continued: bool,
     ) -> tuple[BaseLook, ...]:
         scale = CROSSFADE_SCALE[intensity_level(settings.intensity)]
         _, bars = ROTATION[request.intent]
-        entry = self._entry_transition(request.intent, previous, scale)
         step = {'kind': 'crossfade', 'duration_beats': STEP_CROSSFADE_BEATS * scale}
+        entry = step if continued else self._entry_transition(request.intent, previous, scale)
         return tuple(
             BaseLook(choice.bank, choice.autoloop, bars, entry if index == 0 else step)
             for index, choice in enumerate(choices)
@@ -377,11 +409,16 @@ class CueDirector:
         )
 
     def _fights(self, overlay: tuple[str, str], base: AutoloopChoice) -> bool:
-        """An accent or riser on the layer the base loop leads with would cover its idea."""
-        if (base.bank, base.autoloop) in CLASHES.get(overlay, frozenset()):
+        """An overlay on the layer the base loop leads with would cover its idea; an accent or
+        riser moving the heads the way the base does would take them over."""
+        meta = self._overlays[overlay]
+        if meta.texture != MIXED_TEXTURE and meta.texture == base.meta.texture:
             return True
-        texture = self._overlays[overlay].texture
-        return texture != MIXED_TEXTURE and texture == base.meta.texture
+        return (
+            overlay[0] in MOVEMENT_PAIRED_BANKS
+            and meta.movement != STILL_MOVEMENT
+            and meta.movement == base.meta.movement
+        )
 
     def _shipped(self, overlay: tuple[str, str]) -> tuple[str, str] | None:
         return overlay if overlay in self._overlays else None
@@ -403,19 +440,27 @@ class CueDirector:
         choices: tuple[AutoloopChoice, ...],
         previous: SectionPlan | None,
     ) -> OverlayPicks:
-        fills = [loop for loop in self._bank('fill') if loop != TURNAROUND_FILL]
+        if intent is LightIntent.BUILDUP:
+            return OverlayPicks()
+        accents: list[tuple[str, str]] = []
+        while intent is LightIntent.DROP and len(accents) < 2:
+            pool = [loop for loop in self._bank('accent', under=choices) if loop not in accents]
+            accent = self._pick(pool)
+            if accent is None:
+                break
+            accents.append(accent)
+        # A fill on an accent's own layer would cut across it.
+        taken = {self._overlays[accent].texture for accent in accents} - {MIXED_TEXTURE}
+        fills = [
+            loop
+            for loop in self._bank('fill', under=choices)
+            if loop != TURNAROUND_FILL and self._overlays[loop].texture not in taken
+        ]
         if intent is not LightIntent.DROP:
-            fill = self._pick(fills) if intent is not LightIntent.BUILDUP else None
-            return OverlayPicks(fill=fill)
+            return OverlayPicks(fill=self._pick(fills))
         white_hits = [loop for loop in self._bank('hit', strobe=False) if loop != COLOUR_HIT]
         # The riser plays over the build before the drop, so it pairs with the build's look.
         build = previous.choices if previous is not None else ()
-        accents: list[tuple[str, str]] = []
-        for _ in range(2):
-            pool = [loop for loop in self._bank('accent', under=choices) if loop not in accents]
-            accent = self._pick(pool)
-            if accent is not None:
-                accents.append(accent)
         return OverlayPicks(
             # The entry hit is the track's: a second drop reuses the first drop's.
             hit=first_drop.picks.hit if first_drop is not None else self._pick(white_hits),
@@ -470,23 +515,51 @@ class CueDirector:
         gate: VenueGate,
         moment: Hashable,
     ) -> tuple[list[Overlay], EntryEvents]:
+        rows: list[Overlay] = []
+        events = EntryEvents()
+        # Calm keeps half the accents: restraint is smaller, never absent.
+        accents = plan.picks.accents[:1] if level == CALM else plan.picks.accents
+        entry_accent = None
+        if not plan.continued:
+            rows, events, entry_accent = self._drop_entry(
+                plan, level, settings, gate, moment, accents
+            )
+        # A single accent arrives with the one already, so no bar-8 fill cuts across it.
+        bar_8 = entry_accent is None or len(accents) > 1
+        rows += self._drop_fills(plan, level, bar_8=bar_8)
+        for index, accent in enumerate(accents):
+            begin = (ACCENT_OFFSET_BARS + index * ACCENT_BARS) * BEATS_PER_BAR
+            rows.append(_row(accent, begin, ACCENT_BARS * BEATS_PER_BAR, 2 * ACCENT_BARS, 4.0, 4.0))
+        return rows, events
+
+    def _drop_entry(
+        self,
+        plan: SectionPlan,
+        level: str,
+        settings: ShowSettings,
+        gate: VenueGate,
+        moment: Hashable,
+        accents: tuple[tuple[str, str], ...],
+    ) -> tuple[list[Overlay], EntryEvents, tuple[str, str] | None]:
         at, bpm = plan.request.room_sec, plan.request.bpm
         blocked = gate.intense_blocked(at, moment)
         crowded = gate.accent_crowded(at, moment)
         white = level != CALM and not crowded
-        strobing = level == WILD and white and blocked is None
+        # A soft drop keeps its white but never strobes, as no intense special plays on it.
+        strobing = (
+            level == WILD
+            and white
+            and blocked is None
+            and not soft_drop(plan.request.context.arrival_of_peak)
+        )
         rows: list[Overlay] = []
         dip = plan.dip_beats
         if self._shipped(DROP_DIP):
             rows.append(_row(DROP_DIP, -dip, dip))
         intense = False
 
-        riser_beats = min(RISER_BEATS, plan.previous_beats)
-        if (
-            plan.previous is LightIntent.BUILDUP
-            and level != CALM
-            and riser_beats >= MIN_RISER_BEATS
-        ):
+        riser_beats = self._riser_beats(plan)
+        if plan.previous is LightIntent.BUILDUP and level != CALM and riser_beats is not None:
             riser = plan.picks.riser
             fits = (
                 bool(bpm) and RISER_STROBE_BEATS * 60.0 / bpm <= settings.strobe_max_burst_seconds
@@ -495,7 +568,9 @@ class CueDirector:
                 riser, intense = plan.picks.strobe_riser, True
             if riser is not None:
                 # It closes where the dip opens, so the dark before the one stays dark.
-                rows.append(_row(riser, -(dip + riser_beats), riser_beats, attack=4.0))
+                rows.append(
+                    _row(riser, -(dip + riser_beats), riser_beats, 0, 4.0, RISER_RELEASE_BEATS)
+                )
 
         hit = self._shipped(COLOUR_HIT)
         hit_beats, hit_release = HIT_BEATS, HIT_BEATS
@@ -506,29 +581,39 @@ class CueDirector:
             hit_beats = strobe_hit_beats(bpm, settings)
         if hit is not None:
             rows.append(_row(hit, 0.0, hit_beats, release=hit_release))
-        accent_event = hit is not None and hit != COLOUR_HIT
+        events = EntryEvents(intense=intense, accent=hit is not None and hit != COLOUR_HIT)
 
-        accents = plan.picks.accents
-        if plan.drop_number > 1 and accents:
-            # The added layer: the texture arrives with the one instead of on bar 8.
-            rows.append(
-                _row(accents[-1], 0.0, ENTRY_ACCENT_BARS * BEATS_PER_BAR, 0, MOVER_FADE_BEATS, 4.0)
-            )
-        rows += self._drop_fills(plan.picks.fill, level)
-        for index, accent in enumerate(accents):
-            begin = (ACCENT_OFFSET_BARS + index * ACCENT_BARS) * BEATS_PER_BAR
-            rows.append(_row(accent, begin, ACCENT_BARS * BEATS_PER_BAR, 2 * ACCENT_BARS, 4.0, 4.0))
-        return rows, EntryEvents(intense=intense, accent=accent_event)
+        accent = accents[-1] if plan.drop_number > 1 and accents else None
+        if accent is not None:
+            # The added layer: the texture arrives with the one instead of on bar 8. One that
+            # takes the heads (LTP or moving) waits out the hit, so it never moves them lit.
+            meta = self._overlays[accent]
+            lifts = meta.intensity_htp and meta.movement == STILL_MOVEMENT
+            begin = 0.0 if lifts else HIT_BEATS
+            length = ENTRY_ACCENT_BARS * BEATS_PER_BAR - begin
+            rows.append(_row(accent, begin, length, 0, MOVER_FADE_BEATS, 4.0))
+        return rows, events, accent
 
-    def _drop_fills(self, fill: tuple[str, str] | None, level: str) -> list[Overlay]:
+    @staticmethod
+    def _riser_beats(plan: SectionPlan) -> float | None:
+        """Within the build and after Starfire has the cue, never inside the dip."""
+        dip = plan.dip_beats
+        longest = LONG_RISER_BEATS if plan.previous_beats >= LONG_BUILD_BEATS else RISER_BEATS
+        beats = min(longest, plan.previous_beats - dip, math.floor(plan.request.lead_beats - dip))
+        return beats if beats >= MIN_RISER_BEATS else None
+
+    def _drop_fills(self, plan: SectionPlan, level: str, *, bar_8: bool) -> list[Overlay]:
+        fill = plan.picks.fill
         if fill is None:
             return []
         last_bar = (PHRASE_BARS - 1) * BEATS_PER_BAR
         if level == CALM:
             return [_row(fill, last_bar, FILL_BEATS, PHRASE_BARS, MOVER_FADE_BEATS, 1.0)]
-        middle = (PHRASE_BARS // 2 - 1) * BEATS_PER_BAR
-        turnaround = self._shipped(TURNAROUND_FILL) or fill
-        return [
-            _row(fill, middle, FILL_BEATS, PHRASE_BARS, MOVER_FADE_BEATS, 1.0),
-            _row(turnaround, last_bar, FILL_BEATS, PHRASE_BARS, MOVER_FADE_BEATS, 1.0),
-        ]
+        turnaround = self._shipped(TURNAROUND_FILL)
+        if turnaround is None or any(self._fights(turnaround, base) for base in plan.choices):
+            turnaround = fill
+        rows = [_row(turnaround, last_bar, FILL_BEATS, PHRASE_BARS, MOVER_FADE_BEATS, 1.0)]
+        if bar_8:
+            middle = (PHRASE_BARS // 2 - 1) * BEATS_PER_BAR
+            rows.insert(0, _row(fill, middle, FILL_BEATS, PHRASE_BARS, MOVER_FADE_BEATS, 1.0))
+        return rows
