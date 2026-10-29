@@ -24,6 +24,7 @@
     const STALE_RIG = "The show runs an older rig. Restart show loads the saved patch.";
     const RESTARTING = "Restarting the show on the saved patch.";
     const NEW_GROUP = "\u0000new";
+    const ROLE_NEEDS_GROUP = "Put the fixture in a group first; a role belongs to a group.";
     const RESTART_HOLD_MS = 60000;
     const POSE_SETTLE_MS = 150;
     const IDENTITY = [1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0];
@@ -55,6 +56,8 @@
         yield [node, parent];
         for (const child of node.children) yield* walk(child, node);
     }
+
+    const nodesOf = (tree) => [...walk(tree)].map(([node]) => node);
 
     function locate(tree, key) {
         for (const [node, parent] of walk(tree)) if (node.key === key) return { node, parent };
@@ -128,8 +131,10 @@
         return node;
     }
 
+    const typedNumbers = (texts) => texts.map((text) => (text.trim() === "" ? NaN : Number(text)));
+
     function finiteNumbers(text, count) {
-        const values = text.split(",").map((part) => (part.trim() === "" ? NaN : Number(part)));
+        const values = typedNumbers(text.split(","));
         return values.length === count && values.every(Number.isFinite) ? values : null;
     }
 
@@ -229,19 +234,23 @@
     }
 
     const absoluteAddress = (universe, address) => String(universe * UNIVERSE_SIZE + address);
+    const specsOf = (draft, settings) => [...new Set([...Object.keys(draft.gdtf), ...Object.keys(settings.library)])];
     const gdtfTree = (draft, settings, spec) => draft.gdtf[spec] || settings.library[spec]?.tree || null;
 
-    const modeNode = (tree, mode) => tree && [...walk(tree)].map(([entry]) => entry).find((entry) => entry.tag === "DMXMode" && entry.attributes.Name === mode);
+    const modeNode = (tree, mode) => tree && nodesOf(tree).find((entry) => entry.tag === "DMXMode" && entry.attributes.Name === mode);
+
+    function* addressedChannels(mode) {
+        for (const channel of nodesOf(mode)) {
+            const offsets = channel.attributes.Offset ?? "None";
+            if (channel.tag === "DMXChannel" && (channel.attributes.DMXBreak ?? "1") === "1" && offsets !== "None") yield [channel, offsets.split(",").map(Number)];
+        }
+    }
 
     function modeChannels(tree, mode) {
         const node = modeNode(tree, mode);
         if (!node) return null;
         let channels = 0;
-        for (const [channel] of walk(node)) {
-            const offsets = channel.attributes.Offset ?? "None";
-            if (channel.tag !== "DMXChannel" || (channel.attributes.DMXBreak ?? "1") !== "1" || offsets === "None") continue;
-            for (const offset of offsets.split(",")) channels = Math.max(channels, Number(offset));
-        }
+        for (const [, offsets] of addressedChannels(node)) channels = Math.max(channels, ...offsets);
         return channels;
     }
 
@@ -256,15 +265,12 @@
             paths[path.at(-1)] = path;
             for (const child of entry.children) visit(child, path);
         };
-        const geometries = [...walk(tree)].map(([entry]) => entry).find((entry) => entry.tag === "Geometries");
+        const geometries = nodesOf(tree).find((entry) => entry.tag === "Geometries");
         for (const child of geometries?.children || []) visit(child, []);
-        const owned = [];
-        for (const [channel] of walk(node)) {
-            const offsets = channel.attributes.Offset ?? "None";
-            if (channel.tag !== "DMXChannel" || (channel.attributes.DMXBreak ?? "1") !== "1" || offsets === "None") continue;
+        const owned = [...addressedChannels(node)].map(([channel, offsets]) => {
             const geometry = channel.attributes.Geometry ?? "";
-            owned.push([paths[geometry] || [geometry], offsets.split(",").map(Number)]);
-        }
+            return [paths[geometry] || [geometry], offsets];
+        });
         const within = (path, outer) => outer.length <= path.length && outer.every((name, index) => path[index] === name);
         const leaves = owned.map(([path]) => path).filter((path) => !owned.some(([other]) => other.length > path.length && within(other, path)));
         const cells = new Map();
@@ -328,7 +334,7 @@
             const tree = gdtfTree(draft, settings, spec);
             const channels = modeChannels(tree, mode);
             const cells = modeCells(tree, mode);
-            const className = classes[textOf(node, "Classing").toUpperCase()] || "";
+            const className = classes[classOf(node)] || "";
             return [{ key: node.key, fixture_uuid: node.attributes.uuid || "", name: node.attributes.name || "", spec, mode, breaks, addressKey: addresses[0].key, universe, address, channels, cells, className, matrix }];
         });
     }
@@ -341,7 +347,11 @@
     // Mirrors Starfire's aim without an MVR Focus.
     function stageCentre(draft, settings) {
         const positions = fixtureRows(draft, settings).map((row) => row.matrix.slice(9, 11));
-        const centre = (axis) => (positions.length ? (Math.min(...positions.map((p) => p[axis])) + Math.max(...positions.map((p) => p[axis]))) / 2 : 0);
+        const centre = (axis) => {
+            if (!positions.length) return 0;
+            const [low, high] = extent(positions.map((p) => p[axis]));
+            return (low + high) / 2;
+        };
         return [centre(0), centre(1), 0];
     }
 
@@ -356,6 +366,8 @@
         const focus = focusPoint(draft, settings, node)?.matrix.slice(9) ?? [];
         return { matrix: row.matrix, pan: limits("Pan"), tilt: limits("Tilt"), focus, universe: row.universe, address: row.address, gdtf_mode: row.mode };
     }
+
+    const rowOf = (draft, settings, key) => fixtureRows(draft, settings).find((row) => row.key === key);
 
     function rowError(row, label, settings) {
         if (row.breaks.length !== 1 || Number(row.breaks[0]) !== 0) return `${label}: Starfire renders one Address on break 0 per fixture.`;
@@ -473,7 +485,7 @@
 
     const classOf = (node) => textOf(node, "Classing").toUpperCase();
     const movementFor = (draft, uuid, axis) =>
-        [...walk(draft.scene)].map(([node]) => node).find((node) => node.tag === "Movement" && (node.attributes.fixture || "").toUpperCase() === uuid && node.attributes.axis === axis);
+        nodesOf(draft.scene).find((node) => node.tag === "Movement" && (node.attributes.fixture || "").toUpperCase() === uuid && node.attributes.axis === axis);
 
     const ACTIONS = {
         "set-position"(draft, settings, action, { node }) {
@@ -494,7 +506,7 @@
         },
         "set-role"(draft, settings, action, { node }) {
             const group = classOf(node);
-            if (!group) throw new Error("Put the fixture in a group first; a role belongs to a group.");
+            if (!group) throw new Error(ROLE_NEEDS_GROUP);
             if (!settings.roles.includes(action.role)) throw new Error(`Role must be one of ${settings.roles.join(", ")}.`);
             const layers = childOf(childOf(draft.scene, "Scene"), "Layers");
             let layer = layers.children.find((child) => child.tag === "Layer" && child.attributes.name === action.role);
@@ -528,7 +540,7 @@
             Object.assign(movement.attributes, { fixture: node.attributes.uuid, axis: action.axis, minimum: formatNumber(minimum), maximum: formatNumber(maximum) });
         },
         move(draft, settings, action) {
-            const row = fixtureRows(draft, settings).find((entry) => entry.key === action.key);
+            const row = rowOf(draft, settings, action.key);
             if (!row) throw new Error("The fixture changed. Select it again.");
             if (row.address !== action.original_address || row.universe !== action.original_universe) {
                 throw new Error("The fixture moved while dragging. Try again.");
@@ -614,7 +626,8 @@
     }
 
     const bytes = (text) => new TextEncoder().encode(text).length;
-    const modesOf = (tree) => (tree ? [...walk(tree)].filter(([entry]) => entry.tag === "DMXMode").map(([entry]) => entry.attributes.Name) : []);
+    const nameTooLong = (name) => (bytes(name) > NAME_BYTES ? `Names are at most ${NAME_BYTES} bytes.` : null);
+    const modesOf = (tree) => (tree ? nodesOf(tree).filter((entry) => entry.tag === "DMXMode").map((entry) => entry.attributes.Name) : []);
 
     function overlaps(rows, row, settings, changes) {
         const edited = { ...row, ...changes };
@@ -629,7 +642,7 @@
         const rows = fixtureRows(draft, settings);
         const row = rows.find((entry) => entry.key === key);
         if (!node || !row) return { error: "The fixture changed. Select it again." };
-        const others = [...walk(draft.scene)].map(([entry]) => entry).filter((entry) => entry.tag === "Fixture" && entry !== node);
+        const others = nodesOf(draft.scene).filter((entry) => entry.tag === "Fixture" && entry !== node);
         const child = (tag, text) => ({ action: "set-child-text", key, tag, value: text });
         const fit = (address, channels) => {
             const last = settings.channelCount + 1 - channels;
@@ -639,7 +652,7 @@
         switch (field) {
             case "name": {
                 const twin = others.some((entry) => entry.attributes.name === value);
-                const error = !value.trim() ? "A name is required." : bytes(value) > NAME_BYTES ? `Names are at most ${NAME_BYTES} bytes.` : twin ? `Another fixture is named ${value}.` : null;
+                const error = !value.trim() ? "A name is required." : nameTooLong(value) || (twin ? `Another fixture is named ${value}.` : null);
                 return { error, action: { action: "set-attribute", doc: "scene", key, name: "name", value } };
             }
             case "FixtureID": {
@@ -663,18 +676,18 @@
             case "group":
             case "newGroup": {
                 const name = value.trim();
-                const error = field === "newGroup" && !name ? "Name the new group." : bytes(name) > NAME_BYTES ? `Names are at most ${NAME_BYTES} bytes.` : null;
+                const error = field === "newGroup" && !name ? "Name the new group." : nameTooLong(name);
                 return { error, action: { action: "set-class", key, name } };
             }
             case "role":
-                return { error: classOf(node) ? null : "Put the fixture in a group first; a role belongs to a group.", action: { action: "set-role", key, role: value } };
+                return { error: classOf(node) ? null : ROLE_NEEDS_GROUP, action: { action: "set-role", key, role: value } };
             case "matrix": {
-                const values = value.map((text) => (text.trim() === "" ? NaN : Number(text)));
+                const values = typedNumbers(value);
                 const error = !values.every(Number.isFinite) ? "Position and rotation must be numbers." : Math.abs(values[4]) > MAX_PITCH_DEGREES ? `Pitch must be within ±${MAX_PITCH_DEGREES}°.` : null;
                 return { error, action: { action: "set-matrix", key, position: values.slice(0, 3), rotation: values.slice(3), standing: isStanding(parseMatrix(textOf(node, "Matrix")) || IDENTITY) } };
             }
             case "focus": {
-                const values = value.map((text) => (text.trim() === "" ? NaN : Number(text)));
+                const values = typedNumbers(value);
                 return { error: values.every(Number.isFinite) ? null : "Enter X, Y and Z in mm.", action: { action: "set-focus", key, position: values } };
             }
             case "mount": {
@@ -777,8 +790,7 @@
         if (!rig?.selection || testBlocked(show)) return null;
         if (spec === "test" && lit) return highlight(null);
         if (spec === "test") spec = "white";
-        const rows = fixtureRows(rig.draft, rig.settings);
-        const row = rows.find((entry) => entry.key === rig.selection);
+        const row = rowOf(rig.draft, rig.settings, rig.selection);
         if (!row) return null;
         if (MOTIONS.includes(spec)) {
             const target = { fixture: row.fixture_uuid };
@@ -820,7 +832,6 @@
             ({ name, start, end }) =>
                 `<rect class="preview-overlay" x="${start}" y="0" width="${Math.max(end - start, frameCount / 400)}" height="1" fill="${OVERLAY_COLOURS[name.split("/")[0]] || "#8293a6"}"><title>${escapeXml(name)}</title></rect>`
         );
-        const at = (frame) => `calc(${OVERVIEW_TRACK_LEFT} + ${frame / frameCount} * (100% - ${OVERVIEW_TRACK_LEFT}))`;
         strip.innerHTML = [
             `<div></div><div class="preview-banks">${intents.join("")}</div>`,
             row("overlays", "Overlays as they sound: hits, fills, risers, dips and accents", frameCount, overlays.join("")),
@@ -830,11 +841,12 @@
             ),
             row("white", "Share of each slice with a lit white cell; white is kept for hits", columns, overview.white.map((value, index) => share(value, index, 1.02, "#ffffff")).join("")),
             row(`strobe ${overview.strobe_seconds} s`, `Fastest strobe in each slice against the ${overview.strobe_max_hz} Hz cap`, columns, overview.strobe.map((hz, index) => band(0, hz / overview.strobe_max_hz, index, "#f0c674")).join(""), "band"),
-            ...overview.phrases.map((frame) => `<span class="preview-phrase" style="left:${at(frame)}"></span>`),
+            ...overview.phrases.map((frame) => `<span class="preview-phrase" style="left:${trackLeft(frame / frameCount)}"></span>`),
             '<span class="preview-cursor"></span>'
         ].join("");
     }
 
+    const trackLeft = (fraction) => `calc(${OVERVIEW_TRACK_LEFT} + ${fraction} * (100% - ${OVERVIEW_TRACK_LEFT}))`;
     const previewClock = (seconds) => `${Math.floor(seconds / 60)}:${(seconds % 60).toFixed(1).padStart(4, "0")}`;
 
     function seekPreview(frame) {
@@ -930,7 +942,7 @@
             // A redraw mid-gesture would drop the pointer's capture.
             if (rig && !planDrag && !planNav) showPlan(planView);
             const cursor = document.querySelector?.("#preview-overview .preview-cursor");
-            if (cursor) cursor.style.left = `calc(${OVERVIEW_TRACK_LEFT} + ${shown / Math.max(1, recording.frames.length - 1)} * (100% - ${OVERVIEW_TRACK_LEFT}))`;
+            if (cursor) cursor.style.left = trackLeft(shown / Math.max(1, recording.frames.length - 1));
             const perBar = recording.header.beats_per_bar;
             const whole = Math.floor(frame.beat);
             const inBar = perBar ? ((whole % perBar) + perBar) % perBar : 0;
@@ -997,13 +1009,13 @@
                     segment = stop;
                 }
             }
-            const universes = [...new Set([0, universe, ...rows.map((row) => row.universe).filter((value) => value !== null)])].sort((a, b) => a - b);
+            const choices = [...new Set([0, universe, ...universes(rows)])].sort((a, b) => a - b);
             return [
                 blocks,
                 `${occupied.filter((owners) => owners.length).length} / ${settings.channelCount} channels`,
                 errors.map((error) => component("Div", { children: error })),
                 Boolean(errors.length) || busy === "true",
-                universes.map((number) => ({ label: `Universe ${number + 1}`, value: number })),
+                choices.map((number) => ({ label: `Universe ${number + 1}`, value: number })),
                 universe
             ];
         },
@@ -1027,7 +1039,7 @@
             if (rig?.selection && rig.selection !== selection) {
                 selectedCell = null;
                 testRefusal = "";
-                const next = lit && fixtureRows(draft, settings).find((row) => row.key === selection);
+                const next = lit && rowOf(draft, settings, selection);
                 if (!next || !inRunningRig({ fixture: next.fixture_uuid })) clearTest();
                 else if (testCommand.target.fixture !== next.fixture_uuid) highlight({ fixture: next.fixture_uuid }, testCommand.colour);
             }
@@ -1162,7 +1174,7 @@
                 continue;
             }
             const length = Math.hypot(matrix[3], matrix[4]);
-            const group = classes[textOf(node, "Classing").toUpperCase()] || "";
+            const group = classes[classOf(node)] || "";
             fixtures.push({
                 key: node.key,
                 uuid: (node.attributes.uuid || "").toUpperCase(),
@@ -1182,6 +1194,8 @@
         return index < colors.length ? colors[index] : `hsl(${Math.round((index * 137.508) % 360)},55%,58%)`;
     }
 
+    const extent = (values) => [Math.min(...values), Math.max(...values)];
+    const stageLine = (x1, x2, y, r, n) => `<line class="plan-stage-edge" x1="${n(x1)}" y1="${y}" x2="${n(x2)}" y2="${y}" stroke-width="${n(r * 0.3)}"/>`;
     const escapeXml = (text) => String(text).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 
     function scaleMetres(spanMm) {
@@ -1197,7 +1211,7 @@
         if (!fixtures.length) return "";
         const xs = fixtures.map((mark) => mark.x);
         const ys = fixtures.map((mark) => -mark.y);
-        const [x0, x1, y0, y1] = [Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)];
+        const [[x0, x1], [y0, y1]] = [extent(xs), extent(ys)];
         const cuts = (low, high) => (high > low ? [1, 2].map((k) => low + ((high - low) * k) / 3) : []);
         const thirds = (low, high) => (high > low ? [0, 1, 2].map((k) => [low + ((high - low) * k) / 3, low + ((high - low) * (k + 1)) / 3, k]) : [[low, low, 1]]);
         const inset = r * 0.6;
@@ -1222,13 +1236,14 @@
         return { x: anchor[0] - (at[0] - box.x) * s, y: anchor[1] - (at[1] - box.y) * s, w, h: box.h * s };
     }
 
+    const cellMm = (cell) => [cell.x, cell.y, cell.z].map((metres) => metres * 1000);
+
     function previewCells(header, frame) {
         const cells = {};
         header.cells.forEach((cell, index) => {
             if (cell.x === null) return;
             const [i, r, g, b, strobe, direction = null, gobo = null] = frame.c[index];
-            const at = [cell.x, cell.y, cell.z].map((metres) => metres * 1000);
-            (cells[cell.fixture.toUpperCase()] ||= []).push({ at, i, rgb: [r, g, b], strobe, direction, gobo });
+            (cells[cell.fixture.toUpperCase()] ||= []).push({ at: cellMm(cell), i, rgb: [r, g, b], strobe, direction, gobo });
         });
         return cells;
     }
@@ -1241,7 +1256,7 @@
     }
 
     function previewReach(header, frames) {
-        const placed = header.cells.map((cell) => (cell.x === null ? null : [cell.x, cell.y, cell.z].map((metres) => metres * 1000)));
+        const placed = header.cells.map((cell) => (cell.x === null ? null : cellMm(cell)));
         const reach = [Infinity, -Infinity, 0, 0];
         const take = ([x, , z]) => {
             [reach[0], reach[1], reach[2], reach[3]] = [Math.min(reach[0], x), Math.max(reach[1], x), Math.min(reach[2], z), Math.max(reach[3], z)];
@@ -1257,12 +1272,13 @@
     };
 
     function cellGlyph(cell, axes, r, n, outline, title, strobeMax) {
-        const [x, y] = [n(cell.at[axes[0]]), n(-cell.at[axes[1]])];
+        const project = (at) => [n(at[axes[0]]), n(-at[axes[1]])];
+        const [x, y] = project(cell.at);
         let beam = "";
         if (cell.direction) {
-            const end = beamEnd(cell.at, cell.direction);
+            const [x2, y2] = project(beamEnd(cell.at, cell.direction));
             const gobo = cell.gobo && cell.gobo.toLowerCase() !== "open" ? ` stroke-dasharray="${n(r * 0.6)} ${n(r * 0.5)}"` : "";
-            beam = `<line class="plan-beam" x1="${x}" y1="${y}" x2="${n(end[axes[0]])}" y2="${n(-end[axes[1]])}" stroke="${cssRgb(cell.rgb)}" stroke-opacity="${cell.i}" stroke-width="${n(r * 0.5)}" stroke-linecap="round"${gobo}/>`;
+            beam = `<line class="plan-beam" x1="${x}" y1="${y}" x2="${x2}" y2="${y2}" stroke="${cssRgb(cell.rgb)}" stroke-opacity="${cell.i}" stroke-width="${n(r * 0.5)}" stroke-linecap="round"${gobo}/>`;
         }
         const level = Math.min(1, cell.strobe / strobeMax);
         const strobe =
@@ -1290,10 +1306,11 @@
         const n = Math.round;
         const colour = groupColours(fixtures, settings);
         const placed = fixtures.filter((mark) => preview.cells[mark.uuid]);
-        placed.sort((a, b) => Math.max(...preview.cells[b.uuid].map((cell) => cell.at[1])) - Math.max(...preview.cells[a.uuid].map((cell) => cell.at[1])));
+        const depth = (mark) => Math.max(...preview.cells[mark.uuid].map((cell) => cell.at[1]));
+        placed.sort((a, b) => depth(b) - depth(a));
         const parts = [
             `<svg class="elevation" xmlns="http://www.w3.org/2000/svg" viewBox="${[x0 - pad, -z1 - pad, x1 - x0 + 2 * pad, z1 - z0 + 2 * pad].map(n).join(" ")}" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Front elevation, seen from the audience" font-size="${n(r * 1.3)}">`,
-            `<line class="plan-stage-edge" x1="${n(x0 - pad)}" y1="0" x2="${n(x1 + pad)}" y2="0" stroke-width="${n(r * 0.3)}"/>`,
+            stageLine(x0 - pad, x1 + pad, 0, r, n),
             `<text x="${n(x0 - pad * 0.8)}" y="${n(r * 2)}">floor</text>`,
             `<g stroke-width="${n(r * 0.25)}">`
         ];
@@ -1308,7 +1325,7 @@
         const all = [...fixtures, ...others];
         const xs = all.length ? all.map((mark) => mark.x) : [0];
         const ys = all.length ? all.map((mark) => -mark.y) : [0];
-        const [minX, maxX, minY, maxY] = [Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)];
+        const [[minX, maxX], [minY, maxY]] = [extent(xs), extent(ys)];
         const span = Math.max(PLAN_MIN_SPAN_MM, maxX - minX, maxY - minY);
         const fitR = span * 0.018 * Math.min(1, Math.sqrt(PLAN_LABEL_LIMIT / Math.max(1, fixtures.length)));
         const labelled = fixtures.length <= PLAN_LABEL_LIMIT;
@@ -1325,8 +1342,8 @@
         const [r, font, pad] = [fitR / zoom, n(fitFont / zoom), fitPad / zoom];
         const charWidth = font * 0.58;
         const rect = ({ x, y, w, h }, round = n) => [x, y, w, h].map(round).join(" ");
-        const groups = [...new Set(fixtures.map((mark) => mark.group))].sort();
         const colour = groupColours(fixtures, settings);
+        const groups = Object.keys(colour).sort();
         const counts = fixtures.reduce((total, mark) => ({ ...total, [mark.group]: (total[mark.group] || 0) + 1 }), {});
         const stageEdge = n(maxY + r * 2);
         const metres = scaleMetres(span / zoom);
@@ -1334,7 +1351,7 @@
         const parts = [
             `<svg class="plan" xmlns="http://www.w3.org/2000/svg" viewBox="${rect(box)}" data-fit="${rect(fit, Math.round)}" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Rig plan, audience at the bottom" font-size="${font}" style="--r:${n(r)}">`,
             areaGrid(fixtures, n, r, font),
-            `<line class="plan-stage-edge" x1="${n(box.x)}" y1="${stageEdge}" x2="${n(box.x + box.w)}" y2="${stageEdge}" stroke-width="${n(r * 0.3)}"/>`,
+            stageLine(box.x, box.x + box.w, stageEdge, r, n),
             `<text x="${n(box.x + pad * 0.2)}" y="${n(stageEdge + font * 1.4)}">audience</text>`,
             `<g class="plan-scale"><line x1="${barX}" y1="${barY}" x2="${n(barX + metres * 1000)}" y2="${barY}" stroke-width="${n(r * 0.3)}"/><text x="${barX}" y="${n(barY - font * 0.5)}">${metres} m</text></g>`,
             `<g stroke-width="${n(r * 0.25)}">`
@@ -1419,6 +1436,13 @@
         return { x_mm: local[9], y_mm: local[10], markup: planWithPreview({ ...drag.marks, fixtures }, drag.settings, drag.view) };
     }
 
+    function swallowReleaseClick(target) {
+        suppressedClick = target;
+        setTimeout(() => suppressedClick === target && (suppressedClick = null));
+    }
+
+    const releaseCapture = (element, pointerId) => element.hasPointerCapture(pointerId) && element.releasePointerCapture(pointerId);
+
     function endPlanDrag() {
         const current = planDrag;
         planDrag = null;
@@ -1426,9 +1450,8 @@
         cancelAnimationFrame(current.frame);
         drawn.delete(current.container);
         redraw(current.container, drawPlan);
-        suppressedClick = current.container;
-        setTimeout(() => suppressedClick === current.container && (suppressedClick = null));
-        if (current.container.hasPointerCapture(current.pointerId)) current.container.releasePointerCapture(current.pointerId);
+        swallowReleaseClick(current.container);
+        releaseCapture(current.container, current.pointerId);
         return current;
     }
 
@@ -1455,8 +1478,7 @@
     const textInput = (value, edit, optional) => h("input", { type: "text", value: value ?? "", "data-mvr-edit": JSON.stringify(edit), "data-optional": optional, spellcheck: "false" });
 
     function references(draft, targets) {
-        return [...walk(draft.scene)]
-            .map(([node]) => node)
+        return nodesOf(draft.scene)
             .filter((node) => targets.includes(node.tag) && node.attributes.uuid)
             .map((node) => [node.attributes.uuid, `${node.attributes.name || node.tag} · ${node.attributes.uuid.slice(0, 8)}`]);
     }
@@ -1494,15 +1516,10 @@
                 : [textInput(value, edit, context.optional), button("new", { action: "new-uuid", key: context.node.key }, "Generate a new UUID")],
         matrix: (field, value, edit, context) => [textInput(value, edit, context.optional), null, matrixHelper(context.node, value)],
         dmx_address: (field, value, edit, context) => [textInput(value, edit, context.optional), null, addressHelper(context.node)],
-        GDTFSpec: (field, value, edit, { draft, settings, optional }) => {
-            const specs = [...new Set([...Object.keys(draft.gdtf), ...Object.keys(settings.library)])];
-            return [choice(specs.map((spec) => [spec, spec]), value, edit, optional)];
-        },
-        GDTFMode: (field, value, edit, { draft, settings, node, optional }) => {
-            const tree = gdtfTree(draft, settings, textOf(node, "GDTFSpec"));
-            const modes = tree ? [...walk(tree)].filter(([entry]) => entry.tag === "DMXMode").map(([entry]) => entry.attributes.Name) : [];
-            return [choice(modes.map((mode) => [mode, mode]), value, edit, optional)];
-        },
+        GDTFSpec: (field, value, edit, { draft, settings, optional }) => [choice(specsOf(draft, settings).map((spec) => [spec, spec]), value, edit, optional)],
+        GDTFMode: (field, value, edit, { draft, settings, node, optional }) => [
+            choice(modesOf(gdtfTree(draft, settings, textOf(node, "GDTFSpec"))).map((mode) => [mode, mode]), value, edit, optional)
+        ],
         default: (field, value, edit, context) => [textInput(value, edit, context.optional)]
     };
 
@@ -1555,14 +1572,15 @@
     function paintTest() {
         const strip = typeof document.querySelector === "function" && document.querySelector("#fixture-info .cfg-test");
         if (!strip || !rig) return;
-        const row = fixtureRows(rig.draft, rig.settings).find((entry) => entry.key === rig.selection);
+        const row = rowOf(rig.draft, rig.settings, rig.selection);
         const ids = show?.rig?.fixtures?.find((fixture) => fixture.fixture_uuid === row?.fixture_uuid)?.cells || [];
         if (!ids.includes(selectedCell)) selectedCell = null;
         const cells = document.querySelector("#fixture-info .cfg-cells");
         const listed = JSON.stringify([row?.fixture_uuid, row?.name, ids]);
         if (cells && cells.dataset.listed !== listed) {
             cells.dataset.listed = listed;
-            cells.replaceChildren(...ids.map((cell) => h("button", { type: "button", "data-cfg-cell": cell, title: `Pick ${cell.replace(row.fixture_uuid, row.name)} to test`, text: cell.replace(row.fixture_uuid, row.name) })));
+            const label = (cell) => cell.replace(row.fixture_uuid, row.name);
+            cells.replaceChildren(...ids.map((cell) => h("button", { type: "button", "data-cfg-cell": cell, title: `Pick ${label(cell)} to test`, text: label(cell) })));
         }
         cells?.querySelectorAll("[data-cfg-cell]").forEach((cell) => cell.classList.toggle("selected", cell.dataset.cfgCell === selectedCell));
         const blocked = testBlocked(show);
@@ -1578,7 +1596,7 @@
     }
 
     function patchForm(draft, settings, node) {
-        const row = fixtureRows(draft, settings).find((entry) => entry.key === node.key);
+        const row = rowOf(draft, settings, node.key);
         if (!row) return [];
         const placed = placedObjects(draft, settings).find((entry) => entry.node === node);
         const input = (field, value, attributes = {}) => h("input", { type: "text", value: value ?? "", "data-cfg": field, spellcheck: "false", ...attributes });
@@ -1596,7 +1614,6 @@
         const field = (label, control, wide, tag = "label") => h(tag, { className: wide ? "cfg-field wide" : "cfg-field" }, h("span", {}, label), control, h("small", { className: "cfg-note" }));
         const section = (heading, value, ...fields) => h("section", { className: "cfg-section" }, h("h4", {}, heading, value ? h("small", { text: value }) : null), fields.flat());
         const check = (tag, label) => h("label", { className: "cfg-check" }, h("input", { type: "checkbox", "data-cfg": tag, checked: textOf(node, tag) === "true" }), label);
-        const specs = [...new Set([...Object.keys(draft.gdtf), ...Object.keys(settings.library)])];
         const profile = (spec) => (settings.library[spec] ? `${settings.library[spec].manufacturer} ${settings.library[spec].name}` : spec);
         const tree = gdtfTree(draft, settings, row.spec);
         const classes = [...new Set(Object.values(classNames(draft)).filter(Boolean))].sort();
@@ -1617,7 +1634,7 @@
             section(
                 "Patch",
                 span,
-                field("Profile", select("GDTFSpec", specs.map((spec) => [spec, profile(spec)]), row.spec), true),
+                field("Profile", select("GDTFSpec", specsOf(draft, settings).map((spec) => [spec, profile(spec)]), row.spec), true),
                 h(
                     "div",
                     { className: "cfg-field-pair" },
@@ -1781,11 +1798,8 @@
         clearDropMarks(current.grid);
         current.grid.querySelectorAll(".dragging").forEach((block) => block.classList.remove("dragging"));
         current.label?.remove();
-        if (current.moved) {
-            suppressedClick = current.block;
-            setTimeout(() => suppressedClick === current.block && (suppressedClick = null));
-        }
-        if (current.grid.hasPointerCapture(current.pointerId)) current.grid.releasePointerCapture(current.pointerId);
+        if (current.moved) swallowReleaseClick(current.block);
+        releaseCapture(current.grid, current.pointerId);
     }
 
     document.addEventListener("pointerdown", (event) => {
@@ -1851,9 +1865,7 @@
         cancelAnimationFrame(frame);
         if (frame) showPlan(planView);
         const plan = document.getElementById("mvr-plan");
-        if (!moved || !plan) return;
-        suppressedClick = plan;
-        setTimeout(() => suppressedClick === plan && (suppressedClick = null));
+        if (moved && plan) swallowReleaseClick(plan);
     }
 
     document.addEventListener("pointerdown", (event) => {

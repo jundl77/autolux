@@ -343,7 +343,8 @@ const NEW_GROUP = '\u0000new';
 const rigFiles = () => harness('rig');
 const cfg = (name) => `#fixture-info [data-cfg="${name}"]`;
 const testButton = (spec) => `#fixture-info [data-cfg-test="${spec}"]`;
-// Flask sorts the stub's keys; the expectations are written by hand.
+const buttonLit = (spec) => `document.querySelector('${testButton(spec)}').classList.contains('active')`;
+const TEST_READY = `!!document.querySelector('${testButton('test')}') && !document.querySelector('${testButton('test')}').disabled`;
 const canon = (value) => JSON.stringify(value, (key, v) => (v && typeof v === 'object' && !Array.isArray(v)
     ? Object.fromEntries(Object.entries(v).sort(([a], [b]) => (a < b ? -1 : 1))) : v));
 const same = (a, b) => canon(a) === canon(b);
@@ -377,21 +378,32 @@ const statusText = () => text(STATUS);
 const noteOf = (name) => ev(`(document.querySelector('${cfg(name)}')?.closest('.cfg-field')
     ?.querySelector('.cfg-note')?.textContent || '').trim()`);
 
+async function openConfig() {
+    await tab('Config');
+    await waitFor(`!!document.querySelector('#mvr-plan svg.plan')`, 8000);
+}
+
+const recordActions = () => ev(`(() => {
+    window.__actions = [];
+    const ds = window.dash_clientside;
+    const real = ds.set_props;
+    ds.set_props = function (id, props) {
+        if (id === 'fixture-grid-action') window.__actions.push(props.data);
+        return real.apply(this, arguments);
+    };
+})()`);
+
+async function reloadPage() {
+    await navigate('Page.reload');
+    await waitFor(`!!document.getElementById('control-fx-off')`, 15000);
+}
+
 async function cfgFresh({width = 1280} = {}) {
     await harness('rig', {restore: true});
     await fresh({width});
-    await tab('Config');
-    await waitFor(`!!document.querySelector('#mvr-plan svg.plan')`, 8000);
+    await openConfig();
     await planSettled();
-    await ev(`(() => {
-        window.__actions = [];
-        const ds = window.dash_clientside;
-        const real = ds.set_props;
-        ds.set_props = function (id, props) {
-            if (id === 'fixture-grid-action') window.__actions.push(props.data);
-            return real.apply(this, arguments);
-        };
-    })()`);
+    await recordActions();
     await arm();
 }
 
@@ -407,13 +419,17 @@ async function planSettled() {
     }
 }
 
-async function selectFixture(name) {
+async function clickMark(name) {
     await planSettled();
     await ev(`(() => {
         document.querySelectorAll('[data-harness-mark]').forEach((e) => e.removeAttribute('data-harness-mark'));
         ${markOf(name)}.querySelector('circle').setAttribute('data-harness-mark', '');
     })()`);
     await click('[data-harness-mark]');
+}
+
+async function selectFixture(name) {
+    await clickMark(name);
     const ok = await waitFor(`document.querySelector('${cfg('name')}')?.value === ${JSON.stringify(name)}`, 5000);
     await sleep(300);
     const sent = await takeActions();
@@ -577,7 +593,6 @@ const SUITES = {
             {expect: [{action: 'intensity', level: LEVELS.calm}], look: shows('calm')});
         await action('intensity wild', 'double-click', () => click(levelLabel('wild'), {count: 2}),
             {expect: [{action: 'intensity', level: LEVELS.wild}], look: shows('wild')});
-        // The second click of a double-click may land before Dash runs the first, so one toggle or a pair are both right.
         const dbl = await action('intensity AUTO', 'double-click', () => click('#control-intensity-auto', {count: 2}),
             {expect: null});
         const endsOn = dbl.length === 1;
@@ -1122,12 +1137,12 @@ const SUITES = {
         };
         const note = () => text('#fixture-info .cfg-test-note');
         await exactly('locate Test', 'click', () => click(testButton('test')), [lightOn({fixture: ROOM_UUID.spot_left}, 'white')]);
-        await check('locate Test', 'lights its button; the note stays empty', await waitFor(`document.querySelector('${testButton('test')}').classList.contains('active')`, 3000)
+        await check('locate Test', 'lights its button; the note stays empty', await waitFor(buttonLit('test'), 3000)
             && (await note()) === '', {note: await note()});
         await check('locate Test', 'the keep-alive is held every 15 s', same(await keepAlive(), {held: 1, delays: [15000]}), await keepAlive());
         await exactly('locate keep-alive', 'the 15 s tick re-sends the test', () => ev('window.__tickKeepAlive()'), [lightOn({fixture: ROOM_UUID.spot_left}, 'white')]);
         await exactly('locate Test', 'a second click clears it', () => click(testButton('test')), [CLEAR]);
-        await check('locate Test', 'its button goes dark', await waitFor(`!document.querySelector('${testButton('test')}').classList.contains('active')`, 3000));
+        await check('locate Test', 'its button goes dark', await waitFor('!' + buttonLit('test'), 3000));
         await exactly('locate Test', 'a third click lights it again', () => click(testButton('test')), [lightOn({fixture: ROOM_UUID.spot_left}, 'white')]);
         for (const colour of ['warm', 'red', 'blue', 'green']) {
             await exactly(`locate swatch ${colour}`, 'click', () => click(testButton(colour)), [lightOn({fixture: ROOM_UUID.spot_left}, colour)]);
@@ -1139,14 +1154,14 @@ const SUITES = {
         await exactly('locate swatch red', 'click', () => click(testButton('red')), [lightOn({fixture: ROOM_UUID.spot_right}, 'red')]);
         for (const motion of ['sweep', 'aim']) {
             await exactly(`locate ${motion}`, 'click', () => click(testButton(motion)), [lightOn({fixture: ROOM_UUID.spot_right}, 'red', motion)]);
-            await check(`locate ${motion}`, 'lights its button', await waitFor(`document.querySelector('${testButton(motion)}').classList.contains('active')`, 3000));
+            await check(`locate ${motion}`, 'lights its button', await waitFor(buttonLit(motion), 3000));
         }
         await shot('test_row_mover', '#fixture-info');
         await exactly('locate Test off', 'a second Test clears the aim', () => click(testButton('test')), [CLEAR]);
-        await check('locate Test off', 'Test and the motion buttons go dark', await waitFor(['test', 'aim'].map((spec) => `!document.querySelector('${testButton(spec)}').classList.contains('active')`).join(' && '), 3000));
+        await check('locate Test off', 'Test and the motion buttons go dark', await waitFor(['test', 'aim'].map((spec) => '!' + buttonLit(spec)).join(' && '), 3000));
         for (const motion of ['sweep', 'aim']) {
             await exactly(`locate ${motion}`, 'from dark starts the test in white', () => click(testButton(motion)), [lightOn({fixture: ROOM_UUID.spot_right}, 'white', motion)]);
-            await check(`locate ${motion}`, 'lights Test with it', await waitFor(`document.querySelector('${testButton('test')}').classList.contains('active')`, 3000));
+            await check(`locate ${motion}`, 'lights Test with it', await waitFor(buttonLit('test'), 3000));
             await exactly('locate Test off', `clears the ${motion}`, () => click(testButton('test')), [CLEAR]);
         }
         await check('locate Test off', 'drops the keep-alive', (await keepAlive()).held === 0, await keepAlive());
@@ -1183,7 +1198,7 @@ const SUITES = {
         }, [CLEAR], 4000);
 
         await tab('Config');
-        await waitFor(`!!document.querySelector('${testButton('test')}') && !document.querySelector('${testButton('test')}').disabled`, 3000);
+        await waitFor(TEST_READY, 3000);
         await planSettled();
         await harness('control', {refuse_paused: true});
         await arm();
@@ -1252,7 +1267,7 @@ const SUITES = {
         await selectFixture('spot_left');
         await click(testButton('test'));
         await click(testButton('aim'));
-        await waitFor(`document.querySelector('${testButton('aim')}').classList.contains('active')`, 3000);
+        await waitFor(buttonLit('aim'), 3000);
         await arm();
         const started = Date.now();
         for (const yaw of ['10', '20', '30']) {
@@ -1266,7 +1281,7 @@ const SUITES = {
         await check('test hold', 'three yaw edits and 30 s send no clear', seen.length >= 3 && !seen.some((c) => c.target === null),
             {seen: seen.map((c) => [c.target, c.aim, c.pose?.matrix])});
         await check('test hold', 'every re-send keeps Aim', seen.every((c) => c.aim === true), {seen});
-        await check('test hold', 'Test and Aim stay lit', await ev(['test', 'aim'].map((spec) => `document.querySelector('${testButton(spec)}').classList.contains('active')`).join(' && ')));
+        await check('test hold', 'Test and Aim stay lit', await ev(['test', 'aim'].map(buttonLit).join(' && ')));
         await check('test hold', 'one keep-alive since the first click, never restarted by an edit', same(await keepAlive(), {held: 1, delays: [15000]}), await keepAlive());
         await arm();
         await ev('window.__tickKeepAlive()');
@@ -1278,20 +1293,15 @@ const SUITES = {
 
     cfg_first_press: async () => {
         const pick = async (name) => {
-            await planSettled();
-            await ev(`(() => {
-                document.querySelectorAll('[data-harness-mark]').forEach((e) => e.removeAttribute('data-harness-mark'));
-                ${markOf(name)}.querySelector('circle').setAttribute('data-harness-mark', '');
-            })()`);
-            await click('[data-harness-mark]');
+            await clickMark(name);
             return waitFor(`document.querySelector('${cfg('name')}')?.value === ${JSON.stringify(name)}
-                && !!document.querySelector('${testButton('test')}') && !document.querySelector('${testButton('test')}').disabled`, 5000);
+                && ${TEST_READY}`, 5000);
         };
         const once = async (name, uuid, pause = 0) => {
             await sleep(pause);
             await arm();
             await click(testButton('test'));
-            const lit = await waitFor(`document.querySelector('${testButton('test')}').classList.contains('active')`, 300);
+            const lit = await waitFor(buttonLit('test'), 300);
             await sleep(1500);
             const seen = await since();
             await check('first press', `${name} -> one highlight, exactly`, seen.length === 1 && same(seen[0], lightOn({fixture: uuid}, 'white')),
@@ -1320,14 +1330,13 @@ const SUITES = {
         await off();
         await harness('rig', {restore: true});
         await fresh({blank: true});
-        await tab('Config');
-        await waitFor(`!!document.querySelector('#mvr-plan svg.plan')`, 8000);
+        await openConfig();
         await pick('spot_left');
         await sleep(1500);
         await check('first press', 'mid-restart Test is off and says why', await ev(`document.querySelector('${testButton('test')}').disabled`)
             && (await text('#fixture-info .cfg-test-note')) !== '', {note: await text('#fixture-info .cfg-test-note')});
         await harness('control', {blank: false});
-        await waitFor(`!!document.querySelector('${testButton('test')}') && !document.querySelector('${testButton('test')}').disabled`, 5000);
+        await waitFor(TEST_READY, 5000);
         await once('after the rig appears', ROOM_UUID.spot_left);
     },
 
@@ -1423,21 +1432,18 @@ const SUITES = {
         await cfgFresh();
         await selectFixture('spot_left');
         await click(testButton('test'));
-        await waitFor(`document.querySelector('${testButton('test')}').classList.contains('active')`, 3000);
+        await waitFor(buttonLit('test'), 3000);
         await arm();
-        await navigate('Page.reload');
-        await waitFor(`!!document.getElementById('control-fx-off')`, 15000);
+        await reloadPage();
         await sleep(3000);
         await check('reload mid-test', 'the unload sends exactly one clear and nothing else', same(await since(), [CLEAR]),
             {seen: await since()});
         await check('reload mid-test', 'the show holds no test', (await harness('state')).highlight === null);
-        await tab('Config');
-        await waitFor(`!!document.querySelector('#mvr-plan svg.plan')`, 8000);
-        await ev(`window.__actions = []; (() => { const ds = window.dash_clientside; const real = ds.set_props;
-            ds.set_props = function (id, props) { if (id === 'fixture-grid-action') window.__actions.push(props.data); return real.apply(this, arguments); }; })()`);
+        await openConfig();
+        await recordActions();
         await check('reload mid-test', 'the reloaded page selects the fixture', await selectFixture('spot_left'));
         await sleep(800);
-        await check('reload mid-test', 'and shows no test lit, no keep-alive', !(await ev(`document.querySelector('${testButton('test')}').classList.contains('active')`))
+        await check('reload mid-test', 'and shows no test lit, no keep-alive', !(await ev(buttonLit('test')))
             && (await text('#fixture-info .cfg-test-note')) === '' && (await keepAlive()).held === 0, {note: await text('#fixture-info .cfg-test-note')});
         await arm();
         await click(testButton('test'));
@@ -1451,10 +1457,8 @@ const SUITES = {
         await selectFixture('wash_left');
         await formEdit('Patch number 42', () => typeInto(cfg('FixtureID'), '42'), {action: 'set-patch-number', value: '42'});
         await check('reload after save', 'Save', await save());
-        await navigate('Page.reload');
-        await waitFor(`!!document.getElementById('control-fx-off')`, 15000);
-        await tab('Config');
-        await waitFor(`!!document.querySelector('#mvr-plan svg.plan')`, 8000);
+        await reloadPage();
+        await openConfig();
         await ev(`window.__actions = []`);
         await selectFixture('wash_left');
         await sleep(1000);
@@ -1633,11 +1637,11 @@ const SUITES = {
         const {root} = await cdp('DOM.getDocument');
         const {nodeId} = await cdp('DOM.querySelector', {nodeId: root.nodeId, selector: '#preview-upload input[type=file]'});
         await cdp('DOM.setFileInputFiles', {nodeId, files: [file]});
-        const markOfUuid = (fixture) => `[...document.querySelectorAll('#mvr-plan svg.plan .mvr-object')].find((g) =>
-            g.querySelector('title')?.textContent === ${JSON.stringify(fixture.name)})`;
+        const label = () => text('#preview-label');
+        const labelStarts = (prefix) => `document.getElementById('preview-label').textContent.startsWith('${prefix}')`;
         const loaded = await waitFor(`!!document.querySelector('#mvr-plan svg.plan .plan-beam')`, 8000);
         await check('preview', 'a loaded file draws a beam on the plan', loaded, {status: await text('#preview-status')});
-        const look = (fixture) => ev(`(() => { const g = ${markOfUuid(fixture)}; const disc = g?.querySelector('circle.preview-cell');
+        const look = (fixture) => ev(`(() => { const g = ${markOf(fixture.name)}; const disc = g?.querySelector('circle.preview-cell');
             return disc && {fill: disc.getAttribute('fill'), outlined: disc.style.getPropertyValue('--group') !== '',
                 title: disc.querySelector('title').textContent, beam: g.querySelector('.plan-beam')?.getAttribute('stroke') ?? null,
                 dashed: g.querySelector('.plan-beam')?.hasAttribute('stroke-dasharray') ?? null, strobe: !!g.querySelector('.plan-strobe')}; })()`);
@@ -1649,7 +1653,7 @@ const SUITES = {
         await check('preview', 'the yaw arrows hide while a recording is shown',
             (await ev(`document.querySelectorAll('#mvr-plan svg.plan .mvr-object line:not(.plan-beam)').length`)) === 0);
         await check('preview', 'a front elevation stands beside the plan', await ev(`document.querySelectorAll('#mvr-plan svg.elevation circle.preview-cell').length === 2`));
-        await check('preview', 'the label names time, bar, section and base loop', (await text('#preview-label')) === '0:00.0 · bar 1.1 · drop · drop/chase', {label: await text('#preview-label')});
+        await check('preview', 'the label names time, bar, section and base loop', (await label()) === '0:00.0 · bar 1.1 · drop · drop/chase', {label: await label()});
         const rows = await ev(`[...document.querySelectorAll('#preview-overview > div')].map((d) => d.textContent)`);
         await check('preview', 'the strip shows banks, sections, the group band, white and strobe rows',
             same(rows, ['', '▼ drop', 'overlays', 'sections', 'pair', 'white', 'strobe 0.1 s'])
@@ -1661,11 +1665,11 @@ const SUITES = {
         await shot('config_preview_strip', '#preview-card');
 
         await ev(`window.dash_clientside.set_props('preview-frame', {value: 1})`);
-        const second = await waitFor(`(() => { const g = ${markOfUuid(strobing)}; return !!g?.querySelector('.plan-strobe'); })()`, 4000);
+        const second = await waitFor(`(() => { const g = ${markOf(strobing.name)}; return !!g?.querySelector('.plan-strobe'); })()`, 4000);
         await check('preview', 'scrubbing to the next frame rings the strobing cell and names its rate', second
             && (await look(strobing))?.title === `${strobing.name} · 100% · strobe 8 Hz`, {second: await look(strobing)});
         await check('preview', 'the label adds the sounding overlay to the base loop',
-            (await text('#preview-label')) === '0:00.1 · bar 1.1 · drop · drop/chase + hit/flash', {label: await text('#preview-label')});
+            (await label()) === '0:00.1 · bar 1.1 · drop · drop/chase + hit/flash', {label: await label()});
         await check('preview', 'a gobo other than Open dashes the beam and is named', sub(await look(lit), {dashed: true, title: `${lit.name} · 50% · gobo Dots`}), {lit: await look(lit)});
         const down = await ev(`(() => {
             const line = document.querySelector('#mvr-plan svg.elevation .plan-beam');
@@ -1676,18 +1680,17 @@ const SUITES = {
 
         await click('#preview-overview svg.band', {fx: 0.05});
         await check('preview', 'a click near the start of the strip seeks to the first frame',
-            await waitFor(`document.getElementById('preview-label').textContent.startsWith('0:00.0')`, 3000), {label: await text('#preview-label')});
+            await waitFor(labelStarts('0:00.0'), 3000), {label: await label()});
         await key(null, 'ArrowRight');
         await check('preview', '→ steps to the next beat (here the last frame)',
-            await waitFor(`document.getElementById('preview-label').textContent.startsWith('0:00.1')`, 3000), {label: await text('#preview-label')});
+            await waitFor(labelStarts('0:00.1'), 3000), {label: await label()});
         await key(null, 'ArrowLeft');
         await check('preview', '← steps back to the start of the beat',
-            await waitFor(`document.getElementById('preview-label').textContent.startsWith('0:00.0')`, 3000), {label: await text('#preview-label')});
+            await waitFor(labelStarts('0:00.0'), 3000), {label: await label()});
 
         await click('#preview-play');
-        const played = await waitFor(`document.getElementById('preview-label').textContent.startsWith('0:00.1')
-            && document.getElementById('preview-play').textContent === 'Play'`, 4000);
-        await check('preview', 'Play runs to the last frame and stops there', played, {label: await text('#preview-label'), button: await text('#preview-play')});
+        const played = await waitFor(`${labelStarts('0:00.1')} && document.getElementById('preview-play').textContent === 'Play'`, 4000);
+        await check('preview', 'Play runs to the last frame and stops there', played, {label: await label(), button: await text('#preview-play')});
         await check('preview', 'loading, scrubbing, seeking and playing send no show commands', (await since()).length === 0, {seen: await since()});
     },
 
