@@ -8,7 +8,7 @@ import queue
 import tempfile
 from pathlib import Path
 
-from autolux.lib.audio_config import BUFFER_SIZE, SAMPLE_RATE
+from autolux.lib.audio_config import BUFFER_SIZE, PLAYBACK_DELAY_SEC, SAMPLE_RATE
 from autolux.lib.clients.starfire_client import StarfireClient
 from autolux.lib.clock import SYSTEM_CLOCK, Clock
 from autolux.lib.engine.effect_definitions import (
@@ -35,8 +35,6 @@ from autolux.lib.ui_bridge import DEFAULT_DASHBOARD_PORT, PALETTE_POLICY
 
 LOGGER = logging.getLogger(__name__)
 
-# Production copies this to the native audio sender; simulate/runner.py replays with it.
-PLAYBACK_DELAY_SEC = 14.0
 _UI_ONLY_WINDOW_SEC = 60.0
 SHOW_CONFIG_PATH = Path(__file__).resolve().parents[2] / '.live' / 'show.json'
 CONTROL_QUEUE_SIZE = 16

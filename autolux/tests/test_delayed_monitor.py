@@ -245,10 +245,3 @@ def test_the_retired_play_audio_flag_is_gone_from_the_parser():
 
 def test_the_retired_play_audio_flag_leaves_no_plumbing_behind():
     assert not hasattr(_file_args(), 'play_audio')
-
-
-def test_the_monitor_delay_is_the_one_the_lights_are_aligned_to():
-    from autolux.lib.main import PLAYBACK_DELAY_SEC as LIVE_DELAY_SEC
-    from autolux.simulate.runner import PLAYBACK_DELAY_SEC
-
-    assert PLAYBACK_DELAY_SEC == LIVE_DELAY_SEC

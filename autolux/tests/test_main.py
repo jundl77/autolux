@@ -218,7 +218,7 @@ async def test_source_silence_keeps_the_monitor_audio_tail():
     light, queue, clock, _ = engine()
     played = []
     monitor = DelayedMonitor(PLAYBACK_DELAY_SEC, played.append, clock=clock)
-    for _ in range(20):
+    for _ in range(int(PLAYBACK_DELAY_SEC) + 6):
         clock.advance(1.0)
         monitor.feed(b'music')
     assert monitor.started and played

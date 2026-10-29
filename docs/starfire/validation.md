@@ -4,7 +4,7 @@
 
 Autolux starts Starfire with an embedded Rust Radius TX worker and deploys Rust RX
 through SSH. One TCP connection carries audio, lighting, metrics and heartbeats.
-The 14-second analysis delay and 500 ms receiver buffer are separate. Audio
+The 24-second analysis delay and 500 ms receiver buffer are separate. Audio
 references its lighting state; RX schedules that state against audible audio.
 Starfire and Radius have independent protobuf contracts and telemetry.
 
