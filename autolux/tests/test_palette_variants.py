@@ -1,4 +1,5 @@
 import colorsys
+import math
 import re
 from pathlib import Path
 
@@ -14,6 +15,7 @@ from autolux.lighting.palettes import (
     MIN_COLOUR_SATURATION,
     MONO_COLD_LEVEL,
     PALETTES,
+    SAME_HUE_DEGREES,
     VARIANT_SUFFIXES,
     WHITE,
     Palette,
@@ -275,3 +277,30 @@ def test_every_shipped_palette_colour_clears_the_saturation_floor():
         for role in ('primary', 'secondary', 'accent'):
             colour = getattr(variant, role)
             assert colorsys.rgb_to_hsv(*colour)[1] >= MIN_COLOUR_SATURATION, (variant.name, role)
+
+
+def _chroma_distance(first, second) -> float:
+    """Distance on the hue-saturation disc: hue counts as much as the colour carries it."""
+    (h1, s1, _), (h2, s2, _) = colorsys.rgb_to_hsv(*first), colorsys.rgb_to_hsv(*second)
+    angle = 2 * math.pi * (h1 - h2)
+    return math.sqrt(max(0.0, s1 * s1 + s2 * s2 - 2 * s1 * s2 * math.cos(angle)))
+
+
+# Calm's colour bump paints the accent and a drop turns to the secondary; either must read as a
+# change from the primary, and the secondary must not pass for the white of a hit.
+MIN_CHROMA_DISTANCE = 0.3
+MIN_SECONDARY_SATURATION = 0.35
+
+
+@pytest.mark.parametrize('palette', PALETTES + DROP_PALETTES, ids=lambda p: p.name)
+def test_accent_and_secondary_stand_apart_from_the_primary_and_from_white(palette):
+    if _hue_degrees(palette.primary, palette.secondary) < SAME_HUE_DEGREES:
+        pytest.skip('one hue on purpose')
+    assert _chroma_distance(palette.primary, palette.accent) >= MIN_CHROMA_DISTANCE
+    assert _chroma_distance(palette.primary, palette.secondary) >= MIN_CHROMA_DISTANCE
+    assert colorsys.rgb_to_hsv(*palette.secondary)[1] >= MIN_SECONDARY_SATURATION
+
+
+def _hue_degrees(first, second) -> float:
+    turn = abs(colorsys.rgb_to_hsv(*first)[0] - colorsys.rgb_to_hsv(*second)[0])
+    return 360 * min(turn, 1 - turn)

@@ -45,11 +45,12 @@ its one.
 
 Every buildup reads one shared state, `sf.build(ctx)` (below), and implements both regimes:
 
-- **Regime U, the drop unknown.** `drive = 0.3 + 0.5 * tension`: 0.3 on the one, about 0.43 at
-  bar 8, 0.75 at bar 16 and the 0.8 plateau at bar 32, so a 16-bar build has climbed by its
-  middle and an uncued build never peaks early or restarts.
+- **Regime U, the drop unknown.** `drive = 0.25 + 0.65 * tension`, with tension `e / (e + 48)`
+  of section time: 0.3 in bar 1, 0.51 at bar 8, 0.62 at bar 16 (twice bar 1), 0.72 at bar 32,
+  still rising, so an uncued build climbs from its first bar and never restarts.
 - **Regime K, a drop cued.** `drive` hands over continuously to 1 over the last 16 beats before
-  the dip, however late the cue arrives (`drive + (1 - drive) * finale`). Counts move one step
+  the dip (`drive + (1 - drive) * finale`); a cue that arrives with fewer than 16 beats to go
+  hands over across what is left (`build.span`, `sf.approach`), never in a jump. Counts move one step
   per beat (`math.ceil(build.left)`) and land on the dip, not the drop.
 - **A cued non-drop** eases `drive` down by half instead of building a finale.
 - **Steps land on the one:** compare thresholds with `build.step`, the tension at the last
@@ -71,7 +72,7 @@ Each buildup is one idea that drives every layer:
 | `stutter` | Subdividing: the roll halves on downbeats (a bar, half a bar, a beat, half a beat) and its gaps fill in until it is a wall of light. |
 | `stack` | Layering: strip first, washes from a third of the build, movers from two thirds, the beams lifting with it; the last bar locks solid. |
 | `inhale` | Holding: two-bar breaths that deepen; once the drop is cued everything freezes at the top of the inhale. |
-| `release` | Letting go: dim and motionless until half-way, then the beams open into a sweep and the dot into a chase. |
+| `release` | Letting go: a dim, motionless share of the drive until half-way, then the beams open into a sweep and the dot into a chase (energy 2, so Calm can play it). |
 
 ### The rest of the catalogue
 
@@ -92,11 +93,11 @@ Each buildup is one idea that drives every layer:
 
 | Bank | Loops | Intensity |
 |---|---|---|
-| `hit` | `blinder` (washes and strip white), `beam_punch` (the beams white through the open gobo, where they already point), `colour_bump` (Calm: the palette's punch colour), `strobe` (Wild: white strobe on every group) | HTP |
-| `fill` | `strip_wipe` and `mover_flick` (bar 8), `turnaround` (bar 16: washes and beams roll eighths, the strip doubles to sixteenths, lands on a dark eighth) | LTP |
-| `riser` | `strobe_ramp` (Wild: strobing white rise), `white_sweep` (beams lift in white and land back on the focus over the last bar, washes swell to 0.6), `strip_fill` (the strip closes from the ends in the punch colour, fit for Calm) | HTP |
+| `hit` | `white` (washes, strip and beams full white, the beams through the open gobo where they already point), `colour_bump` (Calm: the palette's punch colour), `strobe` (Wild: white strobe on every group) | HTP |
+| `fill` | `strip_wipe` and `mover_flick` (bar 8), `turnaround` (bar 16, in the punch colour: washes and beams roll eighths, the strip doubles to sixteenths, lands on a dark eighth) | LTP |
+| `riser` | `white_rise` (Balanced: washes and beams rise in white, no position), `strobe_ramp` (Wild: white and strobe over the last eight beats only, so the build's finale shows first), `white_sweep` (beams lift in white and land back on the focus over the last bar, washes swell to 0.6), `strip_fill` (Calm: the strip closes from the ends in the punch colour) | HTP |
 | `dip` | `last_beat` (every group dark), `fade` (a low glow for breakdown entry) | LTP |
-| `accent` | `sparkle` (seeded strip sparkle on the off-beat eighths), `wash_roll` (a quarter of the washes per off-beat, a lap in eight beats), `mover_shapes` (figure-eights through a gobo) | HTP, but `mover_shapes` LTP |
+| `accent` | `sparkle` (seeded strip sparkle on the off-beat eighths), `wash_roll` (a quarter of the washes per off-beat, a lap in eight beats), `mover_shapes` (figure-eights through a gobo, swapping A and B on the two-bar line where `hammer` and `crossfire` swap their washes) | HTP, but `mover_shapes` LTP |
 
 An overlay's first line is free text saying what it does, then exactly these four lines in
 any order:
@@ -122,8 +123,9 @@ any order:
 - **Hits are full on frame 0** (their attack is 0) and decay over their length.
 - **Risers peak at 1.0** (the base loops' 0.9 is their headroom) and end where the dip starts.
 - An overlay sets only the groups it is about; everything else shows the base.
-- **Strobe rates are beat divisions of `ctx.bpm`** (`hz = bpm / 60 * division`), stepped on
-  beat lines and never above the 10 Hz cap: pick the fastest division under it. A strobing
+- **Strobe rates are beat divisions of `ctx.bpm`**, stepped on beat lines:
+  `sf.beat_strobe_hz(ctx, per_beat)` picks the fastest division up to `per_beat` flashes a beat
+  that `ctx.strobe_max_hz` (the cap at this intensity, 0 where strobing is off) lets through. A strobing
   overlay starts on its own beat line whatever the base's level, and its gate covers the
   whole cell, base included.
 
@@ -177,9 +179,10 @@ The context (`ctx`), in beats and 0..1 levels; nil where noted:
 |---|---|
 | `beat_position`, `bar_phase`, `bar_index`, `beats_per_bar`, `bpm` | The tracker's grid and tempo. |
 | `autoloop_elapsed_beats` | Beats since this layer began (rotation entry or overlay begin). |
-| `section_intent`, `section_elapsed_beats` | The active cue's intent and beats since its start (nil without a cue). |
+| `section_intent`, `section_elapsed_beats` | The active cue's intent and beats since its start; for a manual selection the intent is nil and the beats count from the bar line at or before the selection. |
 | `next_intent`, `beats_until_next` | The pending cue's intent and beats until it starts (nil until known). |
 | `next_known_at` | The section time at which the pending cue arrived, where tension bends towards it. |
+| `strobe_max_hz` | The strobe rate the engine lets through at this intensity (0 where strobing is off). |
 | `beats_until_dip` | Beats until the pending cue's dip begins (nil without one). |
 | `drop_strength`, `next_drop_strength` | The active and pending drop's strength. |
 | `seed` | The active cue's seed, or 0. |
@@ -219,24 +222,31 @@ Section and music helpers:
 
 ```lua
 sf.random(ctx, i, j, k)        -- 0..1, a pure hash of ctx.seed and up to three integers.
-sf.tension(ctx, beats)         -- 0..1 build progress, and its value at the last downbeat.
-sf.finale(ctx, beats)          -- 0..1 over the last `beats` before the next cue; 0 when unknown.
+sf.section_beats(ctx)          -- phrase time: beats since the section start, else the layer's.
+sf.tension(ctx, half_beats)    -- 0..1 build progress (e / (e + 48) until the next change is
+                               -- known, then linear to it), and its value at the last downbeat.
+sf.finale(ctx, beats, from)    -- 0..1 over the last `beats` before the next cue (0 when none);
+                               -- with `from`, from + (1 - from) x that. The second value holds
+                               -- each bar at the level its end reaches.
 sf.onset(ctx), sf.band(ctx, name) -- the newest beat's onset and band level, a mid level until measured.
+sf.beat_strobe_hz(ctx, per_beat) -- the fastest beat-division strobe rate the engine lets through.
 sf.white()                     -- full white, for overlays only.
 ```
 
 Show helpers, shared by the banks (the W6 block in `lighting.lua`):
 
 ```lua
-sf.build(ctx) -> { drive, finale, tension, step, measure, left }
--- A buildup's shared state: drive 0..1 (regime U 0.3 + 0.5 x tension, handed over to 1 by a cued
--- drop's finale, eased down before a cued non-drop), finale 0..1, tension and step (the tension
--- at the last downbeat), measure (the 8, 4, 2-beat rate ladder, moving on 8-beat lines), left =
--- beats until a cued drop's dip begins (nil while no drop is cued).
+sf.build(ctx) -> { drive, finale, tension, step, stage, measure, left, span }
+-- A buildup's shared state: drive 0..1 (regime U 0.25 + 0.65 x tension, handed over to 1 by a
+-- cued drop's finale, eased down before a cued non-drop), finale 0..1, tension and step (the
+-- tension at the last downbeat), stage 0, 1, 2 (from step at a third and a half), measure (the
+-- 8, 4, 2-beat rate ladder by stage, moving on 8-beat lines), left = beats until a cued drop's
+-- dip begins (nil while no drop is cued), span = the beats the finale runs over.
+sf.approach(build, beats)      -- 0..1 over the last `beats` before the dip, over less after a
+                               -- late cue, so nothing timed to the drop jumps; 0 uncued.
 sf.snap(ctx, period)           -- look 0/1 changing on the off-beat before each period line, and
                                -- `dark` for the quarter beat after, to move heads in the dark.
 sf.pixels(share, count)        -- a width along a row: share x count cells, at least one.
-sf.section_beats(ctx)          -- phrase time: beats since the section start, else the layer's.
 sf.from_centre(index, count)   -- 0 at the centre of an sf.each row, 1 at either end, 0 for one.
 sf.shared_focus(target)        -- {x, y, z}, the mean of the members' focus points.
 sf.overlay_progress(ctx)       -- an overlay's progress 0..1 and the beats it has left.

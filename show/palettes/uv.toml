@@ -2,7 +2,7 @@ number = 6
 
 [slots]
 primary = "#8000ff"
-secondary = "#e6e6ff"
+secondary = "#00b3ff"
 accent = "#261aff"
 cold = "#b299ff"
 black = "#000000"

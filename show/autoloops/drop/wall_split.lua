@@ -1,6 +1,6 @@
 -- 8-beat loop
 -- energy: 3
--- movement: snap
+-- movement: sweep
 -- texture: wash
 local palette = sf.palette()
 local KICK_WIDTH_BEATS, WIPE_SHARE = 0.4, 0.19
