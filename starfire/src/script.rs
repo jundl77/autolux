@@ -704,6 +704,7 @@ impl LuaAutoloop {
             context.autoloop_elapsed_beats,
             context.autoloop_speed_scaled_elapsed_beats,
             context.bpm,
+            context.strobe_max_hz,
         ]
         .into_iter()
         .chain(context.section_elapsed_beats)

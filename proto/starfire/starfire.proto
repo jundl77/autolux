@@ -227,7 +227,7 @@ message UpdateBeat {
 
 // Measured by Autolux over the beat that starts at beat_index; each 0..1.
 message BeatFeatures {
-  float onset = 1;  // Spectral-flux onset strength at the beat, normalised per track.
+  float onset = 1;  // Kick-band (<= 150 Hz) spectral flux at the beat, against the track's peak.
   float bass = 2;   // 20-150 Hz band level.
   float mid = 3;    // 150-2500 Hz band level.
   float high = 4;   // 2500-16000 Hz band level.

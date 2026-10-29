@@ -187,32 +187,24 @@ end
 -- Section lookahead and per-beat music. Starfire derives these from the cue Autolux sent ahead
 -- of the room; every ctx field here is nil until there is something to say.
 
--- The active section's intent ("atmospheric", "breakdown", "buildup", "drop") and the beats
--- since it started (since the bar line at or before a selection without a cue); nil without
--- either.
-function sf.section(ctx)
-    return ctx.section_intent, ctx.section_elapsed_beats
-end
-
-local TENSION_BEATS = 128
-
-local function phrase_beats(ctx)
+-- Phrase time: beats since the section start (a bar line, also for a selection without a
+-- cue), else since the layer began. Every phrase-counting helper reads it.
+function sf.section_beats(ctx)
     return ctx.section_elapsed_beats or ctx.autoloop_elapsed_beats
 end
 
--- 0..1 over `beats` (128) of section time until the next change becomes known (at
--- ctx.next_known_at): mostly a square over the first half with a linear share, so a 16-bar
--- build already climbs in its first half (0.25 at bar 8, 0.9 at bar 16, 1 at bar 32). From the
--- moment the change is known it bends linearly to full at that change, so the curve fills the
--- real build without a jump. The second value is the tension at the last downbeat, for loops
--- that step against it.
-function sf.tension(ctx, beats)
-    beats = beats or TENSION_BEATS
-    assert(finite(beats) and beats > 0, "tension length must be positive and finite")
-    local elapsed, left, known = phrase_beats(ctx), ctx.beats_until_next, ctx.next_known_at
-    local function ease(played)
-        return 0.8 * math.min(1, played / (beats / 2)) ^ 2 + 0.2 * math.min(1, played / beats)
-    end
+local TENSION_HALF_BEATS = 48
+
+-- 0..1. Until the next change is known, e / (e + half_beats) of section time keeps rising for
+-- as long as the build lasts (with 48: 0.4 at bar 8, 0.57 at bar 16, 0.73 at bar 32). From the
+-- moment the change is known (ctx.next_known_at) it bends linearly to full at that change, so
+-- the curve fills the real build without a jump. The second value is the tension at the last
+-- downbeat, for loops that step against it.
+function sf.tension(ctx, half_beats)
+    half_beats = half_beats or TENSION_HALF_BEATS
+    assert(finite(half_beats) and half_beats > 0, "tension half point must be positive and finite")
+    local elapsed, left, known = sf.section_beats(ctx), ctx.beats_until_next, ctx.next_known_at
+    local function ease(played) return played / (played + half_beats) end
     local function at(played)
         if left == nil or known == nil or played < known then return ease(played) end
         local rest = elapsed - known + left
@@ -241,26 +233,18 @@ function sf.finale(ctx, beats, from)
     return level(remaining), level(stepped)
 end
 
--- Whole beats left before the next cue starts, one step per beat, within the last `steps`
--- beats; nil otherwise.
-function sf.countdown(ctx, steps)
-    assert(math.type(steps) == "integer" and steps > 0, "countdown needs a positive whole step count")
-    local remaining = ctx.beats_until_next
-    if remaining == nil or remaining > steps then return nil end
-    return math.ceil(remaining)
-end
-
--- Bars left before the next cue starts (fractional), nil while none is pending.
-function sf.bars_until_next(ctx)
-    return ctx.beats_until_next and ctx.beats_until_next / ctx.beats_per_bar
-end
-
--- Which `bars`-long phrase of the section this is (0 first) and the position in it, 0..1.
-function sf.phrase(ctx, bars)
-    assert(finite(bars) and bars > 0, "phrase length must be positive and finite")
-    local length = bars * ctx.beats_per_bar
-    local elapsed = ctx.section_elapsed_beats or ctx.beat_position
-    return math.floor(elapsed / length), (elapsed % length) / length
+-- The strobe rate of the fastest beat division, at most `per_beat` flashes a beat and halving
+-- down to one every two beats, that the engine will not clamp (ctx.strobe_max_hz, the cap at
+-- this intensity), so flashes stay on the grid at any tempo; 0 when none fits.
+function sf.beat_strobe_hz(ctx, per_beat)
+    assert(finite(per_beat) and per_beat > 0, "flashes per beat must be positive and finite")
+    local division = per_beat
+    while division >= 0.5 do
+        local hz = ctx.bpm / 60 * division
+        if hz <= ctx.strobe_max_hz then return hz end
+        division = division / 2
+    end
+    return 0
 end
 
 local function random_index(value)
@@ -295,17 +279,6 @@ end
 function sf.band(ctx, name)
     assert(name == "bass" or name == "mid" or name == "high", "band is bass, mid or high")
     return ctx[name] or UNMEASURED_FEATURE
-end
-
--- The newest beat's tempo; 0 before the first beat.
-function sf.bpm(ctx)
-    return ctx.bpm
-end
-
--- A beat-related rate in Hz: `per_beat` cycles every beat (2 is eighths).
-function sf.beat_hz(ctx, per_beat)
-    assert(finite(per_beat) and per_beat >= 0, "beats division must be finite and nonnegative")
-    return ctx.bpm / 60 * per_beat
 end
 
 -- ==== W3 aim ====
@@ -471,7 +444,7 @@ function sf.phaser(target, ctx, spec)
         end
     end
 
-    local elapsed = ctx.section_elapsed_beats or ctx.autoloop_elapsed_beats or ctx.beat_position
+    local elapsed = sf.section_beats(ctx)
     local effects = {}
     for index, cell in ipairs(members) do
         local t = measure and (elapsed / measure - phase_spread * rank[cell] / ranks) % 1
@@ -493,16 +466,14 @@ end
 
 -- ==== W4 vocabulary ====
 
+-- sf.gobo(target, slot) is native: one Gobo1 preset per member that has a gobo wheel. Slot 0
+-- is the open slot, 1.. the others in wheel order, wrapping, so any slot works on any rig.
+
 -- Full white, every palette's reserved "white" slot, for hits only: it ignores palette changes
 -- and alone may put a colour wheel on its open slot.
 function sf.white() return active_palette.white end
 
 -- ==== W6 show helpers ====
-
--- Phrase time: beats since the section start (a bar line), else since the layer began.
-function sf.section_beats(ctx)
-    return ctx.section_elapsed_beats or ctx.autoloop_elapsed_beats
-end
 
 -- 0 at the centre of an sf.each row, 1 at either end; 0 for a row of one.
 function sf.from_centre(index, count)
