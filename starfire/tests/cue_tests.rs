@@ -949,19 +949,23 @@ fn sf_tension_eases_in_then_bends_to_the_known_change_without_a_jump() {
         )
         .unwrap()
     };
-    // Unknown change: (elapsed / 128)^3, the entry's beats without a section.
-    assert_eq!(tension(Some(64.0), 0.0, None, None)[1..], [0.125, 0.125]);
-    assert_eq!(tension(None, 64.0, None, None)[1..], [0.125, 0.125]);
+    // Unknown change: 0.8·min(1, e/64)² + 0.2·min(1, e/128), the entry's beats without a section.
+    let ease = |e: f64| 0.8 * (e / 64.0).min(1.0).powi(2) + 0.2 * (e / 128.0).min(1.0);
+    assert!((ease(32.0) - 0.25).abs() < 1e-12, "bar 8 already climbs");
+    assert!((ease(64.0) - 0.9).abs() < 1e-12 && ease(128.0) == 1.0);
+    let bar_16 = ease(64.0);
+    assert_eq!(tension(Some(64.0), 0.0, None, None)[1..], [bar_16, bar_16]);
+    assert_eq!(tension(None, 64.0, None, None)[1..], [bar_16, bar_16]);
     assert_eq!(tension(Some(200.0), 0.0, None, None)[1..], [1.0, 1.0]);
     let [_, level, stepped] = tension(Some(66.0), 0.0, None, None);
     assert!(
-        level > 0.125 && stepped == 0.125,
+        level > bar_16 && stepped == bar_16,
         "the second value is the last downbeat's"
     );
     // The change becomes known at 96 with 32 beats left: no jump there, full at the change.
-    let eased = 0.75_f64.powi(3);
+    let eased = ease(96.0);
     assert_eq!(tension(Some(96.0), 0.0, Some(32.0), Some(96.0))[1], eased);
-    let halfway = eased + (1.0 - eased) * 0.5;
+    let halfway = eased + (1.0 - eased) * 16.0 / 32.0;
     assert_eq!(
         tension(Some(112.0), 0.0, Some(16.0), Some(96.0))[1..],
         [halfway, halfway]

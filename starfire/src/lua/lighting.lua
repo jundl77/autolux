@@ -200,15 +200,19 @@ local function phrase_beats(ctx)
     return ctx.section_elapsed_beats or ctx.autoloop_elapsed_beats
 end
 
--- 0..1, an ease-in (cubic) over `beats` (128) of section time until the next change becomes
--- known (at ctx.next_known_at); from there it bends linearly to full at that change, so the
--- curve fills the real build without a jump. The second value is the tension at the last
--- downbeat, for loops that step against it.
+-- 0..1 over `beats` (128) of section time until the next change becomes known (at
+-- ctx.next_known_at): mostly a square over the first half with a linear share, so a 16-bar
+-- build already climbs in its first half (0.25 at bar 8, 0.9 at bar 16, 1 at bar 32). From the
+-- moment the change is known it bends linearly to full at that change, so the curve fills the
+-- real build without a jump. The second value is the tension at the last downbeat, for loops
+-- that step against it.
 function sf.tension(ctx, beats)
     beats = beats or TENSION_BEATS
     assert(finite(beats) and beats > 0, "tension length must be positive and finite")
     local elapsed, left, known = phrase_beats(ctx), ctx.beats_until_next, ctx.next_known_at
-    local function ease(played) return math.min(1, played / beats) ^ 3 end
+    local function ease(played)
+        return 0.8 * math.min(1, played / (beats / 2)) ^ 2 + 0.2 * math.min(1, played / beats)
+    end
     local function at(played)
         if left == nil or known == nil or played < known then return ease(played) end
         local rest = elapsed - known + left
