@@ -689,11 +689,11 @@ fn channel_sets_are_explicit_presets_and_do_not_crossfade_through_other_gobos() 
         [128]
     );
     assert_eq!(
-        profile.interpolate_attribute("Gobo1", &open, &stars, 0.75),
+        profile.interpolate_attribute("Gobo1", &open, &stars, 0.25),
         open
     );
     assert_eq!(
-        profile.interpolate_attribute("Gobo1", &open, &stars, 1.0),
+        profile.interpolate_attribute("Gobo1", &open, &stars, 0.5),
         stars
     );
     assert!(

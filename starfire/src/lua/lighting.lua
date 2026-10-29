@@ -487,4 +487,10 @@ function sf.phaser(target, ctx, spec)
     return effects
 end
 
+-- ==== W4 vocabulary ====
+
+-- Full white, every palette's reserved "white" slot, for hits only: it ignores palette changes
+-- and alone may put a colour wheel on its open slot.
+function sf.white() return active_palette.white end
+
 return sf, named_palettes, function(palette) active_palette = palette end, use_render_intensity

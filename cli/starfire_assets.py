@@ -6,10 +6,11 @@ from pathlib import Path
 
 from autolux.lib.engine.static_mode import UV_ATTRIBUTE, StaticRig
 from autolux.lighting import mvr
+from autolux.lighting.autoloop_catalogue import read_overlay_meta
 from autolux.lighting.fixture_setup import load_rig, rig_modes
 from autolux.lighting.gdtf import MAX_DESCRIPTION_BYTES
 from autolux.lighting.gdtf_compile import compile_mode
-from autolux.lighting.palettes import palette_table, wheel_collisions
+from autolux.lighting.palettes import palette_table, wheel_warnings
 from cli.starfire_protocol import (
     COMMAND_ID_MAX_ENCODED_BYTES,
     ROLE_NAMES,
@@ -29,17 +30,6 @@ WIRE_ROLES = {name: role for role, name in ROLE_NAMES.items()}
 LOGGER = logging.getLogger(__name__)
 # What the running rig publishes of each fixture's patch, for a test pose's checks.
 PATCH_KEYS = ('gdtf_spec', 'gdtf_mode', 'universe', 'address', 'matrix')
-
-
-def declares_htp(source: str) -> bool:
-    """The `-- intensity: htp` header line, read as Starfire reads a catalogue directory, so a
-    live Login and a replay compose an overlay alike."""
-    for line in source.splitlines():
-        if not line.startswith('--'):
-            return False
-        if line[2:].replace(' ', '').strip() == 'intensity:htp':
-            return True
-    return False
 
 
 def _read(path: Path, limit: int) -> bytes:
@@ -227,18 +217,20 @@ def _autoloop_definitions(directory):
             total_bytes += len(content)
             if total_bytes > MAX_SCRIPT_CATALOGUE_BYTES or len(scripts) >= MAX_SCRIPTS:
                 raise ValueError('Autoloop catalogue exceeds its size limit')
-            source = content.decode('utf-8')
-            scripts.append(
-                wire.AutoloopDefinition(
-                    autoloop_id=f'{bank.name}/{path.stem}',
-                    bank=bank.name,
-                    lua_source=source,
-                    intensity_htp=declares_htp(source),
-                )
-            )
+            scripts.append((bank.name, path.stem, content.decode('utf-8')))
     if not scripts:
         raise ValueError('Autoloop directory contains no Lua scripts')
-    return scripts
+    # The catalogue's header parse, so a bad overlay header fails Login as it fails readiness.
+    overlays = read_overlay_meta(Path(directory))
+    return [
+        wire.AutoloopDefinition(
+            autoloop_id=f'{bank}/{name}',
+            bank=bank,
+            lua_source=source,
+            intensity_htp=(bank, name) in overlays and overlays[bank, name].intensity_htp,
+        )
+        for bank, name, source in scripts
+    ]
 
 
 def palette_definitions() -> list[wire.Palette]:
@@ -281,8 +273,8 @@ def load_login(
         )
         if render_core is not None:
             login.render_core = render_core
-        for collision in wheel_collisions(login.rig):
-            LOGGER.warning('[palette] %s', collision)
+        for warning in wheel_warnings(login.rig):
+            LOGGER.warning('[palette] %s', warning)
         check_payload_size(wire.LOGIN, login.ByteSize() + COMMAND_ID_MAX_ENCODED_BYTES)
         return login
     except (KeyError, TypeError, ValueError, OverflowError) as error:

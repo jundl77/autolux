@@ -1,20 +1,25 @@
 //! Stateful playback and property composition; no wall clock or hardware I/O.
 
 use std::cell::RefCell;
-use std::collections::BTreeMap;
+use std::collections::btree_map::Entry;
+use std::collections::{BTreeMap, BTreeSet};
 use std::rc::Rc;
 
 use anyhow::{Context, Result, ensure};
 use serde::Serialize;
 
 use crate::clock::{BeatFact, ClockSample, MusicalClock, validate_time};
-use crate::cue::{BaseStep, CueSample, CueTimeline, MAX_OVERLAYS, MAX_PREROLL_BEATS, MAX_ROTATION};
+use crate::cue::{
+    BaseStep, CueSample, CueTimeline, InstanceState, MAX_OVERLAYS, MAX_PREROLL_BEATS, MAX_ROTATION,
+    OverlayInstance, Span,
+};
 use crate::fixtures::FixtureRig;
+use crate::gdtf::GdtfProfile;
 use crate::intensity;
 use crate::model::{
-    BeatFeatures, Command, Effect, FixtureState, FixtureStates, LightingOverride, MAX_STROBE_HZ,
-    OverrideLifetime, PropertyValues, RenderContext, SectionCue, SectionIntent, SpecialFx, Target,
-    Transition, lerp,
+    AttributeValue, BeatFeatures, Command, Effect, FixtureState, FixtureStates, LightingOverride,
+    MAX_STROBE_HZ, OverrideLifetime, PropertyValues, RenderContext, Rgb, SectionCue, SectionIntent,
+    SpecialFx, Target, Transition, lerp,
 };
 use crate::palette::{PaletteSlots, PaletteTable};
 use crate::protocol::wire;
@@ -26,10 +31,27 @@ const MAX_IDENTIFIER_BYTES: usize = 128;
 const MAX_INTENSITY_MULTIPLIER: f64 = 8.0;
 const MAX_TRANSITION_BEATS: f64 = 1_024.0;
 const MAX_STROBE_BURST_SECONDS: f64 = 60.0;
-const STROBE_OPEN_FRACTION: f64 = 0.5;
+/// A flash lasts this long at every rate, up to half a cycle: a short flash reads as a strobe
+/// rather than a blink, and puts less light into a small room.
+const STROBE_FLASH_SECONDS: f64 = 0.05;
+const MAX_STROBE_OPEN_FRACTION: f64 = 0.5;
+/// At rates dividing the render rate, flash edges fall exactly on frame times; this keeps float
+/// rounding from moving an edge by a whole frame.
+const STROBE_EDGE_CYCLES: f64 = 1e-9;
 /// Slow enough to follow the beam by eye, inside even calm's movement slew limit.
 const PAN_SWEEP_SECONDS: f64 = 8.0;
 pub const MAX_SCRIPT_ERROR_BYTES: usize = 1024;
+/// A stepped value (strobe, preset, wheel slot) an overlay sets takes over half-way up its
+/// envelope, the profile's snap point in a crossfade.
+const OVERLAY_SNAP_LEVEL: f64 = 0.5;
+/// Absorbs float rounding between a dip's end and the next cue's activation, both grid beats.
+const ONE_TOLERANCE_BEATS: f64 = 1e-6;
+/// Banks in composition order when priorities tie: the dip lands on top, so nothing composed
+/// after it can light through the dark before the drop.
+const OVERLAY_BANK_LADDER: [&str; 5] = ["fill", "accent", "riser", "hit", "dip"];
+/// Only the dip's dark before a cue moves heads in black; a fill's dark last eighth inside a
+/// section comes back lit where it was.
+const DIP_BANK: &str = "dip";
 const TRUNCATED_ERROR_SUFFIX: &str = "… [truncated]";
 
 /// Semantic properties precede software strobe gating; DMX contains the final output.
@@ -168,7 +190,13 @@ pub struct Engine {
     strobe_max_rate_hz: f64,
     strobe_max_burst_seconds: f64,
     strobe_started_seconds: BTreeMap<String, f64>,
-    strobe_gates: BTreeMap<String, StrobeGate>,
+    strobe_gates: StrobeGates,
+    /// What overlay composition reads from each cell's profile, derived once.
+    cell_traits: BTreeMap<String, CellTraits>,
+    /// Each overlay instance's script and intensity rule by start order, looked up once.
+    overlay_scripts: BTreeMap<u64, OverlayScript>,
+    /// Cells whose overlay strobe outlasted the burst cap, refused until no overlay asks.
+    refused_overlay_strobes: BTreeSet<String>,
     palette: ActivePalette,
     intensity: f64,
     last_render_seconds: Option<f64>,
@@ -183,6 +211,14 @@ impl Engine {
         let palette =
             ActivePalette::steady(palettes.initial(), palettes.slots(palettes.initial())?);
         let scripts = catalog.compile(&rig, &palettes);
+        let cell_traits = rig
+            .cell_ids()
+            .into_iter()
+            .filter_map(|id| {
+                let traits = CellTraits::of(rig.profile(&id)?);
+                Some((id, traits))
+            })
+            .collect();
         Ok(Self {
             rig,
             catalog,
@@ -210,7 +246,10 @@ impl Engine {
             strobe_max_rate_hz: MAX_STROBE_HZ,
             strobe_max_burst_seconds: f64::INFINITY,
             strobe_started_seconds: BTreeMap::new(),
-            strobe_gates: BTreeMap::new(),
+            strobe_gates: StrobeGates::default(),
+            cell_traits,
+            overlay_scripts: BTreeMap::new(),
+            refused_overlay_strobes: BTreeSet::new(),
             palette,
             intensity: 1.0,
             last_render_seconds: None,
@@ -659,10 +698,11 @@ impl Engine {
         if let Err(error) = self.advance_cues(time_seconds, time) {
             self.stop_on_script_error(&error);
         }
+        let frame = self.frame_context(time_seconds, time);
         let mut states = if self.script_error.is_some() {
             self.dark_states()
         } else {
-            match self.render_baseline(time_seconds, time) {
+            match self.render_baseline(&frame, time) {
                 Ok(states) => states,
                 Err(error) => {
                     self.stop_on_script_error(&error);
@@ -672,6 +712,7 @@ impl Engine {
         };
 
         if self.script_error.is_none() {
+            self.compose_overlays(&frame, time_seconds, time, &mut states);
             self.compose_overrides(time_seconds, time, &mut states);
             let master = perceptual_to_linear_master(self.master.level_at(time_seconds));
             for state in states.values_mut() {
@@ -699,7 +740,13 @@ impl Engine {
         }
 
         let mut encoded_states = states.clone();
-        apply_software_strobe(&mut self.strobe_gates, time_seconds, &mut encoded_states);
+        apply_software_strobe(
+            &mut self.strobe_gates,
+            time_seconds,
+            time,
+            self.clock.beats_per_second(),
+            &mut encoded_states,
+        );
         // A test's pose stands in for its fixture's loaded placement; the newest pose wins.
         let rig = self
             .overrides
@@ -786,8 +833,12 @@ impl Engine {
                 .strobe_started_seconds
                 .entry(id.clone())
                 .or_insert(seconds);
+            // A strobe past its burst stays dark until it is no longer asked for, rather than
+            // turning into steady light at the strobe's level.
             if seconds - started >= max_burst_seconds {
                 state.strobe_hz = 0.0;
+                state.intensity = 0.0;
+                state.attribute_brightness = 0.0;
             }
         }
     }
@@ -801,6 +852,11 @@ impl Engine {
         };
         let max_step = range_per_second * (seconds - previous_seconds);
         for (id, state) in states.iter_mut() {
+            // A dark head moves at full speed, as a console moves in black, so it arrives
+            // before it lights.
+            if state.intensity <= 0.0 {
+                continue;
+            }
             if let Some(previous) = self.last_output_states.get(id) {
                 state.pan = step_toward(previous.pan, state.pan, max_step);
                 state.tilt = step_toward(previous.tilt, state.tilt, max_step);
@@ -861,7 +917,7 @@ impl Engine {
             && self.fade.is_some()
             && self.script_error.is_none()
         {
-            match self.render_baseline(seconds, time) {
+            match self.render_baseline(&self.frame_context(seconds, time), time) {
                 Ok(states) => Some(states),
                 Err(error) => {
                     self.stop_on_script_error(&error);
@@ -902,7 +958,11 @@ impl Engine {
         Ok(())
     }
 
-    fn render_baseline(&mut self, seconds: f64, time: ClockSample) -> Result<FixtureStates> {
+    fn render_baseline(
+        &mut self,
+        frame: &RenderContext,
+        time: ClockSample,
+    ) -> Result<FixtureStates> {
         if self
             .fade
             .as_ref()
@@ -910,16 +970,12 @@ impl Engine {
         {
             self.fade = None;
         }
-        if self.active.is_none() {
-            return Ok(self.dark_states());
-        }
-        let frame = self.frame_context(seconds, time);
         let palette = self.palette.slots_at(time.elapsed_musical_beats);
         let Some(active) = &mut self.active else {
             return Ok(self.dark_states());
         };
         let effects = active
-            .render(&frame, time, &palette)
+            .render(frame, time, &palette)
             .with_context(|| format!("autoloop {}/{} failed", active.bank, active.name))?;
         let destination = states_for_effects(&self.rig, &effects)?;
         let Some(fade) = &mut self.fade else {
@@ -928,13 +984,255 @@ impl Engine {
         let source = match &mut fade.source {
             FadeSource::Frozen(states) => states.clone(),
             FadeSource::Running(previous) => {
-                let effects = previous.render(&frame, time, &palette)?;
+                let effects = previous.render(frame, time, &palette)?;
                 states_for_effects(&self.rig, &effects)?
             }
         };
         let amount =
             ((time.elapsed_musical_beats - fade.start_beat) / fade.duration_beats).clamp(0.0, 1.0);
         Ok(blend_states(&self.rig, source, destination, amount))
+    }
+
+    /// Cue overlays over the base in ascending (priority, bank ladder, start order), below
+    /// every override and master. A failing overlay stops alone and never darkens the frame
+    /// (B2): the show's script error would make the supervisor restart it.
+    fn compose_overlays(
+        &mut self,
+        frame: &RenderContext,
+        seconds: f64,
+        time: ClockSample,
+        states: &mut FixtureStates,
+    ) {
+        let instances = self.cues.instances();
+        self.overlay_scripts
+            .retain(|order, _| instances.iter().any(|instance| instance.order == *order));
+        if instances.is_empty() {
+            self.refused_overlay_strobes.clear();
+            return;
+        }
+        let beat = time.elapsed_musical_beats;
+        let sample = self.cue_sample(time);
+        let one = self.cues.next_cue(&sample).map(|(_, at)| at);
+        let mut layers = Vec::with_capacity(instances.len());
+        let mut unloadable = Vec::new();
+        for instance in instances {
+            let Some(elapsed_beats) = instance.elapsed_beats(beat) else {
+                continue;
+            };
+            let overlay = &instance.overlay;
+            let script = match self.overlay_scripts.entry(instance.order) {
+                Entry::Occupied(entry) => entry.into_mut(),
+                Entry::Vacant(entry) => match self.scripts.get(&overlay.bank, &overlay.autoloop) {
+                    Ok(script) => entry.insert(OverlayScript {
+                        script,
+                        intensity_htp: self.catalog.intensity_htp(&overlay.bank, &overlay.autoloop),
+                    }),
+                    Err(error) => {
+                        unloadable.push((instance.order, error));
+                        continue;
+                    }
+                },
+            };
+            let ladder = OVERLAY_BANK_LADDER
+                .iter()
+                .position(|bank| *bank == overlay.bank)
+                .map_or(0, |rung| rung + 1);
+            layers.push(OverlayLayer {
+                rank: (overlay.priority, ladder, instance.order),
+                script: Rc::clone(&script.script),
+                intensity_htp: script.intensity_htp,
+                length_beats: overlay.length_beats,
+                elapsed_beats,
+                seed: instance.seed,
+                level: overlay_level(instance, beat),
+                holds_to_one: overlay.bank == DIP_BANK
+                    && matches!(instance.state, InstanceState::Running(_))
+                    && instance
+                        .nominal_end(&sample)
+                        .zip(one)
+                        .is_some_and(|(end, one)| end + ONE_TOLERANCE_BEATS >= one),
+            });
+        }
+        for (order, error) in unloadable {
+            self.fail_overlay(order, &error);
+        }
+        layers.sort_by_key(|layer| layer.rank);
+        let palette = self.palette.slots_at(beat);
+        let max_burst_seconds =
+            self.strobe_max_burst_seconds * intensity::strobe_scale(self.intensity);
+        let mut refused_strobes = BTreeSet::new();
+        let mut held_dark = BTreeSet::new();
+        for layer in &layers {
+            if layer.level <= 0.0 {
+                continue;
+            }
+            let cells = match self.render_overlay(layer, frame, &palette) {
+                Ok(cells) => cells,
+                Err(error) => {
+                    self.fail_overlay(layer.rank.2, &error);
+                    continue;
+                }
+            };
+            for (id, values) in cells {
+                // Past the burst cap the strobe is refused while asked for and the light
+                // below keeps playing; the limiter alone would hold the cell dark.
+                if values.strobe_hz.is_some_and(|hz| hz > 0.0)
+                    && (self.refused_overlay_strobes.contains(&id)
+                        || self
+                            .strobe_started_seconds
+                            .get(&id)
+                            .is_some_and(|started| seconds - started >= max_burst_seconds))
+                {
+                    refused_strobes.insert(id);
+                    continue;
+                }
+                let Some(state) = states.get_mut(&id) else {
+                    continue;
+                };
+                compose_layer(
+                    self.rig.profile(&id).zip(self.cell_traits.get(&id)),
+                    state,
+                    &values,
+                    layer.level,
+                    layer.intensity_htp,
+                );
+                if layer.holds_to_one && !layer.intensity_htp && values.intensity.is_some() {
+                    held_dark.insert(id);
+                }
+            }
+        }
+        self.refused_overlay_strobes = refused_strobes;
+        if let Err(error) = self.move_in_black(frame, &sample, states, &held_dark) {
+            self.cues
+                .record_overlay_error(format!("move in black failed: {error:#}"));
+        }
+    }
+
+    /// Reports why an overlay failed and stops its row; the show and the frame carry on (B2).
+    fn fail_overlay(&mut self, order: u64, error: &anyhow::Error) {
+        let message = self
+            .cues
+            .instances()
+            .iter()
+            .find(|instance| instance.order == order)
+            .map(|instance| {
+                format!(
+                    "overlay {}/{} failed: {error:#}",
+                    instance.overlay.bank, instance.overlay.autoloop
+                )
+            });
+        if let Some(message) = message {
+            self.cues.record_overlay_error(message);
+        }
+        self.cues.stop_row(order);
+    }
+
+    fn render_overlay(
+        &self,
+        layer: &OverlayLayer,
+        frame: &RenderContext,
+        palette: &PaletteSlots,
+    ) -> Result<BTreeMap<String, PropertyValues>> {
+        let effects = layer.script.borrow_mut().render(
+            &RenderContext {
+                autoloop_elapsed_beats: layer.elapsed_beats,
+                // The envelope runs on musical beats; a speed change must not run the
+                // overlay's animation off it.
+                autoloop_speed_scaled_elapsed_beats: layer.elapsed_beats,
+                overlay_length_beats: Some(layer.length_beats),
+                seed: layer.seed,
+                ..*frame
+            },
+            palette,
+        )?;
+        layer_values(&self.rig, &effects)
+    }
+
+    /// A6 move in black: a cell the dip holds dark up to the next cue takes everything but
+    /// intensity and strobe from that cue's first base loop at its start, so heads, wheels and
+    /// gobos are in place on the one. A lit cell keeps its own, so a wheel only turns in the
+    /// dark, and a cell any override addresses keeps what the override gives it.
+    fn move_in_black(
+        &self,
+        frame: &RenderContext,
+        sample: &CueSample,
+        states: &mut FixtureStates,
+        held_dark: &BTreeSet<String>,
+    ) -> Result<()> {
+        let overridden: BTreeSet<&str> = if held_dark.is_empty() {
+            BTreeSet::new()
+        } else {
+            self.overrides
+                .values()
+                .flat_map(|active| &active.cell_ids)
+                .chain(
+                    self.releasing
+                        .iter()
+                        .flat_map(|releasing| &releasing.cell_ids),
+                )
+                .map(String::as_str)
+                .collect()
+        };
+        let dark: Vec<&String> = held_dark
+            .iter()
+            .filter(|id| {
+                !overridden.contains(id.as_str())
+                    && states.get(*id).is_some_and(|state| state.intensity <= 0.0)
+            })
+            .collect();
+        if dark.is_empty() {
+            return Ok(());
+        }
+        let Some((cue, one)) = self.cues.next_cue(sample) else {
+            return Ok(());
+        };
+        let entry = &cue.rotation[0];
+        // Only a cut to another loop shows the entry's look on the one: a running loop plays
+        // on, and a crossfade starts from the look before.
+        let cuts_to_new_loop = self.resolve_transition(&entry.transition) == Transition::Cut
+            && !self
+                .active
+                .as_ref()
+                .is_some_and(|active| active.bank == entry.bank && active.name == entry.autoloop);
+        if !cuts_to_new_loop {
+            return Ok(());
+        }
+        let bar = f64::from(frame.beats_per_bar);
+        let effects = self
+            .scripts
+            .get(&entry.bank, &entry.autoloop)?
+            .borrow_mut()
+            .render(
+                &RenderContext {
+                    beat_position: one,
+                    bar_phase: one.rem_euclid(bar),
+                    bar_index: (one / bar).floor() as u64,
+                    autoloop_elapsed_beats: 0.0,
+                    autoloop_speed_scaled_elapsed_beats: 0.0,
+                    section_intent: Some(cue.intent),
+                    section_elapsed_beats: Some(0.0),
+                    next_intent: None,
+                    beats_until_next: None,
+                    drop_strength: cue.drop_strength,
+                    next_drop_strength: None,
+                    seed: cue.seed,
+                    ..*frame
+                },
+                &self.palettes.slots(&cue.palette)?,
+            )?;
+        let cells = layer_values(&self.rig, &effects)?;
+        for id in dark {
+            let (Some(values), Some(state)) = (cells.get(id), states.get_mut(id)) else {
+                continue;
+            };
+            let positions = PropertyValues {
+                intensity: None,
+                strobe_hz: None,
+                ..values.clone()
+            };
+            overlay_properties(&self.rig, id, state, &positions);
+        }
+        Ok(())
     }
 
     fn set_override(
@@ -1372,6 +1670,177 @@ fn apply_scalar_properties(state: &mut FixtureState, values: &PropertyValues) {
     }
 }
 
+/// What overlay composition reads from a cell's profile.
+struct CellTraits {
+    /// Each attribute's GDTF default, where an overlay fades in a value the state lacks.
+    rests: BTreeMap<String, AttributeValue>,
+    /// A wheel turns with the overlay's envelope; only a mixed colour follows its light.
+    wheel_colour: bool,
+}
+
+impl CellTraits {
+    fn of(profile: &GdtfProfile) -> Self {
+        let (red, blue) = (
+            Rgb {
+                red: 1.0,
+                green: 0.0,
+                blue: 0.0,
+            },
+            Rgb {
+                red: 0.0,
+                green: 0.0,
+                blue: 1.0,
+            },
+        );
+        Self {
+            rests: profile
+                .functions()
+                .into_iter()
+                .map(|function| (function.key, AttributeValue::Number(function.rest)))
+                .collect(),
+            // The profile's own blend steps a wheel-only colour and lerps a mixed one.
+            wheel_colour: profile.blend_colour(red, blue, 0.25) == red,
+        }
+    }
+}
+
+struct OverlayScript {
+    script: Rc<RefCell<LuaAutoloop>>,
+    intensity_htp: bool,
+}
+
+/// One running overlay instance's script and envelope this frame.
+struct OverlayLayer {
+    /// (priority, bank ladder rung, start order): later composes on top.
+    rank: (i32, usize, u64),
+    script: Rc<RefCell<LuaAutoloop>>,
+    intensity_htp: bool,
+    length_beats: f64,
+    elapsed_beats: f64,
+    /// The owning cue's, for sf.random.
+    seed: u32,
+    level: f64,
+    /// A dip whose window reaches the next cue's activation: the dark before the one.
+    holds_to_one: bool,
+}
+
+/// The envelope at `beat` (elapsed musical beats, which never jump; the grid only schedules):
+/// attack from the first rendered frame, then release from the level reached. A release of 0
+/// is a snap.
+fn overlay_level(instance: &OverlayInstance, beat: f64) -> f64 {
+    let attack_beats = instance.overlay.attack_beats;
+    let attack = |at: f64, span: &Span| {
+        if attack_beats > 0.0 {
+            ((at - span.started) / attack_beats).clamp(0.0, 1.0)
+        } else {
+            1.0
+        }
+    };
+    match &instance.state {
+        InstanceState::Pending => 0.0,
+        InstanceState::Running(span) => attack(beat, span),
+        InstanceState::Releasing { span, released_at } => {
+            let release_beats = instance.overlay.release_beats;
+            if release_beats > 0.0 {
+                attack(*released_at, span)
+                    * (1.0 - (beat - released_at) / release_beats).clamp(0.0, 1.0)
+            } else {
+                0.0
+            }
+        }
+    }
+}
+
+/// Per cell, only the properties a layer's effects set: an overlay composes those alone.
+fn layer_values(rig: &FixtureRig, effects: &[Effect]) -> Result<BTreeMap<String, PropertyValues>> {
+    let mut cells: BTreeMap<String, PropertyValues> = BTreeMap::new();
+    for effect in effects {
+        for id in rig.resolve_for_loop(&effect.target)? {
+            let values = cells.entry(id).or_default();
+            let set = &effect.values;
+            values.intensity = set.intensity.or(values.intensity);
+            values.colour = set.colour.or(values.colour);
+            values.pan = set.pan.or(values.pan);
+            values.tilt = set.tilt.or(values.tilt);
+            values.strobe_hz = set.strobe_hz.or(values.strobe_hz);
+            values.attributes.extend(set.attributes.clone());
+        }
+    }
+    Ok(cells)
+}
+
+/// One overlay's values over the state below at envelope `level`. Intensity is HTP or LTP by
+/// the loop's metadata. Light decides a mixed colour alone: under HTP it follows the overlay's
+/// share of the output, so a white hit is white on the one and fades back to the base colour
+/// with its light (A5). Everything else the overlay owns at its envelope level from the
+/// moment it fires, however bright the base is, so heads, gobos and strobes never flip with a
+/// base dimmer.
+fn compose_layer(
+    cell: Option<(&GdtfProfile, &CellTraits)>,
+    state: &mut FixtureState,
+    values: &PropertyValues,
+    level: f64,
+    intensity_htp: bool,
+) {
+    let mut mix = level;
+    if let Some(intensity) = values.intensity {
+        if intensity_htp {
+            let lit = intensity * level;
+            let output = state.intensity.max(lit);
+            mix = if output > 0.0 { lit / output } else { 0.0 };
+            state.intensity = output;
+        } else {
+            state.intensity = lerp(state.intensity, intensity, level);
+        }
+    }
+    if let Some(colour) = values.colour {
+        state.colour = match cell {
+            Some((profile, traits)) => {
+                let amount = if traits.wheel_colour { level } else { mix };
+                profile.blend_colour(state.colour, colour, amount)
+            }
+            None => state.colour.lerp(colour, mix),
+        };
+    }
+    if let Some(pan) = values.pan {
+        state.pan = lerp(state.pan, pan, level);
+    }
+    if let Some(tilt) = values.tilt {
+        state.tilt = lerp(state.tilt, tilt, level);
+    }
+    if let Some(rate) = values.strobe_hz
+        && level >= OVERLAY_SNAP_LEVEL
+    {
+        state.strobe_hz = rate;
+    }
+    if values.attributes.is_empty() {
+        return;
+    }
+    let Some((profile, traits)) = cell else {
+        if level >= OVERLAY_SNAP_LEVEL {
+            state.attributes.extend(values.attributes.clone());
+        }
+        return;
+    };
+    let mut layer = BTreeMap::new();
+    for (key, to) in &values.attributes {
+        let below = state.attributes.get(key);
+        // A key spelled other than the profile's own has no known default; it steps in.
+        let Some(from) = below.or_else(|| traits.rests.get(key)) else {
+            if level >= OVERLAY_SNAP_LEVEL {
+                layer.insert(key.clone(), to.clone());
+            }
+            continue;
+        };
+        let blended = profile.interpolate_attribute(key, from, to, level);
+        // A stepped value the state lacks appears only once the overlay has taken over.
+        if below.is_some() || blended != *from {
+            layer.insert(key.clone(), blended);
+        }
+    }
+    profile.overlay_attributes(&mut state.attributes, &layer);
+}
+
 fn states_for_effects(rig: &FixtureRig, effects: &[Effect]) -> Result<FixtureStates> {
     let mut states = rig.empty_states();
     // LuaAutoloop::render has already validated every effect.
@@ -1394,24 +1863,10 @@ fn blend_states(
 ) -> FixtureStates {
     for (id, to) in &mut destination {
         if let Some(from) = source.get(id) {
-            let profile = rig.profile(id);
-            for (key, value) in &from.attributes {
-                if let Some(destination) = to.attributes.get(key) {
-                    let blended = profile
-                        .expect("validated cell state")
-                        .interpolate_attribute(key, value, destination, amount);
-                    to.attributes.insert(key.clone(), blended);
-                } else if amount < 1.0
-                    && profile.is_none_or(|profile| !profile.shares_channel(key, &to.attributes))
-                {
-                    to.attributes.insert(key.clone(), value.clone());
-                }
-            }
+            let profile = rig.profile(id).expect("validated cell state");
+            to.attributes = profile.blend_attributes(&from.attributes, &to.attributes, amount);
             to.intensity = lerp(from.intensity, to.intensity, amount);
-            to.colour = profile.map_or_else(
-                || from.colour.lerp(to.colour, amount),
-                |profile| profile.blend_colour(from.colour, to.colour, amount),
-            );
+            to.colour = profile.blend_colour(from.colour, to.colour, amount);
             to.pan = lerp(from.pan, to.pan, amount);
             to.tilt = lerp(from.tilt, to.tilt, amount);
             if amount < 1.0 {
@@ -1434,45 +1889,147 @@ pub fn extinguish(states: &mut FixtureStates) {
     }
 }
 
-/// A strobing cell's gate: its phase in cycles at `seconds`, advancing at `hz` until the rate
-/// changes. Integrating the rate frame by frame keeps a sweep continuous; a phase of
-/// time x rate would gate at rate + time x d(rate)/dt and alias past the cap.
+/// One gate per strobe rate, shared by every cell at that rate, so cells that start on
+/// different frames still flash together.
+#[derive(Default)]
+struct StrobeGates {
+    by_rate: BTreeMap<u64, StrobeGate>,
+    rate_of_cell: BTreeMap<String, u64>,
+    bar_index: Option<u64>,
+}
+
+/// Where a gate's phase is measured: beats, so flashes land on the beat grid, or seconds while
+/// the tempo is unknown.
+#[derive(Clone, Copy, PartialEq)]
+enum StrobeTimeline {
+    Beats,
+    Seconds,
+}
+
+/// A gate's phase in cycles at a timeline position. A rate or tempo change re-anchors from the
+/// phase reached, so a sweep integrates frame by frame; a phase of time x rate would gate at
+/// rate + time x d(rate)/dt and alias past the cap. A negative phase holds the gate closed.
+#[derive(Clone, Copy)]
 struct StrobeGate {
-    seconds: f64,
+    timeline: StrobeTimeline,
+    position: f64,
     cycles: f64,
-    hz: f64,
+    cycles_per_unit: f64,
+    /// The lit part of each cycle: 50 ms, at most half the cycle.
+    open: f64,
+}
+
+impl StrobeGate {
+    fn cycles_at(&self, position: f64) -> f64 {
+        self.cycles + self.cycles_per_unit * (position - self.position)
+    }
+
+    /// The grid phase in [0, 1): flashes start on beats and their divisions.
+    fn grid(timeline: StrobeTimeline, position: f64, cycles_per_unit: f64) -> f64 {
+        match timeline {
+            StrobeTimeline::Beats => (position * cycles_per_unit).rem_euclid(1.0),
+            StrobeTimeline::Seconds => 0.0,
+        }
+    }
+
+    /// Back onto the grid at a bar line, never by starting a flash less than a cycle after the
+    /// last one began: where the grid would, the gate stays closed until a later grid flash.
+    fn realign(&mut self, position: f64) {
+        let phase = self.cycles_at(position);
+        let grid = Self::grid(self.timeline, position, self.cycles_per_unit);
+        let since_flash = phase.rem_euclid(1.0);
+        let offset = (since_flash - grid).rem_euclid(1.0);
+        if phase < 0.0 || offset.min(1.0 - offset) <= STROBE_EDGE_CYCLES {
+            return;
+        }
+        let relights = grid < self.open && since_flash >= self.open;
+        self.position = position;
+        self.cycles = if grid > since_flash {
+            grid - 2.0
+        } else if relights {
+            grid - 1.0
+        } else {
+            grid
+        };
+    }
 }
 
 fn apply_software_strobe(
-    gates: &mut BTreeMap<String, StrobeGate>,
+    gates: &mut StrobeGates,
     seconds: f64,
+    time: ClockSample,
+    beats_per_second: f64,
     states: &mut FixtureStates,
 ) {
+    let (timeline, position, units_per_second) = if beats_per_second > 0.0 {
+        (StrobeTimeline::Beats, time.beat_position, beats_per_second)
+    } else {
+        (StrobeTimeline::Seconds, seconds, 1.0)
+    };
+    if gates.bar_index.is_some_and(|bar| bar != time.bar_index) {
+        for gate in gates.by_rate.values_mut() {
+            if gate.timeline == timeline {
+                gate.realign(position);
+            }
+        }
+    }
+    let mut next = StrobeGates {
+        bar_index: Some(time.bar_index),
+        ..StrobeGates::default()
+    };
     for (id, state) in states.iter_mut() {
         let hz = state.strobe_hz;
         state.strobe_hz = 0.0;
         if hz <= 0.0 {
-            gates.remove(id);
             continue;
         }
-        // A strobe starts open, so its first frame is a flash.
-        let gate = gates.entry(id.clone()).or_insert(StrobeGate {
-            seconds,
-            cycles: 0.0,
-            hz,
+        let rate = hz.to_bits();
+        let cycles_per_unit = hz / units_per_second;
+        let open = (STROBE_FLASH_SECONDS * hz).min(MAX_STROBE_OPEN_FRACTION);
+        // A rate already strobing keeps its timing; a cell changing rate (or the tempo changing)
+        // carries the phase reached into the new one; anything else is a new burst on the grid.
+        let gate = *next.by_rate.entry(rate).or_insert_with(|| {
+            let previous = gates.by_rate.get(&rate).or_else(|| {
+                gates
+                    .rate_of_cell
+                    .get(id)
+                    .and_then(|previous| gates.by_rate.get(previous))
+            });
+            match previous {
+                Some(gate)
+                    if gate.timeline == timeline && gate.cycles_per_unit == cycles_per_unit =>
+                {
+                    *gate
+                }
+                Some(gate) if gate.timeline == timeline => {
+                    let cycles = gate.cycles_at(position);
+                    StrobeGate {
+                        timeline,
+                        position,
+                        cycles: if cycles < 0.0 {
+                            cycles
+                        } else {
+                            cycles.rem_euclid(1.0)
+                        },
+                        cycles_per_unit,
+                        open,
+                    }
+                }
+                _ => StrobeGate {
+                    timeline,
+                    position,
+                    cycles: StrobeGate::grid(timeline, position, cycles_per_unit),
+                    cycles_per_unit,
+                    open,
+                },
+            }
         });
-        let cycles = (gate.cycles + gate.hz * (seconds - gate.seconds)).fract();
-        // Re-anchoring only when the rate changes keeps a steady rate exact over a long burst.
-        if gate.hz != hz {
-            *gate = StrobeGate {
-                seconds,
-                cycles,
-                hz,
-            };
-        }
-        if cycles >= STROBE_OPEN_FRACTION {
+        next.rate_of_cell.insert(id.clone(), rate);
+        let phase = gate.cycles_at(position) + STROBE_EDGE_CYCLES;
+        if phase < 0.0 || phase.rem_euclid(1.0) >= gate.open {
             state.intensity = 0.0;
             state.attribute_brightness = 0.0;
         }
     }
+    *gates = next;
 }
