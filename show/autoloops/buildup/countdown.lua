@@ -8,12 +8,9 @@ local WASH_PEAK, STRIP_PEAK, MOVER_PEAK = 0.9, 0.9, 0.85
 local TICK_WIDTH_BEATS = 0.45
 local FAN_DEGREES, LIFT_DEGREES = 12, 35
 
--- The strip is a meter that fills from the centre to half its length as the build climbs; over
--- a cued drop's last eight beats the count closes the dark rest from both ends one step per
--- beat, so the bar is full on the last beat before the dip and never loses light on the way.
 local function meter_and_count(build)
     local meter = 0.5 * build.step
-    if build.left == nil or build.left > COUNT_BEATS then return meter, 0 end
+    if not sf.drop_within(build, COUNT_BEATS) then return meter, 0 end
     local steps = math.max(1, math.min(COUNT_BEATS, math.ceil(build.span)))
     local counted = math.max(0, steps - math.ceil(build.left) + 1) / steps
     return meter, counted * (1 - meter)
@@ -23,7 +20,7 @@ return {
     render = function(ctx)
         local build = sf.build(ctx)
         local meter, closing = meter_and_count(build)
-        local counting = build.left ~= nil and build.left <= COUNT_BEATS
+        local counting = sf.drop_within(build, COUNT_BEATS)
         local tick = sf.on_beat(ctx, TICK_WIDTH_BEATS, counting and 1 or ctx.beats_per_bar)
         local landing = 1 - sf.approach(build, ctx.beats_per_bar)
         return sf.scene {

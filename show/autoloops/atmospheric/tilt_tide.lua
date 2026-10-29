@@ -8,8 +8,6 @@ local TIDE_DEGREES = 8
 local WASH_LOW, WASH_HIGH = 0.05, 0.22
 local STRIP_LOW, STRIP_HIGH, MOVER_LEVEL = 0.02, 0.24, 0.3
 
--- One tide crosses the room left to right each phrase: every layer reads the same travelling
--- sine at its member's place in the row, so washes, strip and beams rise as the crest passes.
 local function crest(beat, index, count)
     return sf.osc.sine(beat, TIDE_BEATS, 0, 1, -(index - 1) / (2 * count))
 end

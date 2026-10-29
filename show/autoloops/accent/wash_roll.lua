@@ -7,7 +7,6 @@ local palette = sf.palette()
 local HIT_WIDTH_BEATS, PEAK = 0.35, 0.9
 local LAP_STEPS, LIT_SHARE = 8, 0.25
 
--- One step per off-beat, a lap there and back in eight beats on any number of washes.
 return {
     render = function(ctx)
         local offbeat = ctx.beat_position - 0.5

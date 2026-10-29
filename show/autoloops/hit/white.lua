@@ -6,8 +6,7 @@
 local OPEN_SLOT = 0
 local WASH_PEAK, STRIP_PEAK, MOVER_PEAK = 1, 0.9, 1
 
--- No position: an overlay owns pan and tilt from the moment it fires, so aiming here would
--- swing the heads in light on the one; they punch where the drop already points them.
+-- No position: an overlay owns pan and tilt from the moment it fires, so aiming would swing lit heads.
 return {
     render = function(ctx)
         local decay = (1 - sf.overlay_progress(ctx)) ^ 2

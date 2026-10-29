@@ -9,8 +9,6 @@ local WASH_PEAK, STRIP_PEAK, MOVER_FLOOR, MOVER_PEAK = 0.9, 0.9, 0.6, 0.85
 local CROSS_DEGREES, CROSS_MEASURE = 18, 4
 local OUTER_FROM = 0.5
 
--- Outer members carry the second colour over the group's first, so the wall reads as two
--- layers in one colour change per outer member; the strip wipes outside-in over each bar.
 local function outer_in_b(target)
     return sf.each(target, function(member, index, count)
         if sf.from_centre(index, count) > OUTER_FROM then return sf.colour(member, palette.secondary) end
@@ -19,9 +17,7 @@ end
 
 return {
     render = function(ctx)
-        local energy = sf.energy(ctx)
-        local gain = sf.loudness_gain(ctx.normalized_rms_level)
-        local floor = sf.lerp(FLOOR_QUIET, FLOOR_LOUD, energy)
+        local gain, floor, energy = sf.drop_levels(ctx, FLOOR_QUIET, FLOOR_LOUD)
         local kick = sf.on_beat(ctx, KICK_WIDTH_BEATS)
         local wipe = 1 - sf.phrase_phase(ctx, 1)
         return sf.scene {
@@ -31,9 +27,7 @@ return {
             sf.colour(sf.group("strip"), palette.primary),
             outer_in_b(sf.group("strip")),
             sf.each(sf.group("strip"), function(pixel, index, count)
-                local distance = math.abs(sf.from_centre(index, count) - wipe) * (count - 1) / 2
-                local lit = math.max(0, 1 - distance / sf.pixels(WIPE_SHARE, count))
-                return sf.dimmer(pixel, STRIP_PEAK * lit * gain)
+                return sf.dimmer(pixel, STRIP_PEAK * sf.mirrored_spot(index, count, wipe, WIPE_SHARE) * gain)
             end),
             sf.colour(sf.group("movers"), palette.secondary),
             sf.dimmer(sf.group("movers"), sf.lerp(MOVER_FLOOR, MOVER_PEAK, kick) * gain),

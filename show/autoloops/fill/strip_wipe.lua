@@ -12,8 +12,7 @@ return {
         return sf.scene {
             sf.colour(sf.group("strip"), palette.secondary),
             sf.each(sf.group("strip"), function(pixel, index, count)
-                local distance = math.abs(sf.from_centre(index, count) - (1 - progress)) * (count - 1) / 2
-                return sf.dimmer(pixel, PEAK * math.max(0, 1 - distance / sf.pixels(WIPE_SHARE, count)))
+                return sf.dimmer(pixel, PEAK * sf.mirrored_spot(index, count, 1 - progress, WIPE_SHARE))
             end)
         }
     end

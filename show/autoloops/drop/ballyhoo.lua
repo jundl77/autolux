@@ -11,9 +11,7 @@ local WASH_PEAK, STRIP_PEAK, MOVER_FLOOR, MOVER_PEAK = 0.9, 0.9, 0.6, 0.85
 
 return {
     render = function(ctx)
-        local energy = sf.energy(ctx)
-        local gain = sf.loudness_gain(ctx.normalized_rms_level)
-        local floor = sf.lerp(FLOOR_QUIET, FLOOR_LOUD, energy)
+        local gain, floor = sf.drop_levels(ctx, FLOOR_QUIET, FLOOR_LOUD)
         local kick = sf.on_beat(ctx, KICK_WIDTH_BEATS)
         local eighth = math.floor(ctx.beat_position * 2) % LOOP_EIGHTHS
         local spark = sf.on_beat(ctx, SPARK_WIDTH_BEATS, 0.5)

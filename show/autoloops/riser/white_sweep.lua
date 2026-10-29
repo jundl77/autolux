@@ -5,8 +5,6 @@
 -- texture: beam
 local LIFT_DEGREES, WASH_CAP = 40, 0.6
 
--- The rise completes a bar early and holds; over that last bar the lift falls back to the
--- focus, so a short dip can land the heads on the one.
 return {
     render = function(ctx)
         local _, left = sf.overlay_progress(ctx)

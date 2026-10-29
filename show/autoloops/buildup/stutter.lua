@@ -3,15 +3,12 @@
 -- movement: snap
 -- texture: wash
 local palette = sf.palette()
-local ROLL_BEATS, PULSE_SHARE = 8, 0.45
+local ROLL_BEATS, PULSE_SHARE, FASTEST_PULSE_BEATS = 8, 0.45, 0.5
 local WASH_PEAK, STRIP_PEAK, MOVER_PEAK = 0.9, 0.9, 0.85
 local WIDE_DEGREES, NARROW_DEGREES, RISE_DEGREES = 20, 6, 15
 
--- The roll halves on downbeats as the build climbs: a bar, half a bar, a beat. Over a cued
--- drop's last eight beats it rolls in half beats, the fastest a base loop pulses, and its gaps
--- fill in, so by the dip the roll has become a wall of light.
 local function pulse_period(ctx, build)
-    if build.left ~= nil and build.left <= ROLL_BEATS then return 0.5 end
+    if sf.drop_within(build, ROLL_BEATS) then return FASTEST_PULSE_BEATS end
     return ({ ctx.beats_per_bar, ctx.beats_per_bar / 2, 1 })[build.stage + 1]
 end
 

@@ -5,8 +5,6 @@
 -- texture: wash
 local WASH_PEAK, MOVER_PEAK = 1, 1
 
--- The rise eases in, so the build's own finale reads first and the white takes over late; it
--- sets no position, so it plays over any build's movement.
 return {
     render = function(ctx)
         local progress = sf.overlay_progress(ctx)

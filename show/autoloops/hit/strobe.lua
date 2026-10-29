@@ -7,14 +7,6 @@ local FLASHES_PER_BEAT = 4
 
 return {
     render = function(ctx)
-        local hz = sf.beat_strobe_hz(ctx, FLASHES_PER_BEAT)
-        local effects = {}
-        for _, name in ipairs({ "wash", "strip", "movers" }) do
-            local group = sf.group(name)
-            effects[#effects + 1] = {
-                sf.colour(group, sf.white()), sf.dimmer(group, 1), sf.strobe(group, hz)
-            }
-        end
-        return sf.scene(effects)
+        return sf.white_strobe(1, sf.beat_strobe_hz(ctx, FLASHES_PER_BEAT))
     end
 }
