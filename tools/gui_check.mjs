@@ -124,6 +124,25 @@ await cdp('Page.addScriptToEvaluateOnNewDocument', {source: `
     };
     window.clearInterval = (id) => (window.__keepAlive.delete(id) ? undefined : realClearInterval(id));
     window.__tickKeepAlive = () => { window.__keepAlive.forEach((fn) => fn()); return window.__keepAlive.size; };
+    // While __holdPoseSettle is set, fixture_patch.js's pose settle (the timeout re-highlighting testCommand) waits for __settlePose.
+    window.__poseSettle = new Map();
+    const realSetTimeout = window.setTimeout.bind(window);
+    const realClearTimeout = window.clearTimeout.bind(window);
+    let poseSettleId = 2e9;
+    window.setTimeout = (fn, ms, ...rest) => {
+        if (window.__holdPoseSettle && typeof fn === 'function' && String(fn).includes('highlight(testCommand.target')) {
+            window.__poseSettle.set(++poseSettleId, fn);
+            return poseSettleId;
+        }
+        return realSetTimeout(fn, ms, ...rest);
+    };
+    window.clearTimeout = (id) => (window.__poseSettle.delete(id) ? undefined : realClearTimeout(id));
+    window.__settlePose = () => {
+        const due = [...window.__poseSettle.values()];
+        window.__poseSettle.clear();
+        due.forEach((fn) => fn());
+        return due.length;
+    };
 `});
 
 async function ev(expression) {
@@ -348,7 +367,7 @@ const TEST_READY = `!!document.querySelector('${testButton('test')}') && !docume
 const canon = (value) => JSON.stringify(value, (key, v) => (v && typeof v === 'object' && !Array.isArray(v)
     ? Object.fromEntries(Object.entries(v).sort(([a], [b]) => (a < b ? -1 : 1))) : v));
 const same = (a, b) => canon(a) === canon(b);
-const ROOM_UUID = {
+const FROZEN_UUID = {
     spot_left: '75D557BC-32F9-592A-810D-652F0ECF68D7',
     spot_right: '0BD68C96-850C-57EA-86E0-1780E40FF826',
     zq06017: 'B3F12D06-678A-51FE-AD71-BC2BC260EB9F',
@@ -357,7 +376,7 @@ const roomPose = (x, address) => {
     const full = {min: 0, max: 1, inverted: false};
     return {matrix: [-1, 0, 0, 0, -1, 0, 0, 0, 1, x, 0, 0], pan: full, tilt: full, focus: [], universe: 0, address, gdtf_mode: '12ch'};
 };
-const ROOM_POSE = {[ROOM_UUID.spot_left]: roomPose(-300, 1), [ROOM_UUID.spot_right]: roomPose(300, 13)};
+const ROOM_POSE = {[FROZEN_UUID.spot_left]: roomPose(-300, 1), [FROZEN_UUID.spot_right]: roomPose(300, 13)};
 const lightOn = (target, colour, motion) => ({action: 'highlight', target, colour, sweep: motion === 'sweep', aim: motion === 'aim', pose: ROOM_POSE[target.fixture] ?? null});
 const CLEAR = {action: 'highlight', target: null};
 const posted = () => network.slice(netMark).map((n) => JSON.parse(n.body));
@@ -593,6 +612,7 @@ const SUITES = {
             {expect: [{action: 'intensity', level: LEVELS.calm}], look: shows('calm')});
         await action('intensity wild', 'double-click', () => click(levelLabel('wild'), {count: 2}),
             {expect: [{action: 'intensity', level: LEVELS.wild}], look: shows('wild')});
+        // The second click can land before Dash runs the first, so one or two toggles are both right.
         const dbl = await action('intensity AUTO', 'double-click', () => click('#control-intensity-auto', {count: 2}),
             {expect: null});
         const endsOn = dbl.length === 1;
@@ -1107,16 +1127,16 @@ const SUITES = {
         const swapped = await rigFiles();
         const byUuid = (files) => Object.fromEntries(files.fixtures.map(({name, ...rest}) => [rest.fixture_uuid, {name, rest}]));
         const [was, now] = [byUuid(unswapped), byUuid(swapped)];
-        await check('name swap', 'the two names traded uuids', now[ROOM_UUID.spot_left].name === 'spot_right' && now[ROOM_UUID.spot_right].name === 'spot_left',
-            {now: [now[ROOM_UUID.spot_left]?.name, now[ROOM_UUID.spot_right]?.name]});
+        await check('name swap', 'the two names traded uuids', now[FROZEN_UUID.spot_left].name === 'spot_right' && now[FROZEN_UUID.spot_right].name === 'spot_left',
+            {now: [now[FROZEN_UUID.spot_left]?.name, now[FROZEN_UUID.spot_right]?.name]});
         await check('name swap', 'Matrices, addresses and groups stay with the uuids',
             Object.keys(was).length === Object.keys(now).length && Object.entries(was).every(([id, fixture]) => same(fixture.rest, now[id]?.rest)),
-            {was: was[ROOM_UUID.spot_left]?.rest, now: now[ROOM_UUID.spot_left]?.rest});
+            {was: was[FROZEN_UUID.spot_left]?.rest, now: now[FROZEN_UUID.spot_left]?.rest});
         await selectFixture('spot_right');
         await arm();
         await click(testButton('test'));
         await sleep(1500);
-        await check('name swap', 'Test on "spot_right" lights the old spot_left uuid', same(await since(), [lightOn({fixture: ROOM_UUID.spot_left}, 'white')]),
+        await check('name swap', 'Test on "spot_right" lights the old spot_left uuid', same(await since(), [lightOn({fixture: FROZEN_UUID.spot_left}, 'white')]),
             {seen: await since()});
         await click(testButton('test'));
         await sleep(800);
@@ -1136,31 +1156,31 @@ const SUITES = {
             return seen;
         };
         const note = () => text('#fixture-info .cfg-test-note');
-        await exactly('locate Test', 'click', () => click(testButton('test')), [lightOn({fixture: ROOM_UUID.spot_left}, 'white')]);
+        await exactly('locate Test', 'click', () => click(testButton('test')), [lightOn({fixture: FROZEN_UUID.spot_left}, 'white')]);
         await check('locate Test', 'lights its button; the note stays empty', await waitFor(buttonLit('test'), 3000)
             && (await note()) === '', {note: await note()});
         await check('locate Test', 'the keep-alive is held every 15 s', same(await keepAlive(), {held: 1, delays: [15000]}), await keepAlive());
-        await exactly('locate keep-alive', 'the 15 s tick re-sends the test', () => ev('window.__tickKeepAlive()'), [lightOn({fixture: ROOM_UUID.spot_left}, 'white')]);
+        await exactly('locate keep-alive', 'the 15 s tick re-sends the test', () => ev('window.__tickKeepAlive()'), [lightOn({fixture: FROZEN_UUID.spot_left}, 'white')]);
         await exactly('locate Test', 'a second click clears it', () => click(testButton('test')), [CLEAR]);
         await check('locate Test', 'its button goes dark', await waitFor('!' + buttonLit('test'), 3000));
-        await exactly('locate Test', 'a third click lights it again', () => click(testButton('test')), [lightOn({fixture: ROOM_UUID.spot_left}, 'white')]);
+        await exactly('locate Test', 'a third click lights it again', () => click(testButton('test')), [lightOn({fixture: FROZEN_UUID.spot_left}, 'white')]);
         for (const colour of ['warm', 'red', 'blue', 'green']) {
-            await exactly(`locate swatch ${colour}`, 'click', () => click(testButton(colour)), [lightOn({fixture: ROOM_UUID.spot_left}, colour)]);
+            await exactly(`locate swatch ${colour}`, 'click', () => click(testButton(colour)), [lightOn({fixture: FROZEN_UUID.spot_left}, colour)]);
         }
         await check('locate swatch', 'the lit swatch is filled, the last one not', await waitFor(`document.querySelector('${testButton('green')}').classList.contains('active')
             && !document.querySelector('${testButton('blue')}').classList.contains('active')`, 3000));
         await check('locate swatch', 'one keep-alive, whatever the clicks', (await keepAlive()).held === 1, await keepAlive());
-        await exactly('locate selection', 'the lit test follows to spot_right', () => selectFixture('spot_right'), [lightOn({fixture: ROOM_UUID.spot_right}, 'green')]);
-        await exactly('locate swatch red', 'click', () => click(testButton('red')), [lightOn({fixture: ROOM_UUID.spot_right}, 'red')]);
+        await exactly('locate selection', 'the lit test follows to spot_right', () => selectFixture('spot_right'), [lightOn({fixture: FROZEN_UUID.spot_right}, 'green')]);
+        await exactly('locate swatch red', 'click', () => click(testButton('red')), [lightOn({fixture: FROZEN_UUID.spot_right}, 'red')]);
         for (const motion of ['sweep', 'aim']) {
-            await exactly(`locate ${motion}`, 'click', () => click(testButton(motion)), [lightOn({fixture: ROOM_UUID.spot_right}, 'red', motion)]);
+            await exactly(`locate ${motion}`, 'click', () => click(testButton(motion)), [lightOn({fixture: FROZEN_UUID.spot_right}, 'red', motion)]);
             await check(`locate ${motion}`, 'lights its button', await waitFor(buttonLit(motion), 3000));
         }
         await shot('test_row_mover', '#fixture-info');
         await exactly('locate Test off', 'a second Test clears the aim', () => click(testButton('test')), [CLEAR]);
         await check('locate Test off', 'Test and the motion buttons go dark', await waitFor(['test', 'aim'].map((spec) => '!' + buttonLit(spec)).join(' && '), 3000));
         for (const motion of ['sweep', 'aim']) {
-            await exactly(`locate ${motion}`, 'from dark starts the test in white', () => click(testButton(motion)), [lightOn({fixture: ROOM_UUID.spot_right}, 'white', motion)]);
+            await exactly(`locate ${motion}`, 'from dark starts the test in white', () => click(testButton(motion)), [lightOn({fixture: FROZEN_UUID.spot_right}, 'white', motion)]);
             await check(`locate ${motion}`, 'lights Test with it', await waitFor(buttonLit('test'), 3000));
             await exactly('locate Test off', `clears the ${motion}`, () => click(testButton('test')), [CLEAR]);
         }
@@ -1178,7 +1198,7 @@ const SUITES = {
             {listed, cells, shown: await ev(`document.querySelector('#fixture-info .cfg-cells')?.outerHTML.slice(0, 400)`)});
         const shown = await ev(`[...document.querySelectorAll('#fixture-info [data-cfg-cell]')].map((b) => b.textContent)`);
         await check('locate cells', 'each cell reads by the fixture name, not its uuid',
-            same(shown, cells.map((id) => id.replace(ROOM_UUID.zq06017, 'zq06017'))), {shown});
+            same(shown, cells.map((id) => id.replace(FROZEN_UUID.zq06017, 'zq06017'))), {shown});
         const cell = cells[2];
         await exactly('locate cells', `picking ${cell} alone sends nothing`, () => click(`#fixture-info [data-cfg-cell="${cell}"]`), [], 800);
         await exactly('locate cells', 'Test lights the picked cell', () => click(testButton('test')), [lightOn({cell}, 'white')]);
@@ -1190,7 +1210,7 @@ const SUITES = {
         await check('locate deselect', 'drops the keep-alive', (await keepAlive()).held === 0, await keepAlive());
 
         await selectFixture('spot_left');
-        await exactly('locate Test', 'again before leaving the tab', () => click(testButton('test')), [lightOn({fixture: ROOM_UUID.spot_left}, 'white')]);
+        await exactly('locate Test', 'again before leaving the tab', () => click(testButton('test')), [lightOn({fixture: FROZEN_UUID.spot_left}, 'white')]);
         await exactly('locate tab switch', 'Control sends one clear and nothing after', async () => {
             await tab('Control');
             await sleep(2000);
@@ -1233,8 +1253,8 @@ const SUITES = {
         await selectFixture('spot_right');
         await typeInto(cfg('address'), '400');
         await selectFixture('spot_left');
-        await exactly('locate address', 'Test lights spot_left', () => click(testButton('test')), [lightOn({fixture: ROOM_UUID.spot_left}, 'white')]);
-        const at300 = {...lightOn({fixture: ROOM_UUID.spot_left}, 'white'), pose: {...ROOM_POSE[ROOM_UUID.spot_left], address: 300}};
+        await exactly('locate address', 'Test lights spot_left', () => click(testButton('test')), [lightOn({fixture: FROZEN_UUID.spot_left}, 'white')]);
+        const at300 = {...lightOn({fixture: FROZEN_UUID.spot_left}, 'white'), pose: {...ROOM_POSE[FROZEN_UUID.spot_left], address: 300}};
         await exactly('locate address', 'an Address edit moves the lit test to 300', () => typeInto(cfg('address'), '300'), [at300]);
         await arm();
         await watchNote();
@@ -1250,14 +1270,23 @@ const SUITES = {
         await click(testButton('aim'));
         const centre = [];
         for (const axis of ['x', 'y', 'z']) centre.push(Number(await ev(`document.querySelector('${splitInput('focus', axis)}').value`)));
+        await ev('window.__holdPoseSettle = true');
         for (const [axis, value, focus] of [['x', '500', [500, centre[1], centre[2]]], ['z', '1000', [500, centre[1], 1000]]]) {
             await arm();
             await typeInto(splitInput('focus', axis), value);
-            await sleep(500);
-            const seen = await since();
-            await check('locate focus', `a focus ${axis.toUpperCase()} edit re-aims within 500 ms`,
-                seen.length === 1 && seen[0].aim && same(seen[0].pose?.focus, focus), {centre, focus, seen, note: await note()});
+            const pending = await waitFor('window.__poseSettle.size === 1', 3000);
+            const early = await since();
+            const settled = await ev('window.__settlePose()');
+            let seen = [];
+            for (let i = 0; i < 30 && !seen.length; i++) {
+                await sleep(100);
+                seen = await since();
+            }
+            await check('locate focus', `a focus ${axis.toUpperCase()} edit re-aims once, when its pose settles`,
+                pending && early.length === 0 && settled === 1 && seen.length === 1 && seen[0].aim && same(seen[0].pose?.focus, focus),
+                {centre, focus, pending, early, settled, seen, note: await note()});
         }
+        await ev('window.__holdPoseSettle = false');
         await exactly('locate focus', 'Test clears it', () => click(testButton('test')), [CLEAR]);
         await checkHighlightIds('locate');
     },
@@ -1274,6 +1303,7 @@ const SUITES = {
             await typeInto(splitInput('matrix', 'yaw'), yaw);
             await sleep(6500);
         }
+        // The faked document.hidden stands in for macOS hiding a covered window.
         await ev(`Object.defineProperty(document, 'hidden', {value: true, configurable: true}); document.dispatchEvent(new Event('visibilitychange'))`);
         await sleep(Math.max(0, 30000 - (Date.now() - started)));
         await ev(`delete document.hidden; document.dispatchEvent(new Event('visibilitychange'))`);
@@ -1316,17 +1346,17 @@ const SUITES = {
         };
         await cfgFresh();
         await check('first press', 'select spot_left', await pick('spot_left'));
-        await once('right after the pane renders', ROOM_UUID.spot_left);
+        await once('right after the pane renders', FROZEN_UUID.spot_left);
         await off();
         await cfgFresh();
         await check('first press', 'select spot_left', await pick('spot_left'));
-        await once('3 s after the pane renders', ROOM_UUID.spot_left, 3000);
+        await once('3 s after the pane renders', FROZEN_UUID.spot_left, 3000);
         await off();
         await check('first press', 'select spot_right', await pick('spot_right'));
-        await once('right after a selection change', ROOM_UUID.spot_right);
+        await once('right after a selection change', FROZEN_UUID.spot_right);
         await off();
         await check('first press', 'select spot_left', await pick('spot_left'));
-        await once('3 s after a selection change', ROOM_UUID.spot_left, 3000);
+        await once('3 s after a selection change', FROZEN_UUID.spot_left, 3000);
         await off();
         await harness('rig', {restore: true});
         await fresh({blank: true});
@@ -1337,7 +1367,7 @@ const SUITES = {
             && (await text('#fixture-info .cfg-test-note')) !== '', {note: await text('#fixture-info .cfg-test-note')});
         await harness('control', {blank: false});
         await waitFor(TEST_READY, 5000);
-        await once('after the rig appears', ROOM_UUID.spot_left);
+        await once('after the rig appears', FROZEN_UUID.spot_left);
     },
 
     cfg_apply: async () => {
@@ -1403,7 +1433,7 @@ const SUITES = {
         await click(testButton('test'));
         await sleep(1500);
         const renamedTest = posted();
-        await check('odd name', 'Test on the renamed, unapplied fixture lights its uuid', same(renamedTest, [lightOn({fixture: ROOM_UUID.spot_left}, 'white')]),
+        await check('odd name', 'Test on the renamed, unapplied fixture lights its uuid', same(renamedTest, [lightOn({fixture: FROZEN_UUID.spot_left}, 'white')]),
             {posted: renamedTest, note: await text('#fixture-info .cfg-test-note')});
         await click(testButton('test'));
         await sleep(800);
@@ -1448,7 +1478,7 @@ const SUITES = {
         await arm();
         await click(testButton('test'));
         await sleep(1500);
-        await check('reload mid-test', 'Test works again with one command', same(await since(), [lightOn({fixture: ROOM_UUID.spot_left}, 'white')]),
+        await check('reload mid-test', 'Test works again with one command', same(await since(), [lightOn({fixture: FROZEN_UUID.spot_left}, 'white')]),
             {seen: await since()});
         await click(testButton('test'));
         await sleep(1000);
@@ -1481,7 +1511,7 @@ const SUITES = {
             {headings: await headings()});
         await check('pane', 'the name is the heading', !!(await ev(`document.querySelector('#fixture-title [data-cfg="name"]')`)));
         await check('pane', 'the uuid is no field outside Advanced', await ev(`![...document.querySelectorAll('#fixture-info input')]
-            .some((i) => !i.closest('.cfg-advanced') && i.value.toUpperCase() === '${ROOM_UUID.spot_left}')`));
+            .some((i) => !i.closest('.cfg-advanced') && i.value.toUpperCase() === '${FROZEN_UUID.spot_left}')`));
         const advancedOpen = () => ev(`document.querySelector('#fixture-info .cfg-advanced').open`);
         await check('pane', 'Advanced is closed by default', (await advancedOpen()) === false);
         await click('#fixture-info .cfg-advanced > summary');
@@ -1521,8 +1551,8 @@ const SUITES = {
         await formEdit('heading rename', () => typeInto(cfg('name'), 'spot_hero'), {action: 'set-attribute', doc: 'scene', name: 'name', value: 'spot_hero'});
         await check('pane', 'Save', await save(), {status: await statusText()});
         const after = await rigFiles();
-        const hero = after.fixtures.find((f) => f.fixture_uuid.toUpperCase() === ROOM_UUID.spot_left);
-        const was = before.fixtures.find((f) => f.fixture_uuid.toUpperCase() === ROOM_UUID.spot_left);
+        const hero = after.fixtures.find((f) => f.fixture_uuid.toUpperCase() === FROZEN_UUID.spot_left);
+        const was = before.fixtures.find((f) => f.fixture_uuid.toUpperCase() === FROZEN_UUID.spot_left);
         await check('heading rename', 'the uuid keeps its patch under the new name', hero?.name === 'spot_hero'
             && same({...hero, name: 0, matrix: 0, pan: 0}, {...was, name: 0, matrix: 0, pan: 0}), {hero, was});
         await check('mount', 'the saved Matrix is standing: local X and Z negated', same(hero?.matrix, [1, 0, 0, 0, -1, 0, 0, 0, -1, -300, 0, 0]),

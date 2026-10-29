@@ -11,7 +11,7 @@ Only top-level wire messages have direction annotations.
 | --- | --- |
 | `PlayAutoloop` | Play one globally unique autoloop ID until changed. Repeating the ID continues the loop. An empty ID enters idle and clears effects. Transitions are cuts or positive beat-duration crossfades. |
 | `SetActiveEffect` / `UnsetActiveEffect` | Set or remove an identified accent. Specify fixture properties directly; omitted properties leave the baseline untouched. An optional duration in seconds expires the effect; otherwise it lasts until unset. `instantaneous_release` drops a special this frame; otherwise it runs its own release. |
-| `UpdateBeat` | Autolux reports one detected beat with the bar it belongs to: beat index, the tracker's bar phase (absent if unknown), beats per bar and tempo. Starfire derives the continuous bar-aligned position from those facts and interpolates at tempo between beats; animation speed never changes musical phase. `BeatFeatures` ride along once measured; a beat without them clears the previous ones. |
+| `UpdateBeat` | Autolux reports one detected beat with the bar it belongs to: beat index, the tracker's bar phase (absent if unknown), beats per bar and tempo. Starfire derives the continuous bar-aligned position from those facts and interpolates at tempo between beats; animation speed never changes musical phase. `BeatFeatures` (onset, bass, mid, high, each 0..1 against the track's own peaks) ride along once measured; a beat without them clears the previous ones. |
 | `SetParameter` | Change one global parameter, independently of the active autoloop. |
 
 ## Section cues

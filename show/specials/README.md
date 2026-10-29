@@ -90,8 +90,8 @@ rejected at startup, with the file and the key's path (such as `effect.size`) na
 A special is intense when it pulses or its speed is above `INTENSE_SPEED` (0.6).
 This is derived from the values and never declared. A drop whose cue strobes (hit or riser)
 and the intense special entering with it are one intense event on one cooldown, the drop strobe
-cooldown setting (halved at wild). Nothing intense fires at or below intensity 0.3, nor while the
-cooldown runs; calm specials are free.
+cooldown setting (halved at wild). Nothing intense fires at or below intensity 0.3. While the
+cooldown runs neither a strobing overlay nor an intense special fires; calm specials are free.
 
 ## Selection
 

@@ -1,7 +1,7 @@
 (() => {
     const ds = (window.dash_clientside = window.dash_clientside || {});
     const DRAG_THRESHOLD_PX = 4;
-    const LINE_DELTA_PX = 16;
+    const WHEEL_NOTCH_PX = 16;
     const LABEL_OFFSET_PX = 16;
     const MATRIX_DECIMALS = 6;
     const ORTHONORMAL_TOLERANCE = 1e-3;
@@ -718,6 +718,7 @@
         if (note) note.textContent = text;
     }
 
+    // Only a 409 is known dark: an unanswered test may be lit, so it stays lit for the clear; a refused edit re-send keeps `previous` lit.
     function dispatchTest(command, previous) {
         window.autoluxControl?.dispatch(command).then((reply) => {
             if (!reply?.error || command !== testCommand) return;
@@ -879,6 +880,7 @@
         seekPreview(Math.round(((event.clientX - left) / (box.right - left)) * (recording.frames.length - 1)));
     });
 
+    // Capture phase, ahead of the focused slider's single-frame step.
     document.addEventListener(
         "keydown",
         (event) => {
@@ -1423,6 +1425,7 @@
     const toWorld = (inverse, x, y) => toSvg(inverse, x, y).map((value, axis) => (axis ? -value : value));
     const svgBox = (svg) => ({ x: svg.viewBox.baseVal.x, y: svg.viewBox.baseVal.y, w: svg.viewBox.baseVal.width, h: svg.viewBox.baseVal.height });
 
+    // The preview keeps drag.view, so the plan does not rescale under the pointer.
     function planMove(drag, clientX, clientY) {
         const [x0, y0] = toWorld(drag.inverse, drag.clientX, drag.clientY);
         const [x1, y1] = toWorld(drag.inverse, clientX, clientY);
@@ -1585,6 +1588,7 @@
         cells?.querySelectorAll("[data-cfg-cell]").forEach((cell) => cell.classList.toggle("selected", cell.dataset.cfgCell === selectedCell));
         const blocked = testBlocked(show);
         const offline = row && !inRunningRig({ fixture: row.fixture_uuid }) ? `${row.name} · not in the running show` : null;
+        // Lit at the click, not on the show's echo: a dark Test invited the second click that cleared it.
         const active = lit ? testCommand : null;
         const here = Boolean(active) && (active.target.fixture === row?.fixture_uuid || ids.includes(active.target.cell));
         for (const button of strip.querySelectorAll("[data-cfg-test]")) {
@@ -1850,6 +1854,7 @@
         return b ? [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2, Math.hypot(a[0] - b[0], a[1] - b[1])] : [...a, 0];
     }
 
+    // Each gesture maps through the view and screen CTM it started with, so a preview frame drawn mid-gesture never skews it.
     function navBaseline() {
         if (planNav.frame) showPlan(planView);
         cancelAnimationFrame(planNav.frame);
@@ -1902,7 +1907,7 @@
             if (!svg || planDrag || planNav) return;
             event.preventDefault();
             const at = toSvg(svg.getScreenCTM().inverse(), event.clientX, event.clientY);
-            showPlan(zoomPlan(svgBox(svg), svgFit(svg), at, at, Math.exp(event.deltaY * (event.deltaMode ? LINE_DELTA_PX : 1) * 0.002)));
+            showPlan(zoomPlan(svgBox(svg), svgFit(svg), at, at, Math.exp(event.deltaY * (event.deltaMode ? WHEEL_NOTCH_PX : 1) * 0.002)));
         },
         { passive: false }
     );
