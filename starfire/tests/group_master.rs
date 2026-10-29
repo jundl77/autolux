@@ -22,6 +22,7 @@ fn lit_engine(definition: &wire::RigDefinition) -> Engine {
         autoloop_id: "lit".into(),
         bank: "test".into(),
         lua_source: LIT.into(),
+        intensity_htp: false,
     }])
     .unwrap();
     let rig = FixtureRig::from_wire(definition).unwrap();
@@ -32,6 +33,7 @@ fn lit_engine(definition: &wire::RigDefinition) -> Engine {
             bar_phase: None,
             beats_per_bar: 4,
             bpm: 120.0,
+            features: None,
         },
         Command::Select {
             bank: "test".into(),

@@ -4,11 +4,16 @@ from __future__ import annotations
 
 import math
 from collections.abc import Callable, Sequence
+from typing import TYPE_CHECKING
 
 from autolux.lighting.palettes import DEFAULT_PALETTE
 
+if TYPE_CHECKING:
+    from autolux.lib.engine.cue import Cue
+
 RMS_LEVEL_FLOOR_DBFS = -48.0
 RMS_LEVEL_CEILING_DBFS = -12.0
+BEAT_FEATURES = ('onset', 'bass', 'mid', 'high')
 WHOLE_RIG = 'all'
 
 
@@ -45,16 +50,33 @@ class StarfireClient:
         self.selected_autoloop: tuple[str, str] | None = None
         self.palette: str = DEFAULT_PALETTE
 
-    def beat(self, beat_index: int, bar_phase: int | None, beats_per_bar: int, bpm: float) -> None:
-        self._send_command(
-            {
-                'kind': 'beat',
-                'beat_index': beat_index,
-                'bar_phase': bar_phase,
-                'beats_per_bar': beats_per_bar,
-                'bpm': bpm,
-            }
-        )
+    def beat(
+        self,
+        beat_index: int,
+        bar_phase: int | None,
+        beats_per_bar: int,
+        bpm: float,
+        features: dict[str, float] | None = None,
+    ) -> None:
+        command = {
+            'kind': 'beat',
+            'beat_index': beat_index,
+            'bar_phase': bar_phase,
+            'beats_per_bar': beats_per_bar,
+            'bpm': bpm,
+        }
+        if features is not None:
+            if set(features) != set(BEAT_FEATURES):
+                raise ValueError(f'beat features are exactly {BEAT_FEATURES}')
+            command['features'] = dict(features)
+        self._send_command(command)
+
+    def cue_section(self, cue: Cue) -> None:
+        """Starfire starts the cue on its own clock; PlayAutoloop and stop clear it."""
+        self._send_command(cue.command())
+
+    def clear_cues(self) -> None:
+        self._send_command({'kind': 'clear_cues'})
 
     def set_normalized_rms_level(self, level: float) -> None:
         self._send_command({'kind': 'set_normalized_rms_level', 'level': level})

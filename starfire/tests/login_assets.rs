@@ -59,6 +59,7 @@ fn supplied_rig_and_scripts_match_file_loaded_dmx_and_repeated_selection_keeps_p
             )
             .unwrap(),
             bank: autoloop.bank,
+            intensity_htp: false,
         })
         .collect();
     let supplied_catalog = AutoloopCatalog::from_definitions(&scripts).unwrap();
@@ -85,6 +86,7 @@ fn supplied_rig_and_scripts_match_file_loaded_dmx_and_repeated_selection_keeps_p
                         bar_phase: None,
                         beats_per_bar: 4,
                         bpm: 140.0,
+                        features: None,
                     },
                 )
                 .unwrap();
@@ -215,6 +217,7 @@ fn supplied_catalog_requires_unique_ids_and_bounded_source() {
         autoloop_id: "look".into(),
         bank: "atmospheric".into(),
         lua_source: "return {render=function(ctx) return sf.scene {} end}".into(),
+        intensity_htp: false,
     };
     let mut other_bank = script.clone();
     other_bank.bank = "drop".into();
@@ -292,6 +295,7 @@ fn login_palettes_need_complete_unique_named_slots_and_the_first_is_active() {
         autoloop_id: "look".into(),
         bank: "atmospheric".into(),
         lua_source: "return {render=function(ctx) return sf.scene {sf.colour(sf.all(), sf.palette().primary), sf.dimmer(sf.all(), 1)} end}".into(),
+        intensity_htp: false,
     };
     let catalog = AutoloopCatalog::from_definitions(&[script]).unwrap();
     let palettes = PaletteTable::from_wire(&[ember, ice]).unwrap();

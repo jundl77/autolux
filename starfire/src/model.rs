@@ -108,6 +108,27 @@ fn unit_brightness() -> f64 {
 
 pub type FixtureStates = BTreeMap<String, FixtureState>;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SectionIntent {
+    Atmospheric,
+    Breakdown,
+    Buildup,
+    Drop,
+}
+
+/// Measured by Autolux over one beat; each 0..1.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BeatFeatures {
+    pub onset: f64,
+    pub bass: f64,
+    pub mid: f64,
+    pub high: f64,
+}
+
+/// Lua sees `None` as nil. Section fields describe the active cue and `next_*` the earliest
+/// pending one; a pending cue never shows through `section_*`.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct RenderContext {
     pub time_seconds: f64,
@@ -115,10 +136,30 @@ pub struct RenderContext {
     pub bar_phase: f64,
     pub bar_index: u64,
     pub beats_per_bar: u32,
+    /// Beats since this layer began: the rotation entry for a base loop, the nominal begin for
+    /// an overlay.
     pub autoloop_elapsed_beats: f64,
     pub autoloop_speed_scaled_elapsed_beats: f64,
     pub normalized_rms_level: Option<f64>,
     pub intensity: f64,
+    /// The newest beat's tempo; 0 before the first beat.
+    pub bpm: f64,
+    pub section_intent: Option<SectionIntent>,
+    pub section_elapsed_beats: Option<f64>,
+    pub next_intent: Option<SectionIntent>,
+    pub beats_until_next: Option<f64>,
+    /// Beats until the next cue's dip pre-roll begins, the moment a finale aims at.
+    pub beats_until_dip: Option<f64>,
+    pub drop_strength: Option<f64>,
+    pub next_drop_strength: Option<f64>,
+    /// The active cue's seed, or 0.
+    pub seed: u32,
+    pub onset: Option<f64>,
+    pub bass: Option<f64>,
+    pub mid: Option<f64>,
+    pub high: Option<f64>,
+    /// Set only for overlay scripts.
+    pub overlay_length_beats: Option<f64>,
 }
 
 impl Default for RenderContext {
@@ -133,8 +174,66 @@ impl Default for RenderContext {
             autoloop_speed_scaled_elapsed_beats: 0.0,
             normalized_rms_level: None,
             intensity: 1.0,
+            bpm: 0.0,
+            section_intent: None,
+            section_elapsed_beats: None,
+            next_intent: None,
+            beats_until_next: None,
+            beats_until_dip: None,
+            drop_strength: None,
+            next_drop_strength: None,
+            seed: 0,
+            onset: None,
+            bass: None,
+            mid: None,
+            high: None,
+            overlay_length_beats: None,
         }
     }
+}
+
+/// One section's plan, addressed by an Autolux beat index (a downbeat).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SectionCue {
+    pub start_beat_index: u64,
+    pub intent: SectionIntent,
+    pub rotation: Vec<RotationEntry>,
+    #[serde(default)]
+    pub overlays: Vec<OverlayCue>,
+    pub palette: String,
+    #[serde(default)]
+    pub drop_strength: Option<f64>,
+    #[serde(default)]
+    pub seed: u32,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RotationEntry {
+    pub bank: String,
+    pub autoloop: String,
+    pub bars: u32,
+    #[serde(default)]
+    pub transition: Transition,
+}
+
+/// Times in beats from the section start; whether intensity is HTP is the loop's metadata.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct OverlayCue {
+    pub bank: String,
+    pub autoloop: String,
+    #[serde(default)]
+    pub priority: i32,
+    pub begin_beats: f64,
+    pub length_beats: f64,
+    #[serde(default)]
+    pub every_bars: u32,
+    #[serde(default)]
+    pub attack_beats: f64,
+    #[serde(default)]
+    pub release_beats: f64,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -240,7 +339,14 @@ pub enum Command {
         bar_phase: Option<u32>,
         beats_per_bar: u32,
         bpm: f64,
+        #[serde(default)]
+        features: Option<BeatFeatures>,
     },
+    CueSection {
+        value: Box<SectionCue>,
+    },
+    /// Drops every pending cue and ends the active one; the base look plays on.
+    ClearCues,
     Select {
         bank: String,
         autoloop: String,

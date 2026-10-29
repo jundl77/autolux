@@ -29,7 +29,6 @@ fn fault_replay(duration_seconds: f64) -> (Replay, FixtureRig, AutoloopCatalog) 
     let catalog = AutoloopCatalog::load(directory.path()).unwrap();
     let rig = support::rig(simple_rig());
     let replay = Replay {
-        schema_version: 1,
         duration_seconds,
         frame_rate_hz: 40,
         palettes: support::palette_definitions(),

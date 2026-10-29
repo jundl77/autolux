@@ -257,6 +257,9 @@ impl LiveSession {
             script_error: frame.script_error.unwrap_or_default(),
             runtime_error: String::new(),
             last_processed_command_id,
+            pending_cues: self.engine.pending_cue_count() as u32,
+            overlay_error: self.engine.overlay_error().unwrap_or_default().to_owned(),
+            active_overlay_count: self.engine.active_overlay_count() as u32,
         })
     }
 
@@ -593,6 +596,7 @@ mod tests {
                 lua_source:
                     "return {render=function(ctx) return sf.scene {sf.dimmer(sf.all(),1), sf.pan_tilt(sf.all(),0.2,0.8)} end}"
                         .into(),
+                intensity_htp: false,
             }],
             output: Some(wire::login::Output::ArtnetDestination(listener.local_addr().unwrap().to_string())),
             palettes: vec![wire::Palette {
