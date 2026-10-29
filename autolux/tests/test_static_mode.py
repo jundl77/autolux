@@ -2,7 +2,7 @@ import pytest
 
 from autolux.lib.clock import VirtualClock
 from autolux.lib.engine.effect_controller import (
-    DROP_ACCENT_PRIORITY,
+    SPECIAL_PRIORITY,
     EffectController,
 )
 from autolux.lib.engine.effect_definitions import (
@@ -80,7 +80,7 @@ async def test_a_static_look_reaches_starfire_at_once_above_automatic_accents():
             },
         },
     )
-    assert STATIC_PRIORITY > DROP_ACCENT_PRIORITY
+    assert STATIC_PRIORITY > SPECIAL_PRIORITY
 
 
 async def test_the_uv_preset_drives_the_wash_uv_full_with_rgb_off_and_a_colour_replaces_it():
@@ -167,7 +167,7 @@ async def test_off_darkens_the_rig_instead_of_revealing_the_held_automatic_look(
         {'kind': 'clear_override', 'id': 'static_all'},
         {'kind': 'set_override', 'value': DARK_FLOOR},
     ]
-    assert STATIC_FLOOR_PRIORITY > DROP_ACCENT_PRIORITY
+    assert STATIC_FLOOR_PRIORITY > SPECIAL_PRIORITY
     lighting.events.clear()
     await light.leave_static()
     assert overrides(lighting) == [{'kind': 'clear_override', 'id': 'static_floor'}]
@@ -389,7 +389,7 @@ def test_a_picked_row_is_held_at_the_static_priority_and_clear_fx_releases_it_sh
     [
         (('spin', 'fx'), "'fx' cannot render 'spin'"),
         (('drift', 'wash'), "'wash' cannot render 'drift'"),
-        (('strobe_burst', 'all'), "unknown FX 'strobe_burst'"),
+        (('strobe', 'all'), "unknown FX 'strobe'"),
         (('drift', 'par'), "unknown static target 'par'"),
     ],
 )

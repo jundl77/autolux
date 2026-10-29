@@ -5,7 +5,6 @@ import pytest
 from autolux.lib.clock import VirtualClock
 from autolux.lib.engine.autoloop_policy import SelectionContext
 from autolux.lib.engine.effect_controller import (
-    DROP_ACCENT_ID,
     SPECIAL_ID,
     SPECIAL_PRIORITY,
     EffectController,
@@ -16,16 +15,13 @@ from autolux.lib.engine.effect_definitions import (
     INTENSITY_BALANCED,
     INTENSITY_CALM,
     INTENSITY_WILD,
-    STROBE_BURST_SECONDS,
     STROBE_COOLDOWN_SECONDS,
-    STROBE_MAX_BURST_SECONDS,
-    STROBE_RATE_HZ,
     AutoloopMeta,
     LightIntent,
     ShowSettings,
 )
 from autolux.lib.engine.event_buffer import EventBuffer
-from autolux.lib.engine.special_policy import DROP_STROBE, Special
+from autolux.lib.engine.special_policy import Special
 from autolux.lighting.special_catalogue import discover_specials
 from autolux.simulate.lighting_recorder import RecordingStarfireClient
 
@@ -61,30 +57,7 @@ async def test_same_autoloop_continues_without_reselection_or_repeating_accent(
     assert [command['autoloop'] for command in commands if command['kind'] == 'select'] == [
         autoloop
     ]
-    assert len([command for command in commands if command['kind'] == 'set_override']) == int(
-        intent == LightIntent.DROP
-    )
-
-
-async def test_strobe_is_an_expiring_accent_over_the_drop_autoloop(recorded_lighting):
-    effect_controller = EffectController(recorded_lighting, settings=lambda: FULL_INTENSITY)
-    await effect_controller.change_effect(LightIntent.BREAKDOWN)
-    await effect_controller.change_effect(LightIntent.DROP)
-    commands = [event['command'] for event in recorded_lighting.events]
-    assert [command['kind'] for command in commands] == ['select', 'select', 'set_override']
-    accent = commands[-1]['value']
-    assert accent['values'] == {'strobe_hz': 8.0}
-    # Wild bursts for the operator's cap rather than the shorter burst setting.
-    assert accent['lifetime'] == {'kind': 'seconds', 'duration_seconds': STROBE_MAX_BURST_SECONDS}
-
-
-async def test_a_balanced_drop_bursts_for_the_burst_setting(recorded_lighting):
-    controller = EffectController(recorded_lighting, settings=lambda: BALANCED)
-    await controller.change_effect(LightIntent.DROP)
-    accent = recorded_lighting.events[-1]['command']['value']
-    assert accent['lifetime']['duration_seconds'] == pytest.approx(
-        INTENSITY_BALANCED * STROBE_BURST_SECONDS
-    )
+    assert not [command for command in commands if command['kind'] == 'set_override']
 
 
 async def test_stop_allows_the_same_autoloop_to_resume(effect_controller, recorded_lighting):
@@ -92,7 +65,7 @@ async def test_stop_allows_the_same_autoloop_to_resume(effect_controller, record
     recorded_lighting.stop()
     await effect_controller.change_effect(LightIntent.DROP)
     kinds = [event['command']['kind'] for event in recorded_lighting.events]
-    assert kinds == ['select', 'set_override', 'stop', 'select']
+    assert kinds == ['select', 'stop', 'select']
 
 
 @pytest.mark.parametrize(
@@ -118,49 +91,6 @@ async def _drop_after(controller, lighting, clock, seconds):
     start = len(lighting.events)
     await controller.change_effect(LightIntent.DROP)
     return lighting.events[start:]
-
-
-async def test_drop_strobe_respects_cooldown_but_the_drop_still_cuts(recorded_lighting, caplog):
-    clock = VirtualClock()
-    controller = EffectController(recorded_lighting, clock=clock, settings=lambda: BALANCED)
-
-    first = await _drop_after(controller, recorded_lighting, clock, 0)
-    assert [e['command']['kind'] for e in first] == ['select', 'set_override']
-
-    with caplog.at_level(logging.INFO):
-        second = await _drop_after(controller, recorded_lighting, clock, 30)
-    [select] = [e['command'] for e in second]
-    assert select['kind'] == 'select'
-    assert select['autoloop'] == 'kick'
-    assert select['transition'] == {'kind': 'cut'}
-    assert 'intense special suppressed | cooldown' in caplog.text
-
-    third = await _drop_after(controller, recorded_lighting, clock, 61 - 30)
-    assert [e['command']['kind'] for e in third] == ['select', 'set_override']
-    assert STROBE_COOLDOWN_SECONDS == 60
-
-
-@pytest.mark.parametrize('bpm', [None, 60.0, 128.0, 600.0])
-async def test_strobe_burst_stays_within_two_bars_four_seconds_and_eight_hz(recorded_lighting, bpm):
-    controller = EffectController(recorded_lighting, clock=VirtualClock())
-    await controller.change_effect(LightIntent.DROP, bpm=bpm)
-    accent = recorded_lighting.events[-1]['command']['value']
-    duration = accent['lifetime']['duration_seconds']
-    assert accent['values']['strobe_hz'] <= STROBE_RATE_HZ <= 8.0
-    assert duration <= STROBE_MAX_BURST_SECONDS
-    if bpm:
-        assert duration <= 8 * 60.0 / bpm
-
-
-async def test_a_cooldown_change_applies_to_the_next_drop_without_a_restart(recorded_lighting):
-    clock = VirtualClock()
-    settings = FULL_INTENSITY
-    controller = EffectController(recorded_lighting, clock=clock, settings=lambda: settings)
-    await _drop_after(controller, recorded_lighting, clock, 0)
-
-    settings = ShowSettings(drop_strobe_cooldown_seconds=10, intensity=1.0)
-    later = await _drop_after(controller, recorded_lighting, clock, 11)
-    assert [e['command']['kind'] for e in later] == ['select', 'set_override']
 
 
 ROTATION = {
@@ -226,12 +156,12 @@ async def test_a_new_track_chooses_again_within_the_same_intent(recorded_lightin
     assert first != second
 
 
-async def test_a_chosen_drop_still_cuts_and_keeps_the_strobe_cooldown(recorded_lighting):
+async def test_a_chosen_drop_still_cuts(recorded_lighting):
     clock = VirtualClock()
     controller = rotating(recorded_lighting, clock=clock)
     first = await _drop_after(controller, recorded_lighting, clock, 0)
     second = await _drop_after(controller, recorded_lighting, clock, 30)
-    assert [e['command']['kind'] for e in first + second] == ['select', 'set_override', 'select']
+    assert [e['command']['kind'] for e in first + second] == ['select', 'select']
     assert first[0]['command']['autoloop'] != second[0]['command']['autoloop']
     assert second[0]['command']['transition'] == {'kind': 'cut'}
 
@@ -346,46 +276,15 @@ async def test_next_autoloop_switches_at_once_to_another_loop_with_the_default_c
     assert lighting.events[-1] is select, 're-entering the same section keeps the skipped loop'
 
 
-async def test_low_intensity_sends_no_drop_strobe_but_still_cuts_to_the_drop(
-    recorded_lighting, caplog
-):
-    settings = ShowSettings(intensity=INTENSITY_CALM)
-    controller = EffectController(recorded_lighting, settings=lambda: settings)
-    with caplog.at_level(logging.INFO):
-        await controller.change_effect(LightIntent.DROP)
-    assert [e['command']['kind'] for e in recorded_lighting.events] == ['select']
-    assert 'intensity 0.30 at or below 0.30' in caplog.text
-
-
-async def test_measured_intensity_keeps_the_drop_strobe(recorded_lighting):
-    settings = ShowSettings(intensity=INTENSITY_BALANCED)
-    controller = EffectController(recorded_lighting, settings=lambda: settings)
-    await controller.change_effect(LightIntent.DROP)
-    assert [e['command']['kind'] for e in recorded_lighting.events] == ['select', 'set_override']
-
-
-async def test_drop_strobe_rate_and_burst_scale_with_intensity_within_the_caps(recorded_lighting):
-    settings = ShowSettings(intensity=0.5, strobe_max_rate_hz=6.0)
-    controller = EffectController(recorded_lighting, settings=lambda: settings)
-    await controller.change_effect(LightIntent.DROP)
-    accent = recorded_lighting.events[-1]['command']['value']
-    assert accent['values'] == {'strobe_hz': pytest.approx(3.0)}
-    assert accent['lifetime']['duration_seconds'] == pytest.approx(0.5 * STROBE_BURST_SECONDS)
-
-
 @pytest.mark.parametrize(
     ('intensity', 'cooldown'), [(INTENSITY_WILD, 30.0), (INTENSITY_BALANCED, 60.0), (0.4, 60.0)]
 )
-async def test_drop_strobe_cooldown_is_as_set_and_halved_when_wild(
-    recorded_lighting, intensity, cooldown
-):
-    clock = VirtualClock()
-    settings = ShowSettings(intensity=intensity)
-    controller = EffectController(recorded_lighting, clock=clock, settings=lambda: settings)
-    await _drop_after(controller, recorded_lighting, clock, 0)
-    early = await _drop_after(controller, recorded_lighting, clock, cooldown - 1)
+async def test_the_intense_cooldown_is_as_set_and_halved_when_wild(intensity, cooldown):
+    controller, lighting, clock = with_specials([SPIN], settings=ShowSettings(intensity=intensity))
+    await _drop_after(controller, lighting, clock, 0)
+    early = await _drop_after(controller, lighting, clock, cooldown - 1)
     assert [e['command']['kind'] for e in early] == ['select']
-    later = await _drop_after(controller, recorded_lighting, clock, 2)
+    later = await _drop_after(controller, lighting, clock, 2)
     assert [e['command']['kind'] for e in later] == ['select', 'set_override']
 
 
@@ -496,7 +395,7 @@ async def test_the_catalogue_plays_one_texture_per_fx_cooldown_then_a_drop_accen
     assert len(textures) == 1
     start = len(lighting.events)
     await controller.change_effect(LightIntent.DROP)
-    assert [c['value']['id'] for c in accents(lighting, start)] == [DROP_ACCENT_ID]
+    assert accents(lighting, start) == []
     clock.advance(240)
     start = len(lighting.events)
     await controller.change_effect(LightIntent.BREAKDOWN)
@@ -505,53 +404,31 @@ async def test_the_catalogue_plays_one_texture_per_fx_cooldown_then_a_drop_accen
     clock.advance(240)
     start = len(lighting.events)
     await controller.change_effect(LightIntent.DROP)
-    spin, strobe = accents(lighting, start)
+    [spin] = accents(lighting, start)
     assert spin['value']['id'] == SPECIAL_ID
     assert spin['value']['target'] == {'group': 'fx'}
     assert spin['value']['special_fx']['pulse_beats'] == 1
-    assert strobe['value']['id'] == DROP_ACCENT_ID
-    assert strobe['value']['values'] == {'strobe_hz': STROBE_RATE_HZ}
 
 
-async def test_a_soft_drop_keeps_the_strobe_but_plays_no_intense_special(caplog):
-    controller, lighting, _ = with_specials([SPIN, DROP_STROBE])
+async def test_a_soft_drop_plays_no_intense_special(caplog):
+    controller, lighting, _ = with_specials([SPIN])
     soft = SelectionContext(LightIntent.DROP, arrival_of_peak=0.6)
     with caplog.at_level(logging.INFO):
         await controller.change_effect(LightIntent.DROP, context=soft)
-    [strobe] = accents(lighting)
-    assert strobe['value']['id'] == DROP_ACCENT_ID
+    assert accents(lighting) == []
     assert 'intense special suppressed | drop arrival 0.60 below 0.90' in caplog.text
 
 
-async def test_a_strobe_row_releases_the_running_special_before_it_bursts():
-    controller, lighting, _ = with_specials([DRIFT, DROP_STROBE])
-    await controller.change_effect(LightIntent.ATMOSPHERIC)
-    start = len(lighting.events)
-    await controller.change_effect(LightIntent.DROP)
-    clear, strobe = accents(lighting, start)
-    assert clear == {'kind': 'clear_override', 'id': SPECIAL_ID}
-    assert strobe['value']['id'] == DROP_ACCENT_ID
-
-
-async def test_a_drop_fires_its_row_and_the_strobe_as_one_event_on_one_cooldown(caplog):
-    controller, lighting, clock = with_specials([SPIN, DROP_STROBE], settings=BALANCED)
+async def test_a_drop_special_rests_the_intense_cooldown(caplog):
+    controller, lighting, clock = with_specials([SPIN], settings=BALANCED)
     fired = []
     for wait in (0, 30, 31):
         start = len(lighting.events)
         with caplog.at_level(logging.INFO):
             await _drop_after(controller, lighting, clock, wait)
         fired.append([c['value']['id'] for c in accents(lighting, start) if 'value' in c])
-    assert fired == [[SPECIAL_ID, DROP_ACCENT_ID], [], [SPECIAL_ID, DROP_ACCENT_ID]]
+    assert fired == [[SPECIAL_ID], [], [SPECIAL_ID]]
     assert 'intense special suppressed | cooldown 30s of 60s left' in caplog.text
-
-
-async def test_without_reported_groups_only_the_whole_rig_strobe_remains():
-    controller, lighting, _ = with_specials(discover_specials(), groups=())
-    await controller.change_effect(LightIntent.ATMOSPHERIC)
-    assert accents(lighting) == []
-    await controller.change_effect(LightIntent.DROP)
-    [strobe] = accents(lighting)
-    assert strobe['value']['id'] == DROP_ACCENT_ID
 
 
 async def test_capabilities_are_read_when_an_intent_starts_not_when_built():
@@ -570,15 +447,12 @@ async def test_at_or_below_the_strobe_gate_no_intense_special_is_sent(caplog):
     assert 'intense special suppressed | intensity 0.29 at or below 0.30' in caplog.text
 
 
-async def test_standby_releases_the_special_with_the_accent():
+async def test_standby_releases_the_special_at_once():
     controller, lighting, _ = with_specials([DRIFT])
     await controller.change_effect(LightIntent.ATMOSPHERIC)
     start = len(lighting.events)
     controller.enter_standby(120.0)
-    assert accents(lighting, start) == [
-        {'kind': 'clear_override', 'id': DROP_ACCENT_ID},
-        CUT,
-    ]
+    assert accents(lighting, start) == [CUT]
 
 
 async def test_the_event_buffer_shows_the_active_special_and_the_capable_groups():
@@ -620,11 +494,11 @@ async def test_a_new_drop_replaces_the_drop_special_under_the_same_id():
     assert (replacement['kind'], replacement['value']['id']) == ('set_override', SPECIAL_ID)
 
 
-async def test_an_intense_special_blocks_a_later_drop_burst_through_the_same_timestamp(caplog):
+async def test_an_intense_special_blocks_a_later_intense_drop_special(caplog):
     surge = Special(
         'surge', (LightIntent.BUILDUP,), 'fx', colour_slot='primary', energy=0.6, speed=0.9
     )
-    controller, lighting, clock = with_specials([surge, DROP_STROBE], settings=BALANCED)
+    controller, lighting, clock = with_specials([surge, SPIN], settings=BALANCED)
     await controller.change_effect(LightIntent.BUILDUP)
     clock.advance(10)
     start = len(lighting.events)
@@ -635,7 +509,7 @@ async def test_an_intense_special_blocks_a_later_drop_burst_through_the_same_tim
 
 
 async def test_a_held_intent_resends_a_released_special_without_choosing_or_charging_again():
-    controller, lighting, clock = with_specials([SPIN, DROP_STROBE])
+    controller, lighting, clock = with_specials([SPIN])
     await controller.change_effect(LightIntent.DROP)
     controller.release_special()
     lighting.selected_autoloop = None
@@ -644,7 +518,7 @@ async def test_a_held_intent_resends_a_released_special_without_choosing_or_char
     await controller.change_effect(LightIntent.DROP)
     [resent] = accents(lighting, start)
     assert resent['value']['id'] == SPECIAL_ID
-    assert controller._last_intense_at == 0
+    assert list(controller._intense_at.values()) == [0]
 
 
 async def test_skipping_the_loop_keeps_the_running_special():
@@ -848,7 +722,7 @@ async def test_the_snapshot_carries_each_special_cooldown_on_the_engine_clock():
         event_buffer=buffer,
         clock=clock,
         settings=lambda: BALANCED,
-        specials=[texture, SPIN, DROP_STROBE],
+        specials=[texture, SPIN],
     )
 
     def cooldowns():
@@ -865,7 +739,7 @@ async def test_the_snapshot_carries_each_special_cooldown_on_the_engine_clock():
     later = cooldowns()
     # Spin sets no cooldown of its own, so fx is free at once; the strobe waits out the shared one.
     assert (first['fx']['last'], first['fx']['ready']) == ('spin', True)
-    assert first['all']['last'] == 'strobe_burst'
+    assert first['all']['last'] == 'strobe'
     assert first['venue']['label'] == 'venue · accents 1/2'
     assert first['all']['cooldown_seconds'] == pytest.approx(60.0)
     assert first['all']['remaining_seconds'] == pytest.approx(50.0)
@@ -880,7 +754,7 @@ async def test_the_snapshot_carries_each_special_cooldown_on_the_engine_clock():
     assert all(row['ready'] for row in cooldowns().values())
 
 
-async def test_fx_off_picks_no_automatic_fx_but_keeps_the_drop_strobe():
+async def test_fx_off_picks_no_automatic_fx():
     import dataclasses
 
     from autolux.lib.engine.static_mode import STATIC_SPECIAL_ID, StaticLooks, StaticRig
@@ -890,11 +764,11 @@ async def test_fx_off_picks_no_automatic_fx_but_keeps_the_drop_strobe():
     current = [FULL_INTENSITY]
     # Own rows, not the catalogue, so the test does not hang on which intents ship an fx row.
     controller = EffectController(
-        lighting, clock=clock, settings=lambda: current[0], specials=[SPIN, DROP_STROBE]
+        lighting, clock=clock, settings=lambda: current[0], specials=[SPIN]
     )
     # Every drop here is loud: no arrival is measured, and an unknown arrival is never soft.
     await controller.change_effect(LightIntent.DROP)
-    assert [c['value']['id'] for c in accents(lighting)] == [SPECIAL_ID, DROP_ACCENT_ID]
+    assert [c['value']['id'] for c in accents(lighting)] == [SPECIAL_ID]
 
     current[0] = dataclasses.replace(FULL_INTENSITY, fx_auto=False)
     start = len(lighting.events)
@@ -904,10 +778,7 @@ async def test_fx_off_picks_no_automatic_fx_but_keeps_the_drop_strobe():
     start = len(lighting.events)
     clock.advance(STROBE_COOLDOWN_SECONDS + 1)
     await controller.change_effect(LightIntent.DROP)
-    # A loud drop still bursts the strobe; only the special is left out.
-    [strobe] = accents(lighting, start)
-    assert strobe['value']['id'] == DROP_ACCENT_ID
-    assert strobe['value']['values'] == {'strobe_hz': STROBE_RATE_HZ}
+    assert accents(lighting, start) == [], 'a loud drop leaves the special out'
 
     # The operator's Static FX row does not ask the policy, so it still plays.
     drift = Special('drift', (LightIntent.BREAKDOWN,), 'fx', colour_slot='primary', speed=0.5)
@@ -923,7 +794,7 @@ async def test_fx_off_picks_no_automatic_fx_but_keeps_the_drop_strobe():
     start = len(lighting.events)
     clock.advance(STROBE_COOLDOWN_SECONDS + 1)
     await controller.change_effect(LightIntent.DROP)
-    assert [c['value']['id'] for c in accents(lighting, start)] == [SPECIAL_ID, DROP_ACCENT_ID]
+    assert [c['value']['id'] for c in accents(lighting, start)] == [SPECIAL_ID]
 
 
 def _long_texture_on_a_drop(tmp_path):
@@ -937,23 +808,23 @@ def _long_texture_on_a_drop(tmp_path):
     lighting = RecordingStarfireClient(clock=clock, groups=(FX_GROUP,))
     texture = dataclasses.replace(SPIN, release_beats=64)
     controller = EffectController(
-        lighting, clock=clock, settings=lambda: control.settings, specials=[texture, DROP_STROBE]
+        lighting, clock=clock, settings=lambda: control.settings, specials=[texture]
     )
     return control, controller, lighting, clock
 
 
-async def test_fx_off_ends_a_running_texture_at_once_and_spares_the_drop_strobe(tmp_path):
+async def test_fx_off_ends_a_running_texture_at_once(tmp_path):
     from types import SimpleNamespace
 
     control, controller, lighting, _ = _long_texture_on_a_drop(tmp_path)
     await controller.change_effect(LightIntent.DROP)
-    assert [c['value']['id'] for c in accents(lighting)] == [SPECIAL_ID, DROP_ACCENT_ID]
+    assert [c['value']['id'] for c in accents(lighting)] == [SPECIAL_ID]
     show = SimpleNamespace(effect_controller=controller)
 
     start = len(lighting.events)
     control.commands.put_nowait({'action': 'fx_auto', 'enabled': False})
     await control.apply_pending(show)
-    assert accents(lighting, start) == [CUT], 'the drop strobe keeps its own burst'
+    assert accents(lighting, start) == [CUT]
 
     control.commands.put_nowait({'action': 'fx_auto', 'enabled': True})
     await control.apply_pending(show)
@@ -968,7 +839,7 @@ async def test_standby_ends_a_running_texture_at_once_and_keeps_the_cooldown(tmp
     assert CUT in accents(lighting, start)
     start = len(lighting.events)
     await controller.change_effect(LightIntent.DROP)
-    assert accents(lighting, start) == [], 'the cooldown still holds both intense rows back'
+    assert accents(lighting, start) == [], 'the cooldown still holds the intense row back'
 
 
 def _delayed_show(tmp_path, delay_sec=14.0):
