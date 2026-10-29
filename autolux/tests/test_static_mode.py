@@ -768,3 +768,36 @@ async def test_the_show_publishes_the_highlight_and_rig_and_clears_it_with_the_o
         }
     )
     assert snapshot['highlight'] is None, 'paused, the engine refuses what the bridge let through'
+
+
+async def test_a_panel_pause_under_static_keeps_starfire_rendering_and_the_highlight():
+    light, _, clock, lighting = static_engine()
+    light.static_looks = StaticLooks(lighting, HALL, clock=clock)
+    light.static_looks.look('all', colour=(1.0, 0.0, 0.0))
+    await light.sync_static()
+    light.static_looks.highlight({'fixture': 'par'})
+    lighting.events.clear()
+
+    light.pause()
+    assert light.paused and not light.rendering_paused
+    light.send_renderer_settings()
+    assert [c['paused'] for _, c in sent(lighting, 'set_paused')] == [False]
+    assert sent(lighting, 'set_master') == [] and overrides(lighting) == []
+    assert light.static_looks.highlighted is not None
+    await light.resume()
+    assert [c['paused'] for _, c in sent(lighting, 'set_paused')] == [False]
+
+
+async def test_selecting_static_while_paused_renders_it_and_deselecting_pauses_again():
+    light, _, _, lighting = static_engine()
+    light.pause()
+    lighting.events.clear()
+
+    light.static_looks.preset('red')
+    await light.sync_static()
+    assert [c['paused'] for _, c in sent(lighting, 'set_paused')] == [False]
+    lighting.events.clear()
+    light.static_looks.clear()
+    await light.sync_static()
+    assert [c['paused'] for _, c in sent(lighting, 'set_paused')] == [True]
+    assert light.paused and light.rendering_paused

@@ -182,7 +182,7 @@ class ShowControl:
                         sweep=command['sweep'],
                         aim=command['aim'],
                         pose=command['pose'],
-                        paused=light_engine.paused,
+                        paused=light_engine.rendering_paused,
                     )
             except ValueError as error:
                 LOGGER.warning('[main] highlight refused: %s', error)

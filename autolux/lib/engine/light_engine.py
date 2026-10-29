@@ -242,6 +242,10 @@ class LightEngine(IMusicAnalyserHandler):
         return self._paused
 
     @property
+    def rendering_paused(self) -> bool:
+        return self._paused and not self._static_mode
+
+    @property
     def mode(self) -> str:
         return 'static' if self._static_mode else 'auto'
 
@@ -259,9 +263,10 @@ class LightEngine(IMusicAnalyserHandler):
         LOGGER.info('[engine] pause')
         self._paused = True
         self._held_intent = None
-        self.static_looks.clear_highlight()
-        # Pause before the cut so play does not revive it.
-        self.lighting_client.set_paused(True)
+        if not self._static_mode:
+            self.static_looks.clear_highlight()
+            # Pause before the cut so play does not revive it.
+            self.lighting_client.set_paused(True)
         self.effect_controller.forget_special(instantaneous=True)
         self._send_brightness(BRIGHTNESS_FADE_SECONDS)
 
@@ -270,7 +275,8 @@ class LightEngine(IMusicAnalyserHandler):
             return
         LOGGER.info('[engine] play')
         self._paused = False
-        self.lighting_client.set_paused(False)
+        if not self._static_mode:
+            self.lighting_client.set_paused(False)
         self._send_brightness(BRIGHTNESS_FADE_SECONDS)
         await self._rejoin_current_intent()
 
@@ -294,6 +300,8 @@ class LightEngine(IMusicAnalyserHandler):
         LOGGER.info('[engine] static mode')
         self._static_mode = True
         self._held_intent = None
+        if self._paused:
+            self.lighting_client.set_paused(False)
         self.lighting_client.clear_cues()
         self.effect_controller.release_special(instantaneous=True)
         self._send_brightness(OPERATOR_FADE_SECONDS)
@@ -304,6 +312,9 @@ class LightEngine(IMusicAnalyserHandler):
         LOGGER.info('[engine] auto mode')
         self.static_looks.clear()
         self._static_mode = False
+        if self._paused:
+            self.static_looks.clear_highlight()
+            self.lighting_client.set_paused(True)
         self._send_brightness(OPERATOR_FADE_SECONDS)
         if self._showing_standby and (self._current_intent is None or not self._room_playing):
             self.effect_controller.enter_standby(None if self._paused else self._last_bpm)
@@ -343,7 +354,7 @@ class LightEngine(IMusicAnalyserHandler):
 
     def send_renderer_settings(self) -> None:
         settings = self._settings()
-        self.lighting_client.set_paused(self._paused)
+        self.lighting_client.set_paused(self.rendering_paused)
         self._send_crossfade()
         self.lighting_client.set_strobe_limits(
             settings.strobe_max_rate_hz, settings.strobe_max_burst_seconds
