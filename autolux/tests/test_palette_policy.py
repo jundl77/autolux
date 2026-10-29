@@ -246,10 +246,14 @@ def test_each_drop_variant_pushes_the_accent_and_keeps_everything_else(base):
 def test_the_login_table_starts_with_the_default_and_groups_each_palette_with_its_variants():
     table = palette_table()
     assert table[0].name == DEFAULT_PALETTE == 'techno'
-    assert [palette.name for palette in table[1::3]] == [p.name for p in BREAKDOWN_PALETTES]
-    assert [palette.name for palette in table[2::3]] == [p.name for p in DROP_PALETTES]
-    assert [palette.name for palette in table[2::3]] == [f'{p.name}_drop' for p in PALETTES]
-    assert len({palette.name for palette in table}) == 3 * len(PALETTES) == 27
+    assert [palette.name for palette in table[1::5]] == [p.name for p in BREAKDOWN_PALETTES]
+    assert [palette.name for palette in table[2::5]] == [p.name for p in DROP_PALETTES]
+    assert [palette.name for palette in table[2::5]] == [f'{p.name}_drop' for p in PALETTES]
+    assert [palette.name for palette in table[3::5]] == [f'{p.name}_mono' for p in PALETTES]
+    assert [palette.name for palette in table[4::5]] == [
+        f'{p.name}_breakdown_mono' for p in PALETTES
+    ]
+    assert len({palette.name for palette in table}) == 5 * len(PALETTES) == 45
 
 
 @pytest.mark.parametrize(

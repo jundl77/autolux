@@ -26,7 +26,13 @@ const MAX_IDENTIFIER_BYTES: usize = 128;
 const MAX_INTENSITY_MULTIPLIER: f64 = 8.0;
 const MAX_TRANSITION_BEATS: f64 = 1_024.0;
 const MAX_STROBE_BURST_SECONDS: f64 = 60.0;
-const STROBE_OPEN_FRACTION: f64 = 0.5;
+/// A flash lasts this long at every rate, up to half a cycle: a short flash reads as a strobe
+/// rather than a blink, and puts less light into a small room.
+const STROBE_FLASH_SECONDS: f64 = 0.05;
+const MAX_STROBE_OPEN_FRACTION: f64 = 0.5;
+/// At rates dividing the render rate, flash edges fall exactly on frame times; this keeps float
+/// rounding from moving an edge by a whole frame.
+const STROBE_EDGE_CYCLES: f64 = 1e-9;
 /// Slow enough to follow the beam by eye, inside even calm's movement slew limit.
 const PAN_SWEEP_SECONDS: f64 = 8.0;
 pub const MAX_SCRIPT_ERROR_BYTES: usize = 1024;
@@ -168,6 +174,7 @@ pub struct Engine {
     strobe_max_rate_hz: f64,
     strobe_max_burst_seconds: f64,
     strobe_started_seconds: BTreeMap<String, f64>,
+    strobe_gates: StrobeGates,
     palette: ActivePalette,
     intensity: f64,
     last_render_seconds: Option<f64>,
@@ -209,6 +216,7 @@ impl Engine {
             strobe_max_rate_hz: MAX_STROBE_HZ,
             strobe_max_burst_seconds: f64::INFINITY,
             strobe_started_seconds: BTreeMap::new(),
+            strobe_gates: StrobeGates::default(),
             palette,
             intensity: 1.0,
             last_render_seconds: None,
@@ -688,7 +696,13 @@ impl Engine {
         }
 
         let mut encoded_states = states.clone();
-        apply_software_strobe(time_seconds, &mut encoded_states);
+        apply_software_strobe(
+            &mut self.strobe_gates,
+            time_seconds,
+            time,
+            self.clock.beats_per_second(),
+            &mut encoded_states,
+        );
         // A test's pose stands in for its fixture's loaded placement; the newest pose wins.
         let rig = self
             .overrides
@@ -775,8 +789,12 @@ impl Engine {
                 .strobe_started_seconds
                 .entry(id.clone())
                 .or_insert(seconds);
+            // A strobe past its burst stays dark until it is no longer asked for, rather than
+            // turning into steady light at the strobe's level.
             if seconds - started >= max_burst_seconds {
                 state.strobe_hz = 0.0;
+                state.intensity = 0.0;
+                state.attribute_brightness = 0.0;
             }
         }
     }
@@ -1383,21 +1401,10 @@ fn blend_states(
 ) -> FixtureStates {
     for (id, to) in &mut destination {
         if let Some(from) = source.get(id) {
-            let profile = rig.profile(id);
-            for (key, value) in &from.attributes {
-                if let Some(destination) = to.attributes.get(key) {
-                    let blended = profile
-                        .expect("validated cell state")
-                        .interpolate_attribute(key, value, destination, amount);
-                    to.attributes.insert(key.clone(), blended);
-                } else if amount < 1.0
-                    && profile.is_none_or(|profile| !profile.shares_channel(key, &to.attributes))
-                {
-                    to.attributes.insert(key.clone(), value.clone());
-                }
-            }
+            let profile = rig.profile(id).expect("validated cell state");
+            to.attributes = profile.blend_attributes(&from.attributes, &to.attributes, amount);
             to.intensity = lerp(from.intensity, to.intensity, amount);
-            to.colour = from.colour.lerp(to.colour, amount);
+            to.colour = profile.blend_colour(from.colour, to.colour, amount);
             to.pan = lerp(from.pan, to.pan, amount);
             to.tilt = lerp(from.tilt, to.tilt, amount);
             if amount < 1.0 {
@@ -1420,20 +1427,147 @@ pub fn extinguish(states: &mut FixtureStates) {
     }
 }
 
-fn apply_software_strobe(seconds: f64, states: &mut FixtureStates) {
-    for state in states.values_mut() {
-        if state.strobe_hz > 0.0 {
-            let cycles = seconds * state.strobe_hz;
-            let phase = if cycles.is_finite() {
-                cycles.fract()
-            } else {
-                seconds.rem_euclid(1.0 / state.strobe_hz) * state.strobe_hz
-            };
-            if phase >= STROBE_OPEN_FRACTION {
-                state.intensity = 0.0;
-                state.attribute_brightness = 0.0;
+/// One gate per strobe rate, shared by every cell at that rate, so cells that start on
+/// different frames still flash together.
+#[derive(Default)]
+struct StrobeGates {
+    by_rate: BTreeMap<u64, StrobeGate>,
+    rate_of_cell: BTreeMap<String, u64>,
+    bar_index: Option<u64>,
+}
+
+/// Where a gate's phase is measured: beats, so flashes land on the beat grid, or seconds while
+/// the tempo is unknown.
+#[derive(Clone, Copy, PartialEq)]
+enum StrobeTimeline {
+    Beats,
+    Seconds,
+}
+
+/// A gate's phase in cycles at a timeline position. A rate or tempo change re-anchors from the
+/// phase reached, so a sweep integrates frame by frame; a phase of time x rate would gate at
+/// rate + time x d(rate)/dt and alias past the cap. A negative phase holds the gate closed.
+#[derive(Clone, Copy)]
+struct StrobeGate {
+    timeline: StrobeTimeline,
+    position: f64,
+    cycles: f64,
+    cycles_per_unit: f64,
+    /// The lit part of each cycle: 50 ms, at most half the cycle.
+    open: f64,
+}
+
+impl StrobeGate {
+    fn cycles_at(&self, position: f64) -> f64 {
+        self.cycles + self.cycles_per_unit * (position - self.position)
+    }
+
+    /// The grid phase in [0, 1): flashes start on beats and their divisions.
+    fn grid(timeline: StrobeTimeline, position: f64, cycles_per_unit: f64) -> f64 {
+        match timeline {
+            StrobeTimeline::Beats => (position * cycles_per_unit).rem_euclid(1.0),
+            StrobeTimeline::Seconds => 0.0,
+        }
+    }
+
+    /// Back onto the grid at a bar line, never by starting a flash less than a cycle after the
+    /// last one began: where the grid would, the gate stays closed until a later grid flash.
+    fn realign(&mut self, position: f64) {
+        let phase = self.cycles_at(position);
+        let grid = Self::grid(self.timeline, position, self.cycles_per_unit);
+        let since_flash = phase.rem_euclid(1.0);
+        let offset = (since_flash - grid).rem_euclid(1.0);
+        if phase < 0.0 || offset.min(1.0 - offset) <= STROBE_EDGE_CYCLES {
+            return;
+        }
+        let relights = grid < self.open && since_flash >= self.open;
+        self.position = position;
+        self.cycles = if grid > since_flash {
+            grid - 2.0
+        } else if relights {
+            grid - 1.0
+        } else {
+            grid
+        };
+    }
+}
+
+fn apply_software_strobe(
+    gates: &mut StrobeGates,
+    seconds: f64,
+    time: ClockSample,
+    beats_per_second: f64,
+    states: &mut FixtureStates,
+) {
+    let (timeline, position, units_per_second) = if beats_per_second > 0.0 {
+        (StrobeTimeline::Beats, time.beat_position, beats_per_second)
+    } else {
+        (StrobeTimeline::Seconds, seconds, 1.0)
+    };
+    if gates.bar_index.is_some_and(|bar| bar != time.bar_index) {
+        for gate in gates.by_rate.values_mut() {
+            if gate.timeline == timeline {
+                gate.realign(position);
             }
         }
-        state.strobe_hz = 0.0;
     }
+    let mut next = StrobeGates {
+        bar_index: Some(time.bar_index),
+        ..StrobeGates::default()
+    };
+    for (id, state) in states.iter_mut() {
+        let hz = state.strobe_hz;
+        state.strobe_hz = 0.0;
+        if hz <= 0.0 {
+            continue;
+        }
+        let rate = hz.to_bits();
+        let cycles_per_unit = hz / units_per_second;
+        let open = (STROBE_FLASH_SECONDS * hz).min(MAX_STROBE_OPEN_FRACTION);
+        // A rate already strobing keeps its timing; a cell changing rate (or the tempo changing)
+        // carries the phase reached into the new one; anything else is a new burst on the grid.
+        let gate = *next.by_rate.entry(rate).or_insert_with(|| {
+            let previous = gates.by_rate.get(&rate).or_else(|| {
+                gates
+                    .rate_of_cell
+                    .get(id)
+                    .and_then(|previous| gates.by_rate.get(previous))
+            });
+            match previous {
+                Some(gate)
+                    if gate.timeline == timeline && gate.cycles_per_unit == cycles_per_unit =>
+                {
+                    *gate
+                }
+                Some(gate) if gate.timeline == timeline => {
+                    let cycles = gate.cycles_at(position);
+                    StrobeGate {
+                        timeline,
+                        position,
+                        cycles: if cycles < 0.0 {
+                            cycles
+                        } else {
+                            cycles.rem_euclid(1.0)
+                        },
+                        cycles_per_unit,
+                        open,
+                    }
+                }
+                _ => StrobeGate {
+                    timeline,
+                    position,
+                    cycles: StrobeGate::grid(timeline, position, cycles_per_unit),
+                    cycles_per_unit,
+                    open,
+                },
+            }
+        });
+        next.rate_of_cell.insert(id.clone(), rate);
+        let phase = gate.cycles_at(position) + STROBE_EDGE_CYCLES;
+        if phase < 0.0 || phase.rem_euclid(1.0) >= gate.open {
+            state.intensity = 0.0;
+            state.attribute_brightness = 0.0;
+        }
+    }
+    *gates = next;
 }

@@ -3,7 +3,6 @@ import pytest
 from autolux.lib.engine.effect_definitions import (
     DEFAULT_AUTOLOOP_META,
     PREFERRED_AUTOLOOPS,
-    STANDBY_AUTOLOOP,
     AutoloopMeta,
     LightIntent,
 )
@@ -14,6 +13,7 @@ from autolux.lighting.autoloop_catalogue import (
     parse_autoloop_meta,
     read_autoloop_meta,
     required_autoloops,
+    rotation_autoloops,
 )
 
 
@@ -82,7 +82,7 @@ def test_reading_the_library_reports_every_bad_loop_at_once(tmp_path):
 
 def test_every_shipped_loop_declares_metadata_and_the_defaults_match_their_files():
     meta = read_autoloop_meta()
-    assert set(meta) == required_autoloops() - {STANDBY_AUTOLOOP}
+    assert set(meta) == rotation_autoloops()
     for loop, declared in DEFAULT_AUTOLOOP_META.items():
         assert meta[loop] == declared
 

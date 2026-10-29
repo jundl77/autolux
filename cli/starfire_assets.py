@@ -9,7 +9,7 @@ from autolux.lighting import mvr
 from autolux.lighting.fixture_setup import load_rig, rig_modes
 from autolux.lighting.gdtf import MAX_DESCRIPTION_BYTES
 from autolux.lighting.gdtf_compile import compile_mode
-from autolux.lighting.palettes import palette_table
+from autolux.lighting.palettes import palette_table, wheel_warnings
 from cli.starfire_protocol import (
     COMMAND_ID_MAX_ENCODED_BYTES,
     ROLE_NAMES,
@@ -281,6 +281,8 @@ def load_login(
         )
         if render_core is not None:
             login.render_core = render_core
+        for warning in wheel_warnings(login.rig):
+            LOGGER.warning('[palette] %s', warning)
         check_payload_size(wire.LOGIN, login.ByteSize() + COMMAND_ID_MAX_ENCODED_BYTES)
         return login
     except (KeyError, TypeError, ValueError, OverflowError) as error:
