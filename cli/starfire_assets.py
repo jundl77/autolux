@@ -31,6 +31,17 @@ LOGGER = logging.getLogger(__name__)
 PATCH_KEYS = ('gdtf_spec', 'gdtf_mode', 'universe', 'address', 'matrix')
 
 
+def declares_htp(source: str) -> bool:
+    """The `-- intensity: htp` header line, read as Starfire reads a catalogue directory, so a
+    live Login and a replay compose an overlay alike."""
+    for line in source.splitlines():
+        if not line.startswith('--'):
+            return False
+        if line[2:].replace(' ', '').strip() == 'intensity:htp':
+            return True
+    return False
+
+
 def _read(path: Path, limit: int) -> bytes:
     with path.open('rb') as source:
         content = source.read(limit + 1)
@@ -216,11 +227,13 @@ def _autoloop_definitions(directory):
             total_bytes += len(content)
             if total_bytes > MAX_SCRIPT_CATALOGUE_BYTES or len(scripts) >= MAX_SCRIPTS:
                 raise ValueError('Autoloop catalogue exceeds its size limit')
+            source = content.decode('utf-8')
             scripts.append(
                 wire.AutoloopDefinition(
                     autoloop_id=f'{bank.name}/{path.stem}',
                     bank=bank.name,
-                    lua_source=content.decode('utf-8'),
+                    lua_source=source,
+                    intensity_htp=declares_htp(source),
                 )
             )
     if not scripts:

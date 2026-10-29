@@ -380,6 +380,8 @@ fn no_autoloop_ever_strobes_even_when_loud() {
 
 #[test]
 fn selecting_mid_bar_keeps_the_musical_phrase() {
+    // Phrase time counts from the bar line at or before a selection, so a loop selected mid-bar
+    // renders as if selected on that downbeat.
     for look in looks().iter().filter(|look| !look.ramps()) {
         let mut on_the_one = look.engine(0.0);
         let mut mid_bar = look.engine(2.25);
@@ -388,7 +390,7 @@ fn selecting_mid_bar_keeps_the_musical_phrase() {
             let actual = render(&mut mid_bar, beat - 2.0);
             assert_eq!(
                 expected.dmx_frames_by_universe, actual.dmx_frames_by_universe,
-                "{look} restarted on selection"
+                "{look} selected mid-bar left the phrase of its downbeat"
             );
         }
     }

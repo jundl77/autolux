@@ -50,8 +50,14 @@ function sf.beat_in_bar(ctx_or_beats)
     return ctx_or_beats % BEATS_PER_BAR
 end
 
+-- Given ctx, bars since the section start (the bar line at or before a selection without a
+-- cue); the absolute bar index before any.
 function sf.bar(ctx_or_beats)
-    if type(ctx_or_beats) == "table" then return ctx_or_beats.bar_index end
+    if type(ctx_or_beats) == "table" then
+        local elapsed = ctx_or_beats.section_elapsed_beats
+        if elapsed == nil then return ctx_or_beats.bar_index end
+        return math.floor(elapsed / ctx_or_beats.beats_per_bar)
+    end
     return math.floor(ctx_or_beats / BEATS_PER_BAR)
 end
 
@@ -182,31 +188,42 @@ end
 -- of the room; every ctx field here is nil until there is something to say.
 
 -- The active section's intent ("atmospheric", "breakdown", "buildup", "drop") and the beats
--- since it started; nil, nil while no cue is active.
+-- since it started (since the bar line at or before a selection without a cue); nil without
+-- either.
 function sf.section(ctx)
     return ctx.section_intent, ctx.section_elapsed_beats
 end
 
-local function smoothstep(x)
-    return x * x * (3 - 2 * x)
+local TENSION_BEATS = 128
+
+local function phrase_beats(ctx)
+    return ctx.section_elapsed_beats or ctx.autoloop_elapsed_beats
 end
 
-local function bar_floor(ctx, beats)
-    return math.floor(beats / ctx.beats_per_bar) * ctx.beats_per_bar
-end
-
--- 0..1 over the section's first plateau_beats (the rotation entry's without a cue). The second
--- value holds still within a bar, so thresholds compared against it switch on a downbeat.
-function sf.tension(ctx, plateau_beats)
-    assert(finite(plateau_beats) and plateau_beats > 0, "tension plateau must be positive and finite")
-    local elapsed = ctx.section_elapsed_beats or ctx.autoloop_elapsed_beats
-    local function level(beats) return smoothstep(math.min(1, beats / plateau_beats)) end
-    return level(elapsed), level(bar_floor(ctx, elapsed))
+-- 0..1, an ease-in (cubic) over the build: the share of it already played when the next cue is
+-- known, else over `beats` (128) of section time. The second value is the level at the bar
+-- line at or before now, for loops that step on downbeats.
+function sf.tension(ctx, beats)
+    beats = beats or TENSION_BEATS
+    assert(finite(beats) and beats > 0, "tension length must be positive and finite")
+    local elapsed, left = phrase_beats(ctx), ctx.beats_until_next
+    local function level(played)
+        local t
+        if left ~= nil and elapsed + left > 0 then
+            t = played / (elapsed + left)
+        else
+            t = math.min(1, played / beats)
+        end
+        return t * t * t
+    end
+    local bar = ctx.beats_per_bar
+    return level(elapsed), level(math.floor(elapsed / bar) * bar)
 end
 
 -- 0..1 over the last `beats` before the next cue starts, 0 while none is pending. Given `from`
 -- (the level the loop builds to without a known next section), the result hands over from it
--- continuously: from + (1 - from) * fin. The second value holds still within a bar.
+-- continuously: from + (1 - from) * fin. The second value holds each bar at the level its end
+-- reaches, so the last bar is full.
 function sf.finale(ctx, beats, from)
     assert(finite(beats) and beats > 0, "finale length must be positive and finite")
     assert(from == nil or (finite(from) and from >= 0 and from <= 1), "finale base must be within 0..1")
@@ -215,7 +232,8 @@ function sf.finale(ctx, beats, from)
         local fin = left and 1 - math.min(1, left / beats) or 0
         return from and from + (1 - from) * fin or fin
     end
-    local stepped = remaining and math.ceil(remaining / ctx.beats_per_bar) * ctx.beats_per_bar
+    local bar = ctx.beats_per_bar
+    local stepped = remaining and math.max(0, (math.ceil(remaining / bar) - 1) * bar)
     return level(remaining), level(stepped)
 end
 
@@ -228,16 +246,31 @@ function sf.countdown(ctx, steps)
     return math.ceil(remaining)
 end
 
+-- Bars left before the next cue starts (fractional), nil while none is pending.
+function sf.bars_until_next(ctx)
+    return ctx.beats_until_next and ctx.beats_until_next / ctx.beats_per_bar
+end
+
+-- Which `bars`-long phrase of the section this is (0 first) and the position in it, 0..1.
+function sf.phrase(ctx, bars)
+    assert(finite(bars) and bars > 0, "phrase length must be positive and finite")
+    local length = bars * ctx.beats_per_bar
+    local elapsed = ctx.section_elapsed_beats or ctx.beat_position
+    return math.floor(elapsed / length), (elapsed % length) / length
+end
+
 local function random_index(value)
     if value == nil then return 0 end
     assert(math.type(value) == "integer", "sf.random takes integer indices (use the sf.each index)")
     return value
 end
 
--- 0..1, a pure hash of the cue's seed and two integer indices: the same arguments give the same
--- value on every frame and every run. SplitMix64's finaliser, two rounds.
-function sf.random(ctx, i, j)
+-- 0..1, a pure hash of the cue's seed and up to three integer indices (say phrase, cell, step):
+-- the same arguments give the same value on every frame and every run. SplitMix64's
+-- finaliser, two rounds.
+function sf.random(ctx, i, j, k)
     local x = ctx.seed ~ (random_index(i) * 0x9E3779B97F4A7C15) ~ (random_index(j) << 21)
+        ~ (random_index(k) << 42)
     for _ = 1, 2 do
         x = (x ~ (x >> 30)) * 0xBF58476D1CE4E5B9
         x = (x ~ (x >> 27)) * 0x94D049BB133111EB

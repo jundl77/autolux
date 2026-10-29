@@ -148,6 +148,8 @@ pub struct RenderContext {
     pub section_elapsed_beats: Option<f64>,
     pub next_intent: Option<SectionIntent>,
     pub beats_until_next: Option<f64>,
+    /// Beats until the next cue's dip pre-roll begins, the moment a finale aims at.
+    pub beats_until_dip: Option<f64>,
     pub drop_strength: Option<f64>,
     pub next_drop_strength: Option<f64>,
     /// The active cue's seed, or 0.
@@ -177,6 +179,7 @@ impl Default for RenderContext {
             section_elapsed_beats: None,
             next_intent: None,
             beats_until_next: None,
+            beats_until_dip: None,
             drop_strength: None,
             next_drop_strength: None,
             seed: 0,

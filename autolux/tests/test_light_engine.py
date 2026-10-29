@@ -1989,6 +1989,13 @@ def cue_events(lighting, kind='cue_section'):
     return [e for e in lighting.events if e['command']['kind'] == kind]
 
 
+def planned_cue(planned):
+    """A fixed cue in place of the director's, for tests of the cue transport alone."""
+    from autolux.lib.engine.cue import BaseLook, Cue
+
+    return Cue(planned.start_beat_index, planned.intent, (BaseLook('drop', 'kick', 16),), 'techno')
+
+
 async def test_the_cue_is_sent_at_commit_time_on_the_sections_analysed_downbeat():
     decoder = FakeDecoder()
     light, _, clock, lighting = engine(decoder=decoder)
@@ -2013,9 +2020,9 @@ async def test_a_section_starting_on_a_beat_not_yet_analysed_is_cued_when_that_b
     decoder = FakeDecoder()
     light, _, clock, lighting = engine(decoder=decoder)
     await elapse(light, clock, 20.0)
-    await beat_at_phase(light, decoder, 2, decision='buildup')
+    await beat_at_phase(light, decoder, 2)
     await elapse(light, clock, 0.5)
-    await beat_at_phase(light, decoder, 3)
+    await beat_at_phase(light, decoder, 3, decision='buildup')
     assert cue_events(lighting) == []
     await elapse(light, clock, 0.5)
     await beat_at_phase(light, decoder, 0)
@@ -2032,9 +2039,10 @@ def test_the_start_beat_is_the_first_downbeat_at_the_section_start_and_never_a_g
         AnalysedBeat(sec, index, phase)
         for sec, index, phase in [(10.0, 1, 3), (10.5, 2, 0), (11.0, 3, 1), (12.5, 6, 0)]
     )
-    assert light._start_beat_index(10.6) == 2, 'up to half a beat early'
-    assert light._start_beat_index(10.8) == 6
-    assert light._start_beat_index(13.0) is None
+    assert light._start_beat_index(10.6) == 2
+    assert light._start_beat_index(11.1) == 2, 'a boundary decided late keeps its bar'
+    assert light._start_beat_index(12.0) == 6, 'the nearest downbeat'
+    assert light._start_beat_index(14.0) is None, 'half a bar either side at most'
     light._beat_ring.clear()
     light._beat_ring.extend([AnalysedBeat(10.0, 1, None), AnalysedBeat(10.5, 2, None)])
     assert light._start_beat_index(10.4) == 2, 'without a phase, the beat at the start'
@@ -2062,13 +2070,14 @@ async def test_published_beats_carry_the_analysers_features_as_levels():
     decoder = FakeDecoder()
     light, _, _, lighting = engine(decoder=decoder, queue=False)
     await beat_at_phase(light, decoder, 0)
-    light.analyser.features = BeatFeatures(
-        onset=0.7, bass_dbfs=-6.0, mid_dbfs=-36.0, high_dbfs=-90.0
-    )
+    light.analyser.features = BeatFeatures(onset=0.7, bass=1.0, mid=0.5, high=0.0)
     await beat_at_phase(light, decoder, 1)
-    first, second = sent_beats(lighting)
+    light.analyser.features = BeatFeatures(onset=float('nan'), bass=1.0, mid=0.5, high=0.0)
+    await beat_at_phase(light, decoder, 2)
+    first, second, unmeasurable = sent_beats(lighting)
     assert 'features' not in first
     assert second['features'] == {'onset': 0.7, 'bass': 1.0, 'mid': 0.5, 'high': 0.0}
+    assert 'features' not in unmeasurable, 'the beat still goes out'
 
 
 async def test_the_room_switches_in_the_beat_publish_of_the_planned_start_beat():
@@ -2096,6 +2105,7 @@ async def test_the_room_switches_in_the_beat_publish_of_the_planned_start_beat()
     [published] = [e for e in lighting.events if e['command'].get('beat_index') == 2]
     assert switched == [(LightIntent.DROP, published['at_seconds'])]
     assert selections(lighting) == [], 'a cued section sends no selection'
+    assert light._entered_intent is LightIntent.DROP
     assert light.current_intent is LightIntent.DROP
 
 
@@ -2179,3 +2189,35 @@ async def test_a_superseded_section_takes_its_plan_along():
     await light.on_beat(1, 128.0, False)
     assert planned not in light._pending_intents
     assert light.effect_controller.cue_for(planned) is None
+
+
+async def test_a_replacement_not_cued_yet_withdraws_the_superseded_cue():
+    decoder = FakeDecoder()
+    light, _, clock, lighting = engine(decoder=decoder)
+    # The director declines to cue the drop.
+    light._plan_cue = lambda planned: (
+        planned_cue(planned) if planned.intent is LightIntent.BUILDUP else None
+    )
+    await elapse(light, clock, 20.0)
+    await beat_at_phase(light, decoder, 0, decision='buildup')
+    [_] = cue_events(lighting)
+    await elapse(light, clock, 0.5)
+    # An older decision supersedes the buildup before it starts.
+    decoder._script.append([BarDecision(0, 'drop', light.audio_sec - 0.6)])
+    await light.on_beat(1, 128.0, False)
+    [planned] = light._pending_intents
+    assert planned.intent is LightIntent.DROP and planned.cue is None
+    assert len(cue_events(lighting, 'clear_cues')) == 1, 'Starfire must not start the stale cue'
+
+
+async def test_a_new_source_never_places_the_old_sources_sections():
+    decoder = FakeDecoder()
+    light, _, clock, _ = engine(decoder=decoder)
+    light._plan_cue = planned_cue
+    await elapse(light, clock, 20.0)
+    await beat_at_phase(light, decoder, 2, decision='buildup')
+    [planned] = light._pending_intents
+    assert planned.start_beat_index is None
+    light.on_sound_start()
+    await beat_at_phase(light, decoder, 0)
+    assert planned.start_beat_index is None and planned.unplaceable
