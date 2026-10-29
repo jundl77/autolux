@@ -504,9 +504,15 @@ function sf.section_beats(ctx)
     return ctx.section_elapsed_beats or ctx.autoloop_elapsed_beats
 end
 
--- 0 at the centre of an sf.each row, 1 at either end.
+-- 0 at the centre of an sf.each row, 1 at either end; 0 for a row of one.
 function sf.from_centre(index, count)
     return count > 1 and math.abs(2 * (index - 1) / (count - 1) - 1) or 0
+end
+
+-- A width along a row as a share of its cells, never under one cell, so a look keeps its
+-- proportions on any strip.
+function sf.pixels(share, count)
+    return math.max(1, share * count)
 end
 
 -- The mean of the members' focus points as {x, y, z}, where beams sent meet in one spot; nil
@@ -521,16 +527,38 @@ function sf.shared_focus(target)
     return { x / #members, y / #members, z / #members }
 end
 
-local BUILD_BEATS, FINALE_BEATS, EASE_BEATS = 128, 16, 8
-local DRIVE_FLOOR, DRIVE_PLATEAU = 0.15, 0.7
+local SNAP_LEAD_BEATS, SNAP_DARK_BEATS = 0.5, 0.25
 
--- Every buildup's shared state. drive 0..1: with no drop known it rises with tension to 0.7; a
--- cued drop hands it over continuously to 1 over the last 16 beats before the dip; a cued
--- non-drop eases it down by half. finale 0..1 is that hand-over, tension the build's progress,
--- step the tension at the last downbeat (compare thresholds with it so steps land on the one),
--- left the beats until a cued drop's dip begins (nil while no drop is cued).
+-- Alternating looks for a snap: the look (0 or 1) changes on the off-beat half a beat before
+-- every `period` line of section time, and `dark` holds for the quarter beat after the change,
+-- so heads jump only while their dimmers are at 0. A section opens on look 0.
+function sf.snap(ctx, period)
+    local beats = sf.section_beats(ctx) + SNAP_LEAD_BEATS
+    return math.floor(beats / period) % 2, beats % period < SNAP_DARK_BEATS
+end
+
+local FINALE_BEATS, EASE_BEATS, LADDER_BEATS = 16, 8, 8
+local DRIVE_FLOOR, DRIVE_PLATEAU = 0.3, 0.8
+
+-- The context as it was at the last `beats` line of section time, for the fields tension reads.
+local function back_at_line(ctx, beats)
+    local elapsed = sf.section_beats(ctx)
+    local back = elapsed % beats
+    return {
+        section_elapsed_beats = elapsed - back, autoloop_elapsed_beats = elapsed - back,
+        beats_until_next = ctx.beats_until_next and ctx.beats_until_next + back,
+        next_known_at = ctx.next_known_at, beats_per_bar = ctx.beats_per_bar,
+    }
+end
+
+-- Every buildup's shared state. drive 0..1: with no drop known 0.3 + 0.5 x tension; a cued drop
+-- hands it over continuously to 1 over the last 16 beats before the dip; a cued non-drop eases
+-- it down by half. finale 0..1 is that hand-over, tension the build's progress, step the tension
+-- at the last downbeat (compare thresholds with it so steps land on the one), measure the
+-- phaser rate ladder 8, 4, 2 beats, which moves only on 8-beat lines so cycles never jump, left
+-- the beats until a cued drop's dip begins (nil while no drop is cued).
 function sf.build(ctx)
-    local tension, step = sf.tension(ctx, BUILD_BEATS)
+    local tension, step = sf.tension(ctx)
     local drive, finale = sf.lerp(DRIVE_FLOOR, DRIVE_PLATEAU, tension), 0
     local left = ctx.next_intent == "drop" and (ctx.beats_until_dip or ctx.beats_until_next) or nil
     if left ~= nil then
@@ -539,7 +567,9 @@ function sf.build(ctx)
     elseif ctx.next_intent ~= nil then
         drive = drive * (1 - 0.5 * sf.finale(ctx, EASE_BEATS))
     end
-    return { drive = drive, finale = finale, tension = tension, step = step, left = left }
+    local at_line = sf.tension(back_at_line(ctx, LADDER_BEATS))
+    local measure = at_line < 1 / 3 and 8 or at_line < 2 / 3 and 4 or 2
+    return { drive = drive, finale = finale, tension = tension, step = step, left = left, measure = measure }
 end
 
 -- An overlay's progress through its length, 0..1, and the beats it has left.

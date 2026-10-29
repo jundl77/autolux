@@ -5,7 +5,7 @@
 local palette = sf.palette()
 local ROLL_BEATS, PULSE_SHARE = 8, 0.45
 local WASH_PEAK, STRIP_PEAK, MOVER_PEAK = 0.9, 0.9, 0.85
-local WIDE_DEGREES, NARROW_DEGREES = 20, 6
+local WIDE_DEGREES, NARROW_DEGREES, RISE_DEGREES = 20, 6, 15
 
 -- The roll halves on downbeats as the build climbs: a bar, half a bar, a beat. Over a cued
 -- drop's last eight beats it rolls in half beats, the fastest a base loop pulses, and its gaps
@@ -24,16 +24,21 @@ return {
         local count = math.floor(ctx.beat_position / period)
         local filled = build.left and math.max(0, 1 - build.left / ROLL_BEATS) or 0
         local level = sf.lerp(sf.lerp(0.08, 1, filled), 1, pulse)
-        local spread = period >= 1 and count % 2 == 0 and WIDE_DEGREES or NARROW_DEGREES
+        local look, dark = sf.snap(ctx, ctx.beats_per_bar)
+        local rolling = period < 1
+        local spread = (rolling or look == 1) and NARROW_DEGREES or WIDE_DEGREES
+        local movers_lit = (dark and not rolling) and 0 or 1
         return sf.scene {
             sf.colour(sf.all(), palette.primary),
             sf.dimmer(sf.group("wash"), WASH_PEAK * build.drive * level),
             sf.each(sf.group("strip"), function(pixel, index)
                 local lit = (index + count) % 2 == 0 and level or level * filled
-                return sf.dimmer(pixel, STRIP_PEAK * sf.lerp(0.4, 1, build.drive) * lit)
+                return sf.dimmer(pixel, STRIP_PEAK * build.drive * lit)
             end),
-            sf.dimmer(sf.group("movers"), MOVER_PEAK * sf.lerp(0.4, 1, build.drive) * level),
-            sf.phaser(sf.group("movers"), ctx, { shape = "fan", size = spread })
+            sf.dimmer(sf.group("movers"), MOVER_PEAK * build.drive * level * movers_lit),
+            sf.phaser(sf.group("movers"), ctx, {
+                shape = "fan", size = spread, centre_tilt = RISE_DEGREES * build.drive
+            })
         }
     end
 }
