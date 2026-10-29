@@ -1315,7 +1315,7 @@ def test_the_fx_effects_block_shows_one_bar_per_group_readiest_first():
         {
             'special_cooldowns': [
                 cooldown('fx', 'cold_drift', 240, 179.5),
-                cooldown('all', 'strobe_burst', 60, 0.0),
+                cooldown('all', 'drift', 60, 0.0),
                 cooldown('movers', 'spin', 90, 45.0),
                 cooldown('wash', None, 0, 0.0),
             ]
@@ -1323,7 +1323,7 @@ def test_the_fx_effects_block_shows_one_bar_per_group_readiest_first():
     )
 
     assert [row.children[0].children[0].children for row in rows] == [
-        'all · Strobe burst',
+        'all · Drift',
         'wash',
         'movers · Spin',
         'fx · Cold drift',

@@ -14,6 +14,7 @@ MAX_ROTATION = 8
 MAX_OVERLAYS = 8
 MAX_PREROLL_BEATS = 64.0
 MAX_OVERLAY_BEATS = 1024.0
+MAX_TRANSITION_BEATS = 1024.0
 MAX_IDENTIFIER_BYTES = 128
 
 
@@ -69,9 +70,9 @@ def _check_transition(transition: dict | None) -> None:
         set(transition) != {'kind', 'duration_beats'}
         or transition['kind'] != 'crossfade'
         or not isinstance(beats, (int, float))
-        or not 0 < beats <= MAX_OVERLAY_BEATS
+        or not 0 < beats <= MAX_TRANSITION_BEATS
     ):
-        raise ValueError('a transition is a cut or a crossfade of 0..1024 beats')
+        raise ValueError(f'a transition is a cut or a crossfade of 0..{MAX_TRANSITION_BEATS} beats')
 
 
 @dataclass(frozen=True)

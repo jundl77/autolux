@@ -144,6 +144,9 @@ pub struct RenderContext {
     pub intensity: f64,
     /// The newest beat's tempo; 0 before the first beat.
     pub bpm: f64,
+    /// The strobe rate the engine lets through at this intensity (the strobe rate cap scaled by
+    /// the intensity, 0 where strobing is off), so a loop can keep its flashes on the beat.
+    pub strobe_max_hz: f64,
     pub section_intent: Option<SectionIntent>,
     pub section_elapsed_beats: Option<f64>,
     pub next_intent: Option<SectionIntent>,
@@ -178,6 +181,7 @@ impl Default for RenderContext {
             normalized_rms_level: None,
             intensity: 1.0,
             bpm: 0.0,
+            strobe_max_hz: 0.0,
             section_intent: None,
             section_elapsed_beats: None,
             next_intent: None,

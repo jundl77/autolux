@@ -918,25 +918,38 @@ fn sf_random_is_a_pure_hash_of_the_seed_and_integer_indices() {
 }
 
 #[test]
-fn sf_countdown_steps_once_per_beat_over_the_last_beats() {
-    let counting = |left| {
+fn sf_beat_strobe_hz_takes_the_fastest_division_the_engine_lets_through() {
+    let rate = |bpm: f64, cap: f64, per_beat: &str| {
         lua(
-            "(sf.countdown(ctx, 8) or 10) / 10, 0, 0",
-            with(|context| context.beats_until_next = left),
+            &format!("sf.beat_strobe_hz(ctx, {per_beat}) / 10, 0, 0"),
+            with(|context| {
+                context.bpm = bpm;
+                context.strobe_max_hz = cap;
+            }),
         )
         .unwrap()[0]
+            * 10.0
     };
-    assert_eq!(counting(None), 1.0);
-    assert_eq!(counting(Some(8.5)), 1.0);
-    assert_eq!(counting(Some(8.0)), 0.8);
-    assert_eq!(counting(Some(7.2)), 0.8);
-    assert_eq!(counting(Some(7.0)), 0.7);
-    assert_eq!(counting(Some(0.3)), 0.1);
-    assert_eq!(counting(Some(0.0)), 0.0);
+    // Wild's 8 Hz cap: at 128 bpm sixteenths (8.53 Hz) would be clamped off the grid.
+    assert!((rate(128.0, 8.0, "4") - 128.0 / 60.0 * 2.0).abs() < 1e-12);
+    assert!(
+        (rate(120.0, 8.0, "4") - 8.0).abs() < 1e-12,
+        "exactly at the cap stays"
+    );
+    assert!((rate(128.0, 3.0, "4") - 128.0 / 60.0).abs() < 1e-12);
+    assert!(
+        (rate(128.0, 1.5, "4") - 128.0 / 120.0).abs() < 1e-12,
+        "one every two beats"
+    );
+    assert_eq!(
+        rate(128.0, 0.0, "4"),
+        0.0,
+        "no strobe where the engine allows none"
+    );
 }
 
 #[test]
-fn sf_tension_eases_in_then_bends_to_the_known_change_without_a_jump() {
+fn sf_tension_keeps_rising_then_bends_to_the_known_change_without_a_jump() {
     let tension = |section: Option<f64>, entry: f64, left: Option<f64>, known: Option<f64>| {
         lua(
             "0, sf.tension(ctx)",
@@ -949,14 +962,19 @@ fn sf_tension_eases_in_then_bends_to_the_known_change_without_a_jump() {
         )
         .unwrap()
     };
-    // Unknown change: 0.8·min(1, e/64)² + 0.2·min(1, e/128), the entry's beats without a section.
-    let ease = |e: f64| 0.8 * (e / 64.0).min(1.0).powi(2) + 0.2 * (e / 128.0).min(1.0);
-    assert!((ease(32.0) - 0.25).abs() < 1e-12, "bar 8 already climbs");
-    assert!((ease(64.0) - 0.9).abs() < 1e-12 && ease(128.0) == 1.0);
+    // Unknown change: e / (e + 48), the entry's beats without a section, never flat.
+    let ease = |e: f64| e / (e + 48.0);
+    assert!((ease(32.0) - 0.4).abs() < 1e-12, "bar 8");
+    assert!((ease(64.0) - 4.0 / 7.0).abs() < 1e-12, "bar 16, about 0.57");
+    assert!(
+        (ease(128.0) - 8.0 / 11.0).abs() < 1e-12,
+        "bar 32, about 0.73"
+    );
     let bar_16 = ease(64.0);
     assert_eq!(tension(Some(64.0), 0.0, None, None)[1..], [bar_16, bar_16]);
     assert_eq!(tension(None, 64.0, None, None)[1..], [bar_16, bar_16]);
-    assert_eq!(tension(Some(200.0), 0.0, None, None)[1..], [1.0, 1.0]);
+    let [_, late, _] = tension(Some(512.0), 0.0, None, None);
+    assert!(late > ease(256.0) && late < 1.0, "still rising");
     let [_, level, stepped] = tension(Some(66.0), 0.0, None, None);
     assert!(
         level > bar_16 && stepped == bar_16,
@@ -974,7 +992,6 @@ fn sf_tension_eases_in_then_bends_to_the_known_change_without_a_jump() {
     assert!(level > halfway && stepped == halfway);
     assert_eq!(tension(Some(128.0), 0.0, Some(0.0), Some(96.0))[1], 1.0);
 }
-
 #[test]
 fn next_known_at_is_the_section_time_the_next_cue_arrived() {
     const KNOWN: &str = r#"return {render = function(ctx)
@@ -1034,29 +1051,24 @@ fn sf_finale_hands_over_continuously_and_its_last_bar_is_full() {
 }
 
 #[test]
-fn phrase_helpers_count_from_the_section_start() {
-    let at = |section: Option<f64>, beat: f64, left: Option<f64>| {
+fn phrase_time_counts_from_the_section_start_else_from_the_layer() {
+    let at = |section: Option<f64>, entry: f64, beat: f64| {
         with(|context| {
             context.section_elapsed_beats = section;
+            context.autoloop_elapsed_beats = entry;
             context.beat_position = beat;
             context.bar_index = (beat / 4.0) as u64;
-            context.beats_until_next = left;
         })
     };
-    const BAR_AND_PHRASE: &str = "sf.bar(ctx) / 100,
-        (function() local index, phase = sf.phrase(ctx, 4) return index / 100, phase end)()";
-    let [bar, index, phase] = lua(BAR_AND_PHRASE, at(Some(36.0), 100.0, None)).unwrap();
-    assert_eq!((bar, index, phase), (0.09, 0.02, 0.25));
-    let [bar, index, phase] = lua(BAR_AND_PHRASE, at(None, 100.0, None)).unwrap();
-    assert_eq!((bar, index, phase), (0.25, 0.06, 0.25));
-    let until = |left| {
-        lua(
-            "(sf.bars_until_next(ctx) or 10) / 10, 0, 0",
-            at(None, 0.0, left),
-        )
-    };
-    assert_eq!(until(Some(6.0)).unwrap()[0], 0.15);
-    assert_eq!(until(None).unwrap()[0], 1.0);
+    const PHRASE: &str = "sf.section_beats(ctx) / 100, sf.bar(ctx) / 100, 0";
+    assert_eq!(
+        lua(PHRASE, at(Some(36.0), 12.0, 100.0)).unwrap()[..2],
+        [0.36, 0.09]
+    );
+    assert_eq!(
+        lua(PHRASE, at(None, 12.0, 100.0)).unwrap()[..2],
+        [0.12, 0.25]
+    );
 }
 
 #[test]
@@ -1079,25 +1091,13 @@ fn render_cannot_keep_state_in_globals() {
 
 #[test]
 fn music_helpers_read_the_beat_and_fall_back_to_a_mid_level() {
-    let [onset, bass, hz] = lua(
-        "sf.onset(ctx), sf.band(ctx, 'bass'), sf.beat_hz(ctx, 2) / 10",
-        with(|context| {
-            context.onset = Some(0.9);
-            context.bpm = 150.0;
-        }),
+    let [onset, bass, _] = lua(
+        "sf.onset(ctx), sf.band(ctx, 'bass'), 0",
+        with(|context| context.onset = Some(0.9)),
     )
     .unwrap();
-    assert_eq!((onset, bass, hz), (0.9, 0.5, 0.5));
+    assert_eq!((onset, bass), (0.9, 0.5));
     assert!(lua("sf.band(ctx, 'treble'), 0, 0", RenderContext::default()).is_err());
-    let [intent_known, elapsed, _] = lua(
-        "(sf.section(ctx) == 'drop') and 1 or 0, select(2, sf.section(ctx)) / 100, 0",
-        with(|context| {
-            context.section_intent = Some(SectionIntent::Drop);
-            context.section_elapsed_beats = Some(12.0);
-        }),
-    )
-    .unwrap();
-    assert_eq!((intent_known, elapsed), (1.0, 0.12));
 }
 
 /// Beat `beat` of a clock whose index n is grid beat n and that never re-anchored.

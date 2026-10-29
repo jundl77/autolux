@@ -560,7 +560,7 @@ fn blackout_darkens_an_overlay_with_everything_else() {
 }
 
 #[test]
-fn higher_priority_composes_later_and_ties_follow_the_bank_ladder_then_list_order() {
+fn higher_priority_composes_later_and_ties_keep_list_order() {
     let row = |id: &str, priority: i32| OverlayCue {
         priority,
         ..overlay(id, 0.0, 8.0)
@@ -570,10 +570,10 @@ fn higher_priority_composes_later_and_ties_follow_the_bank_ladder_then_list_orde
         (vec![row("three_quarters", 1), row("quarter", 0)], 0.75),
         (vec![row("quarter", 0), row("three_quarters", 0)], 0.75),
         (vec![row("three_quarters", 0), row("quarter", 0)], 0.25),
-        // A dip outranks a hit at the same priority, whatever the list order.
+        // Banks rank nothing: the director's priorities do.
         (
             vec![row("dip/three_quarters_dip", 0), row("hit/quarter_hit", 0)],
-            0.75,
+            0.25,
         ),
         (
             vec![row("hit/quarter_hit", 1), row("dip/three_quarters_dip", 0)],

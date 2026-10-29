@@ -46,9 +46,6 @@ pub const MAX_SCRIPT_ERROR_BYTES: usize = 1024;
 const OVERLAY_SNAP_LEVEL: f64 = 0.5;
 /// Absorbs float rounding between a dip's end and the next cue's activation, both grid beats.
 const ONE_TOLERANCE_BEATS: f64 = 1e-6;
-/// Banks in composition order when priorities tie: the dip lands on top, so nothing composed
-/// after it can light through the dark before the drop.
-const OVERLAY_BANK_LADDER: [&str; 5] = ["fill", "accent", "riser", "hit", "dip"];
 const TRUNCATED_ERROR_SUFFIX: &str = "… [truncated]";
 
 /// Semantic properties precede software strobe gating; DMX contains the final output.
@@ -523,6 +520,7 @@ impl Engine {
             normalized_rms_level: self.normalized_rms_level,
             intensity: self.intensity,
             bpm: self.clock.tempo_bpm(),
+            strobe_max_hz: self.strobe_rate_cap_hz(),
             section_intent: section.section_intent,
             section_elapsed_beats,
             next_intent: section.next_intent,
@@ -844,16 +842,24 @@ impl Engine {
         }
     }
 
+    /// The rate `limit_strobes` lets through at this intensity; scripts see it as strobe_max_hz.
+    fn strobe_rate_cap_hz(&self) -> f64 {
+        let strobe_scale = intensity::strobe_scale(self.intensity);
+        if strobe_scale > 0.0 {
+            self.strobe_max_rate_hz * strobe_scale
+        } else {
+            0.0
+        }
+    }
+
     fn limit_strobes(&mut self, seconds: f64, states: &mut FixtureStates) {
         let paused = self.clock.paused();
         let strobe_scale = intensity::strobe_scale(self.intensity);
-        let (max_rate_hz, max_burst_seconds) = if strobe_scale > 0.0 {
-            (
-                self.strobe_max_rate_hz * strobe_scale,
-                self.strobe_max_burst_seconds * strobe_scale,
-            )
+        let max_rate_hz = self.strobe_rate_cap_hz();
+        let max_burst_seconds = if strobe_scale > 0.0 {
+            self.strobe_max_burst_seconds * strobe_scale
         } else {
-            (0.0, 0.0)
+            0.0
         };
         for (id, state) in states.iter_mut() {
             if paused {
@@ -1068,12 +1074,8 @@ impl Engine {
                     }
                 },
             };
-            let ladder = OVERLAY_BANK_LADDER
-                .iter()
-                .position(|bank| *bank == overlay.bank)
-                .map_or(0, |rung| rung + 1);
             layers.push(OverlayLayer {
-                rank: (overlay.priority, ladder, instance.order),
+                rank: (overlay.priority, instance.order),
                 script: Rc::clone(&script.script),
                 intensity_htp: script.intensity_htp,
                 length_beats: overlay.length_beats,
@@ -1106,7 +1108,7 @@ impl Engine {
             let cells = match self.render_overlay(layer, frame, &palette) {
                 Ok(cells) => cells,
                 Err(error) => {
-                    self.fail_overlay(layer.rank.2, &error);
+                    self.fail_overlay(layer.rank.1, &error);
                     continue;
                 }
             };
@@ -1753,8 +1755,8 @@ struct OverlayScript {
 
 /// One running overlay instance's script and envelope this frame.
 struct OverlayLayer {
-    /// (priority, bank ladder rung, start order): later composes on top.
-    rank: (i32, usize, u64),
+    /// (priority, start order): later composes on top. The director owns the bank ladder.
+    rank: (i32, u64),
     script: Rc<RefCell<LuaAutoloop>>,
     intensity_htp: bool,
     length_beats: f64,
