@@ -175,7 +175,9 @@ pub struct PreviewSummary {
 }
 
 /// The offline preview as JSON lines: a header naming the rig's cells, groups and bar length,
-/// then one frame per line at `rate_hz`, each cell `[i, r, g, b, strobe_hz, direction, gobo]`
+/// then one frame per line at `rate_hz` naming the cue's section intent, the base loop and the
+/// sounding overlays (`bank/autoloop`, absent when none), each cell `[i, r, g, b, strobe_hz,
+/// direction, gobo]`
 /// in header order. Intensity and strobe are the output after masters and limits, the colour
 /// what the encode emits (a colour wheel's slot). Direction
 /// (a unit vector in the MVR scene frame) and gobo leave the tail when absent; a missing
@@ -282,13 +284,22 @@ pub fn write_preview(
                 preview_cell(state, colour, direction)
             })
             .collect();
+        let (intent, overlays) = engine.sounding_section()?;
         let mut line = json!({
             "t": preview_round(frame.time_seconds),
             "beat": preview_round(frame.beat_position),
+            "intent": intent,
             "bank": frame.active_bank,
             "autoloop": frame.active_autoloop,
             "c": values,
         });
+        if !overlays.is_empty() {
+            let named: Vec<String> = overlays
+                .into_iter()
+                .map(|(bank, autoloop)| format!("{bank}/{autoloop}"))
+                .collect();
+            line["overlays"] = json!(named);
+        }
         // A faulted loop renders dark; the flag keeps that from reading as restraint.
         if frame.script_error.is_some() {
             line["fault"] = Value::Bool(true);

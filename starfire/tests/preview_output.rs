@@ -1,9 +1,11 @@
 mod support;
 
 use serde_json::{Value, json};
-use starfire::model::{Command, TimedCommand, Transition};
+use starfire::model::{
+    Command, OverlayCue, RotationEntry, SectionCue, SectionIntent, TimedCommand, Transition,
+};
 use starfire::protocol::wire;
-use starfire::replay::{PREVIEW_KIND, REPLAY_SCHEMA_VERSION, Replay, render_replay, write_preview};
+use starfire::replay::{PREVIEW_KIND, Replay, render_replay, write_preview};
 use starfire::script::AutoloopCatalog;
 
 const RED_HALF: &str = r#"return {render=function(ctx) return sf.scene {
@@ -22,6 +24,7 @@ fn beat(at_seconds: f64, beat_index: u64) -> TimedCommand {
             bar_phase: None,
             beats_per_bar: 4,
             bpm: 120.0,
+            features: None,
         },
     }
 }
@@ -36,6 +39,7 @@ fn preview_lines(rate_hz: u32) -> Vec<Value> {
         autoloop_id: "red_half".into(),
         bank: "test".into(),
         lua_source: RED_HALF.into(),
+        intensity_htp: false,
     }])
     .unwrap();
     let mut events: Vec<_> = (0..4)
@@ -54,7 +58,6 @@ fn preview_lines(rate_hz: u32) -> Vec<Value> {
         },
     );
     let replay = Replay {
-        schema_version: REPLAY_SCHEMA_VERSION,
         duration_seconds: 2.0,
         frame_rate_hz: 40,
         palettes: support::palette_definitions(),
@@ -149,6 +152,7 @@ fn one_loop(source: &str, duration_seconds: f64) -> (AutoloopCatalog, Replay) {
         autoloop_id: "under_test".into(),
         bank: "test".into(),
         lua_source: source.into(),
+        intensity_htp: false,
     }])
     .unwrap();
     let select = TimedCommand {
@@ -161,7 +165,6 @@ fn one_loop(source: &str, duration_seconds: f64) -> (AutoloopCatalog, Replay) {
         },
     };
     let replay = Replay {
-        schema_version: REPLAY_SCHEMA_VERSION,
         duration_seconds,
         frame_rate_hz: 40,
         palettes: support::palette_definitions(),
@@ -311,4 +314,70 @@ fn a_colour_wheel_shows_the_slot_its_encode_selects() {
     assert_ne!(pinkish, [json!(1.0), json!(0.3), json!(0.3)]);
     let [red, green, blue] = [0, 1, 2].map(|channel| pinkish[channel].as_f64().unwrap());
     assert!(red > 0.5 && green < red && blue < red, "{pinkish:?}");
+}
+
+#[test]
+fn frames_name_the_cues_section_and_its_sounding_overlays() {
+    let definition = |name: &str, source: &str| wire::AutoloopDefinition {
+        autoloop_id: name.into(),
+        bank: "test".into(),
+        lua_source: source.into(),
+        intensity_htp: false,
+    };
+    let catalog = AutoloopCatalog::from_definitions(&[
+        definition("base", RED_HALF),
+        definition("flash", RED_HALF),
+    ])
+    .unwrap();
+    // A drop from beat 4 (2 s) whose overlay sounds for its first two beats, cut off after.
+    let drop = SectionCue {
+        start_beat_index: 4,
+        intent: SectionIntent::Drop,
+        rotation: vec![RotationEntry {
+            bank: "test".into(),
+            autoloop: "base".into(),
+            bars: 16,
+            transition: Transition::Cut,
+        }],
+        overlays: vec![OverlayCue {
+            bank: "test".into(),
+            autoloop: "flash".into(),
+            priority: 0,
+            begin_beats: 0.0,
+            length_beats: 2.0,
+            every_bars: 0,
+            attack_beats: 0.0,
+            release_beats: 0.0,
+        }],
+        palette: "techno".into(),
+        drop_strength: None,
+        seed: 7,
+    };
+    let mut events: Vec<_> = (0..9)
+        .map(|index| beat(index as f64 * 0.5, index))
+        .collect();
+    events.insert(
+        1,
+        TimedCommand {
+            at_seconds: 0.0,
+            command: Command::CueSection {
+                value: Box::new(drop),
+            },
+        },
+    );
+    let replay = Replay {
+        duration_seconds: 4.0,
+        frame_rate_hz: 40,
+        palettes: support::palette_definitions(),
+        events,
+    };
+    let mut output = Vec::new();
+    write_preview(&replay, scanner_and_wash(), catalog, 10, &mut output).unwrap();
+    let frames = frames_of(output);
+    let at = |index: usize| (&frames[index]["intent"], frames[index].get("overlays"));
+    assert_eq!(at(19), (&Value::Null, None));
+    assert_eq!(at(20), (&json!("drop"), Some(&json!(["test/flash"]))));
+    assert_eq!(at(29), (&json!("drop"), Some(&json!(["test/flash"]))));
+    assert_eq!(at(30), (&json!("drop"), None));
+    assert_eq!(frames[20]["autoloop"], json!("base"));
 }
