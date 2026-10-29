@@ -2305,8 +2305,8 @@ def sent_hits(lighting):
 @pytest.mark.parametrize('cause', ['supersession', 'static'])
 async def test_a_running_drop_sent_again_never_fires_its_entry_twice(cause):
     light, lighting, planned = await wild_drop_in_the_room()
-    [hit] = sent_hits(lighting)
-    assert hit['autoloop'] == 'strobe'
+    entry = sent_hits(lighting)
+    assert {row['autoloop'] for row in entry} == {'blinder', 'beam_punch', 'strobe'}
     booked = dict(light.effect_controller._intense_at)
     before = len(cue_events(lighting))
     if cause == 'static':
@@ -2317,7 +2317,7 @@ async def test_a_running_drop_sent_again_never_fires_its_entry_twice(cause):
     [again] = (e['command']['value'] for e in cue_events(lighting)[before:])
     assert again['start_beat_index'] == planned.start_beat_index
     assert again['overlays'] and all(row['every_bars'] > 0 for row in again['overlays'])
-    assert sent_hits(lighting) == [hit], 'Starfire would anchor the hit on its next bar line'
+    assert sent_hits(lighting) == entry, 'Starfire would anchor the hits on its next bar line'
     assert light.effect_controller._intense_at == booked
 
 

@@ -56,6 +56,7 @@ OVERLAYS = {
     ('dip', 'fade'): overlay(htp=False),
     ('hit', 'colour_bump'): overlay(texture='wash'),
     ('hit', 'blinder'): overlay(texture='wash'),
+    ('hit', 'beam_punch'): overlay(texture='beam'),
     ('hit', 'strobe'): overlay(strobe=True),
     ('riser', 'strip_fill'): overlay(texture='pixel'),
     ('riser', 'strobe_ramp'): overlay(strobe=True),
@@ -114,6 +115,13 @@ def play(sections=SET, *, level='balanced', gate=None, cues=None, seed=0):
             )
         )
     return plans
+
+
+def entry_of(cue):
+    hits = {o.autoloop for o in cue.overlays if o.bank == 'hit'}
+    if 'strobe' in hits:
+        return 'strobe'
+    return 'colour' if hits == {'colour_bump'} else 'white'
 
 
 def rows(plan):
@@ -235,6 +243,7 @@ def test_mono_until_the_first_drop_and_in_every_breakdown_and_buildup():
             Gate(),
             [
                 'dip/last_beat',
+                'riser/strip_fill',
                 'hit/colour_bump',
                 'fill/wipe',
                 'accent/mover_shapes',
@@ -247,6 +256,7 @@ def test_mono_until_the_first_drop_and_in_every_breakdown_and_buildup():
                 'dip/last_beat',
                 'riser/strip_fill',
                 'hit/blinder',
+                'hit/beam_punch',
                 'fill/wipe',
                 'fill/turnaround',
                 'accent/mover_shapes',
@@ -257,10 +267,12 @@ def test_mono_until_the_first_drop_and_in_every_breakdown_and_buildup():
             'wild',
             Gate(),
             [
+                # Over the 8-row cap the bar-8 fill gives way to the entry.
                 'dip/last_beat',
                 'riser/strobe_ramp',
+                'hit/blinder',
+                'hit/beam_punch',
                 'hit/strobe',
-                'fill/wipe',
                 'fill/turnaround',
                 'accent/mover_shapes',
                 'accent/sparkle',
@@ -273,6 +285,7 @@ def test_mono_until_the_first_drop_and_in_every_breakdown_and_buildup():
                 'dip/last_beat',
                 'riser/strip_fill',
                 'hit/blinder',
+                'hit/beam_punch',
                 'fill/wipe',
                 'fill/turnaround',
                 'accent/mover_shapes',
@@ -305,11 +318,13 @@ def test_the_drop_entry_per_venue_setting(level, gate, expected):
 
 def test_the_entry_rows_land_on_the_one():
     drop = play(SET[:3])[2]
-    dip, riser, hit = row(drop, 'dip'), row(drop, 'riser'), row(drop, 'hit')
+    dip, riser = row(drop, 'dip'), row(drop, 'riser')
     assert (dip.begin_beats + dip.length_beats, dip.attack_beats) == (0.0, 0.0)
     assert riser.begin_beats + riser.length_beats == dip.begin_beats, 'the riser ends at the dip'
     assert (riser.length_beats, riser.every_bars, riser.release_beats) == (16, 0, 2.0)
-    assert (hit.begin_beats, hit.attack_beats, hit.every_bars) == (0.0, 0.0, 0)
+    hits = [o for o in drop.cue.overlays if o.bank == 'hit']
+    assert {o.autoloop for o in hits} == {'blinder', 'beam_punch'}, 'both on the one'
+    assert {(o.begin_beats, o.attack_beats, o.every_bars) for o in hits} == {(0.0, 0.0, 0)}
     priorities = {overlay.bank: overlay.priority for overlay in drop.cue.overlays}
     assert priorities['fill'] < priorities['accent'] < priorities['riser']
     assert priorities['riser'] < priorities['hit'] < priorities['dip']
@@ -318,7 +333,8 @@ def test_the_entry_rows_land_on_the_one():
 def test_the_wild_strobe_hit_is_the_burst_setting_in_beats_and_the_riser_fits_the_cap():
     drop = play(SET[:3], level='wild')[2]
     # 1 s at 120 bpm is two beats; a strobe ends on a snap.
-    assert (row(drop, 'hit').length_beats, row(drop, 'hit').release_beats) == (2.0, 0.0)
+    [strobe] = [o for o in drop.cue.overlays if o.autoloop == 'strobe']
+    assert (strobe.begin_beats, strobe.length_beats, strobe.release_beats) == (0.0, 2.0, 0.0)
     tight = ShowSettings(intensity=INTENSITY_WILD, strobe_max_burst_seconds=3.0)
     cues = director()
     for number, (intent, start) in enumerate(SET[:3]):
@@ -464,9 +480,8 @@ def test_a_second_drop_opens_on_the_first_drops_look_and_hit_and_adds_one_layer(
         first.choices[0].bank,
         first.choices[0].autoloop,
     )
-    assert row(second, 'hit').autoloop == row(first, 'hit').autoloop
     once = [[o for o in plan.cue.overlays if o.every_bars == 0] for plan in (first, second)]
-    assert [o.bank for o in once[0]] == ['dip', 'riser', 'hit']
+    assert [o.bank for o in once[0]] == ['dip', 'riser', 'hit', 'hit']
     assert once[1][: len(once[0])] == once[0] and len(once[1]) == len(once[0]) + 1
     [added] = once[1][len(once[0]) :]
     meta = OVERLAYS[added.bank, added.autoloop]
@@ -505,7 +520,7 @@ def test_a_soft_drop_keeps_its_white_but_never_strobes():
     settings = ShowSettings(intensity=INTENSITY_WILD)
     cues.plan(0, request(B, 0, new_track=True), settings, 'ice', Gate())
     soft = cues.plan(1, request(D, 64, arrival=0.6), settings, 'ice', Gate())
-    assert (row(soft, 'hit').autoloop, row(soft, 'riser').autoloop) == ('blinder', 'strip_fill')
+    assert entry_of(soft.cue) == 'white' and row(soft, 'riser').autoloop == 'strip_fill'
     assert not soft.events.intense and soft.events.accent
 
 
@@ -552,9 +567,9 @@ def test_a_level_change_refilters_rows_and_keeps_start_seed_and_rotation():
         balanced.cue.seed,
         balanced.cue.rotation,
     )
-    assert row(wild, 'hit').autoloop == 'strobe' and wild.events.intense
+    assert entry_of(wild.cue) == 'strobe' and wild.events.intense
     calm = cues.revise(128, ShowSettings(intensity=INTENSITY_CALM), Gate(), started=True)
-    assert row(calm, 'hit').autoloop == 'strobe', 'a started section keeps its one-shot rows'
+    assert entry_of(calm.cue) == 'strobe', 'a started section keeps its one-shot rows'
     assert calm.events == wild.events
     assert [o.every_bars for o in calm.cue.overlays if o.bank == 'fill'] == [16]
 
@@ -595,21 +610,18 @@ def plan_drop(effects, moment, at, start):
     return effects.plan_cue(moment, drop)
 
 
-def hit_of(cue):
-    [hit] = [o.autoloop for o in cue.overlays if o.bank == 'hit']
-    return hit
-
-
 def test_the_intense_cooldown_blocks_strobe_rows_between_drops():
     effects, _ = controller('wild', venue=Venue(max_accent_events_per_minute=10))
     # Wild halves the 60 s cooldown.
-    assert hit_of(plan_drop(effects, 'one', 100.0, 128)) == 'strobe'
+    assert entry_of(plan_drop(effects, 'one', 100.0, 128)) == 'strobe'
     second = plan_drop(effects, 'two', 125.0, 384)
-    assert hit_of(second) != 'strobe' and 'strobe_ramp' not in {o.autoloop for o in second.overlays}
-    assert hit_of(plan_drop(effects, 'three', 131.0, 640)) == 'strobe', 'two booked nothing'
+    assert entry_of(second) != 'strobe' and 'strobe_ramp' not in {
+        o.autoloop for o in second.overlays
+    }
+    assert entry_of(plan_drop(effects, 'three', 131.0, 640)) == 'strobe', 'two booked nothing'
     effects.drop_cue('one')
     effects.drop_cue('three')
-    assert hit_of(effects.revise_cue('two', started=False)) == 'strobe', 'the slot is free again'
+    assert entry_of(effects.revise_cue('two', started=False)) == 'strobe', 'the slot is free again'
 
 
 def test_the_drops_special_shares_its_cues_intense_moment():
@@ -622,9 +634,9 @@ def test_the_drops_special_shares_its_cues_intense_moment():
 
 def test_the_venue_cap_turns_a_third_white_hit_in_a_minute_into_the_colour_bump():
     effects, _ = controller('balanced')
-    hits = [hit_of(plan_drop(effects, n, 100.0 + 20 * n, 128 + 256 * n)) for n in range(3)]
-    assert hits == ['blinder', 'blinder', 'colour_bump']
-    assert hit_of(plan_drop(effects, 3, 161.0, 1024)) == 'blinder', 'the first left the window'
+    hits = [entry_of(plan_drop(effects, n, 100.0 + 20 * n, 128 + 256 * n)) for n in range(3)]
+    assert hits == ['white', 'white', 'colour']
+    assert entry_of(plan_drop(effects, 3, 161.0, 1024)) == 'white', 'the first left the window'
 
 
 def test_resetting_the_plans_releases_bookings_still_ahead_of_the_room():
@@ -635,3 +647,18 @@ def test_resetting_the_plans_releases_bookings_still_ahead_of_the_room():
     effects.reset_cues()
     assert effects.intense_blocked(60.0, None) is None
     assert effects.intense_blocked(30.0, None) is not None, 'the drop the room saw still counts'
+
+
+def test_calm_rises_on_the_palette_riser_only():
+    calm = play(SET[:3], level='calm')[2]
+    assert [o.autoloop for o in calm.cue.overlays if o.bank == 'riser'] == ['strip_fill']
+    overlays = {loop: value for loop, value in OVERLAYS.items() if loop != ('riser', 'strip_fill')}
+    bare = play(SET[:3], level='calm', cues=director(overlays=overlays))[2]
+    assert 'riser' not in {o.bank for o in bare.cue.overlays}, 'no white riser at Calm'
+
+
+def test_a_wild_second_drop_keeps_its_entry_whole_under_the_row_cap():
+    second = play(level='wild')[5]
+    assert len(second.cue.overlays) <= 8
+    banks = [o.bank for o in second.cue.overlays if o.every_bars == 0]
+    assert banks.count('hit') == 3 and 'dip' in banks and 'riser' in banks
