@@ -1,5 +1,3 @@
-// The browser half of tools/gui_check.py: drives headless Chrome over the DevTools protocol.
-// Started by gui_check.py, which serves the panel at GUI_URL and the stub's /_harness routes.
 import {spawn} from 'node:child_process';
 import {existsSync, mkdirSync, readFileSync, writeFileSync} from 'node:fs';
 import {join} from 'node:path';
@@ -10,12 +8,9 @@ const SHOTS = process.env.GUI_SHOTS || '';
 const PROFILE = process.env.GUI_PROFILE;
 const ECHO_MS = 1000;
 const POLL_MS = 250;
-// A click's look must hold from here on: the optimistic flip, the echo and two polls after it.
 const SETTLED_MS = 400;
 const WATCH_MS = 5000;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-
-// ---- Chrome and the protocol --------------------------------------------------------------
 
 mkdirSync(PROFILE, {recursive: true});
 const chrome = spawn(process.env.GUI_CHROME, [
@@ -63,8 +58,7 @@ const cdp = (method, params = {}) => new Promise((resolve, reject) => {
 
 const network = [];
 const consoleLines = [];
-// From a navigation's start to its commit the old page is torn down, and Dash reports each
-// callback it had in flight as failed: that is the harness navigating, not a page error.
+// While a navigation tears the old page down, Dash reports each callback in flight as failed: the harness, not a page error.
 let leaving = false;
 let abortedOnLeave = 0;
 const ABORTED_CALLBACK = 'Callback failed: the server did not respond';
@@ -97,7 +91,6 @@ listeners.push((msg) => {
 await cdp('Network.enable');
 await cdp('Runtime.enable');
 await cdp('Page.enable');
-// Flashes are 650 ms; an observer catches every one a 100 ms sample could miss.
 await cdp('Page.addScriptToEvaluateOnNewDocument', {source: `
     window.__flashes = [];
     new MutationObserver((records) => records.forEach((r) => {
@@ -109,14 +102,13 @@ await cdp('Page.addScriptToEvaluateOnNewDocument', {source: `
         }
         el.__flashing = flashing;
     })).observe(document, {subtree: true, attributes: true, attributeFilter: ['class']});
-    // The fixture test's keep-alive is held, not scheduled: the harness fires it by hand
-    // (window.__tickKeepAlive) instead of waiting 15 s. Every other timer runs as usual.
     window.__pointer = [];
     for (const type of ['pointerdown', 'pointerup', 'click']) {
         document.addEventListener(type, (e) => window.__pointer.push({type, x: e.clientX, y: e.clientY,
             target: (e.target.tagName || '') + '.' + (e.target.getAttribute?.('class') || '') + (e.target.closest?.('[data-node-key]') ? ' in-mark' : ''),
             at: Math.round(performance.now())}), true);
     }
+    // fixture_patch.js's keep-alive is the interval whose body calls dispatchTest; __tickKeepAlive fires it by hand.
     window.__keepAlive = new Map();
     window.__keepAliveDelays = [];
     const realSetInterval = window.setInterval.bind(window);
@@ -161,7 +153,6 @@ async function waitFor(expression, ms = 8000) {
     return false;
 }
 
-// Readable state of every control, for failures.
 const DOM_JS = `(() => {
     const q = (s) => document.querySelector(s);
     const cls = (s) => (q(s) || {}).className;
@@ -180,8 +171,6 @@ const DOM_JS = `(() => {
     };
 })()`;
 const dom = () => ev(DOM_JS);
-
-// ---- checks -------------------------------------------------------------------------------
 
 const results = [];
 let failed = 0;
@@ -215,9 +204,6 @@ async function arm() {
     netMark = network.length;
 }
 
-// Runs act, then samples look (a page expression, true when the control shows what the click
-// asked for) for WATCH_MS. Expects exactly `expect` bridge commands (each a partial match),
-// none after them (expect null: any count), and look true at every sample from SETTLED_MS on.
 async function action(control, name, act, {expect = [], look = null, watch = WATCH_MS} = {}) {
     await arm();
     const started = Date.now();
@@ -304,7 +290,6 @@ async function type(selector, text) {
     await ev(`(() => { const e = document.querySelector(${JSON.stringify(selector)}); e.focus(); e.select(); })()`);
     await cdp('Input.insertText', {text});
 }
-// The whole page, or one element unclipped by its own scrolling.
 async function shot(name, selector = null) {
     if (!SHOTS) {
         return;
@@ -320,8 +305,6 @@ async function shot(name, selector = null) {
     writeFileSync(join(SHOTS, selector ? `${name}.png` : `gui_${name}.png`), Buffer.from(data, 'base64'));
 }
 
-// ---- suites -------------------------------------------------------------------------------
-
 const LEVELS = {calm: 0.3, balanced: 0.7, wild: 1};
 const LEVEL_INDEX = {calm: 1, balanced: 2, wild: 3};
 const levelLabel = (name) => `#control-intensity label:nth-child(${LEVEL_INDEX[name]})`;
@@ -335,7 +318,6 @@ const tab = (label) => click(`#dashboard-tab .tab:nth-child(${['Control', 'Telem
 const modeTab = (mode) => click(`#control-mode .tab:nth-child(${mode === 'auto' ? 1 : 2})`);
 const keysOf = (c) => Object.keys(c || {}).sort().join(',');
 const flashes = () => ev('window.__flashes.splice(0)');
-// The chosen level's fill, and a #show-control colour token resolved the same way.
 const levelFill = () => ev(`getComputedStyle(document.querySelector('#control-intensity .selected .dash-options-list-option-text')).backgroundColor`);
 const tokenColour = (name) => ev(`(() => { const probe = document.createElement('div');
     probe.style.background = 'var(${name})'; document.getElementById('show-control').appendChild(probe);
@@ -349,10 +331,7 @@ const overflow = () => ev(`(() => {
     return {scroll: document.documentElement.scrollWidth, width: w, wide};
 })()`);
 
-// Clicks a slider's track at a fraction of its width.
 const slider = (selector, fraction) => click(selector, {fx: fraction});
-
-// ---- fixture configuration helpers --------------------------------------------------------
 
 const STATUS = '#fixture-status';
 const UNSAVED = 'Unsaved changes';
@@ -364,18 +343,15 @@ const NEW_GROUP = '\u0000new';
 const rigFiles = () => harness('rig');
 const cfg = (name) => `#fixture-info [data-cfg="${name}"]`;
 const testButton = (spec) => `#fixture-info [data-cfg-test="${spec}"]`;
-// Sorted keys on both sides: Flask sorts the stub's, the expectations are written by hand.
+// Flask sorts the stub's keys; the expectations are written by hand.
 const canon = (value) => JSON.stringify(value, (key, v) => (v && typeof v === 'object' && !Array.isArray(v)
     ? Object.fromEntries(Object.entries(v).sort(([a], [b]) => (a < b ? -1 : 1))) : v));
 const same = (a, b) => canon(a) === canon(b);
-// The frozen room's MVR uuids: tests target a fixture by its uuid, whatever its name is now.
 const ROOM_UUID = {
     spot_left: '75D557BC-32F9-592A-810D-652F0ECF68D7',
     spot_right: '0BD68C96-850C-57EA-86E0-1780E40FF826',
     zq06017: 'B3F12D06-678A-51FE-AD71-BC2BC260EB9F',
 };
-// A mover's test carries its draft placement and patch: the room hangs both turned to the
-// audience, no soft limits and no MVR Focus, in 12ch on universe 1.
 const roomPose = (x, address) => {
     const full = {min: 0, max: 1, inverted: false};
     return {matrix: [-1, 0, 0, 0, -1, 0, 0, 0, 1, x, 0, 0], pan: full, tilt: full, focus: [], universe: 0, address, gdtf_mode: '12ch'};
@@ -386,7 +362,6 @@ const CLEAR = {action: 'highlight', target: null};
 const posted = () => network.slice(netMark).map((n) => JSON.parse(n.body));
 const markOf = (name) => `[...document.querySelectorAll('#mvr-plan .mvr-object')].find((g) =>
     (g.querySelector('title')?.textContent || '').split(' · ')[0] === ${JSON.stringify(name)})`;
-// Every fixture label's box, in viewport pixels, against the plan SVG's own box.
 const labelBoxesJs = `(() => {
     const box = document.querySelector('#mvr-plan svg.plan')?.getBoundingClientRect();
     return [...document.querySelectorAll('#mvr-plan .plan-name')].map((t) => {
@@ -402,15 +377,12 @@ const statusText = () => text(STATUS);
 const noteOf = (name) => ev(`(document.querySelector('${cfg(name)}')?.closest('.cfg-field')
     ?.querySelector('.cfg-note')?.textContent || '').trim()`);
 
-// The Config tab on a page booted against the original rig: the store is restored first, as
-// the panel's layout carries the draft the server loaded at start.
 async function cfgFresh({width = 1280} = {}) {
     await harness('rig', {restore: true});
     await fresh({width});
     await tab('Config');
     await waitFor(`!!document.querySelector('#mvr-plan svg.plan')`, 8000);
     await planSettled();
-    // Records every draft action the page sends (fixture_patch.js sendAction).
     await ev(`(() => {
         window.__actions = [];
         const ds = window.dash_clientside;
@@ -423,8 +395,7 @@ async function cfgFresh({width = 1280} = {}) {
     await arm();
 }
 
-// The Config tab can still move the plan after it opens (fonts, the DMX map filling in); a
-// click aimed before that lands beside the mark.
+// The plan can still move after the tab opens (fonts, the DMX map filling in); a click aimed earlier lands beside the mark.
 async function planSettled() {
     let last = null;
     for (let stable = 0, i = 0; stable < 3 && i < 100; i++) {
@@ -453,7 +424,6 @@ async function selectFixture(name) {
     return ok;
 }
 
-// The fixture's plan mark in screen and plan coordinates; the plan's SVG x is MVR X.
 async function planMark(name) {
     return ev(`(() => {
         const mark = ${markOf(name)};
@@ -477,7 +447,6 @@ async function pressAndMove(x0, y0, x1, y1, steps = 8) {
         await mouse('mouseMoved', x0 + (x1 - x0) * i / steps, y0 + (y1 - y0) * i / steps, {buttons: 1});
         await sleep(30);
     }
-    // One animation frame draws the preview.
     await sleep(150);
 }
 const release = (x, y) => mouse('mouseReleased', x, y, {clickCount: 1});
@@ -485,7 +454,6 @@ const release = (x, y) => mouse('mouseReleased', x, y, {clickCount: 1});
 async function typeInto(selector, value) {
     await ev(`(() => { const e = document.querySelector(${JSON.stringify(selector)}); e.focus(); e.select(); })()`);
     await cdp('Input.insertText', {text: value});
-    // The page edits on change, which a text field fires when it loses focus.
     await ev('document.activeElement.blur()');
 }
 async function choose(selector, value) {
@@ -494,7 +462,6 @@ async function choose(selector, value) {
 }
 const splitInput = (name, input) => `${cfg(name)} input[name="${input}"]`;
 
-// One form edit: exactly one draft action matching `expected` (partial), the draft taking it.
 async function formEdit(what, act, expected) {
     await takeActions();
     await act();
@@ -507,7 +474,6 @@ async function formEdit(what, act, expected) {
     await check('patch form', `${what} -> the draft takes it`, applied, {status: await statusText()});
     return sent[0];
 }
-// One refused form edit: no draft action and the reason beside the field.
 async function formRefusal(what, act, field, reason) {
     await takeActions();
     await act();
@@ -531,13 +497,10 @@ async function reloadSaved() {
     return waitFor(`document.querySelector('${STATUS}').textContent === 'Saved patch loaded.'`, 15000);
 }
 const fixtureIn = (files, name) => files.fixtures.find((f) => f.name === name);
-// A fixture's element in the scene XML, from its name to its closing tag.
 function fixtureXml(xml, name) {
     const start = xml.lastIndexOf('<Fixture ', xml.indexOf(`name="${name}"`));
     return xml.slice(start, xml.indexOf('</Fixture>', start) + '</Fixture>'.length);
 }
-// Every highlight target any page posted must be in the running rig (Starfire stops the show
-// on an unknown fixture; the bridge refusing it is the last line, not the first).
 async function checkHighlightIds(scenario) {
     const rig = (await harness('state')).rig;
     const ids = new Set(rig.fixtures.flatMap((f) => [`fixture:${f.fixture_uuid}`, ...f.cells.map((c) => `cell:${c}`)]));
@@ -547,7 +510,6 @@ async function checkHighlightIds(scenario) {
     await check(scenario, 'no highlight posted with an id outside rig.fixtures', bad.length === 0, {bad});
 }
 let scenarioNet = 0;
-// Every text the test note shows from now on, however briefly.
 const watchNote = () => ev(`(() => {
     window.__notes = [];
     const note = document.querySelector('#fixture-info .cfg-test-note');
@@ -573,7 +535,6 @@ const SUITES = {
         await check('Section Confidence', 'one bar per class at its posterior',
             JSON.stringify(bars) === JSON.stringify(['10%', '30%', '60%']), {bars});
 
-        // The stub reselects the loop on a level change, as the engine does.
         const autoloopText = `[...document.querySelectorAll('#show-status .status-item')]
             .find((e) => e.querySelector('.control-label')?.textContent === 'Autoloop')?.textContent`;
         const autoloopBefore = await ev(autoloopText);
@@ -616,8 +577,7 @@ const SUITES = {
             {expect: [{action: 'intensity', level: LEVELS.calm}], look: shows('calm')});
         await action('intensity wild', 'double-click', () => click(levelLabel('wild'), {count: 2}),
             {expect: [{action: 'intensity', level: LEVELS.wild}], look: shows('wild')});
-        // A double-click is one operator action: the second click may land before Dash runs
-        // the first, so one or two toggles are both right as long as the UI ends where the show does.
+        // The second click of a double-click may land before Dash runs the first, so one toggle or a pair are both right.
         const dbl = await action('intensity AUTO', 'double-click', () => click('#control-intensity-auto', {count: 2}),
             {expect: null});
         const endsOn = dbl.length === 1;
@@ -843,7 +803,6 @@ const SUITES = {
         await fresh({blank: true});
         await action('first load', 'FX Off clicked before the first poll', async () => {
             await click('#control-fx-off');
-            // Long enough that blank polls land after SETTLED_MS: the lit chip must survive them.
             await sleep(1000);
             await harness('control', {blank: false});
         }, {expect: [{action: 'fx_auto', enabled: false}], look: has('control-fx-off', 'active')});
@@ -911,7 +870,6 @@ const SUITES = {
         const xField = () => ev(`document.querySelector('${splitInput('matrix', 'x')}').value`);
         await check('plan drag', 'Position X reads -300 before the drag', (await xField()) === '-300', {x: await xField()});
 
-        // Escape mid-drag: the preview moved, then everything is as it was and nothing is sent.
         let m = await planMark('spot_left');
         const grid0 = await areaBox();
         await arm();
@@ -930,7 +888,6 @@ const SUITES = {
         await check('plan drag', 'Escape then release sends no draft action', sent.length === 0, {sent});
         await check('plan drag', 'Escape leaves the draft clean', !(await statusText()).startsWith(UNSAVED), {status: await statusText()});
 
-        // The nine-area grid follows the preview: wash_left is the leftmost fixture.
         const w = await planMark('wash_left');
         await pressAndMove(w.x, w.y, w.x + 300 * w.a, w.y);
         const gridMid = await areaBox();
@@ -945,7 +902,6 @@ const SUITES = {
         await check('plan drag', 'Escape restores the grid', same(await areaBox(), grid0), {grid: await areaBox()});
         await takeActions();
 
-        // The committing drag.
         m = await planMark('spot_left');
         await arm();
         await pressAndMove(m.x, m.y, m.x + 300 * m.a, m.y);
@@ -963,7 +919,6 @@ const SUITES = {
         await check('plan drag', 'the draft reads dirty', (await statusText()).startsWith(UNSAVED), {status: await statusText()});
         await check('plan drag', 'a drag sends no bridge command', (await since()).length === 0, {seen: await since()});
 
-        // Zero movement: a press and release in place, and a drag that comes home.
         m = await planMark('spot_left');
         await mouse('mouseMoved', m.x, m.y, {button: 'none'});
         await mouse('mousePressed', m.x, m.y, {clickCount: 1, buttons: 1});
@@ -1027,7 +982,6 @@ const SUITES = {
         await formRefusal('rename to spot_right', () => typeInto(cfg('name'), 'spot_right'),
             'name', 'Another fixture is named spot_right.');
         await formRefusal('empty name', () => typeInto(cfg('name'), ' '), 'name', 'A name is required.');
-        // The refusals left typed text in the fields; a redraw from the draft puts it back.
         await selectFixture('spot_right');
         await selectFixture('spot_left');
         await check('patch form', 'refused edits leave the draft as it was',
@@ -1114,7 +1068,6 @@ const SUITES = {
             && same(fixtureIn(after, 'kinta'), fixtureIn(before, 'kinta')));
         await check('patch form', 'repo mirror and pb follow the save', after.repo_same_as_store && after.repo_pb === after.pb_of_store);
 
-        // Stale revision: the store changes behind the page; the page's Save must not land.
         await selectFixture('spot_left');
         await formEdit('Patch number 9 (to save over a moved store)', () => typeInto(cfg('FixtureID'), '9'),
             {action: 'set-patch-number', value: '9'});
@@ -1129,7 +1082,6 @@ const SUITES = {
             {revision: [after.revision, bumped.revision, refused.revision]});
         await check('stale save', 'the draft keeps the unsaved edit', (await ev(`document.querySelector('${cfg('FixtureID')}').value`)) === '9');
 
-        // Swapping two names swaps labels only: everything else stays with each uuid.
         await cfgFresh();
         const unswapped = await rigFiles();
         for (const [from, to] of [['spot_left', 'spot_tmp'], ['spot_right', 'spot_left'], ['spot_tmp', 'spot_right']]) {
@@ -1205,7 +1157,6 @@ const SUITES = {
         const rig = (await harness('state')).rig;
         const cells = rig.fixtures.find((f) => f.name === 'zq06017').cells;
         const listing = `[...document.querySelectorAll('#fixture-info [data-cfg-cell]')].map((b) => b.dataset.cfgCell)`;
-        // The list fills from the show's rig on the poll after the form draws.
         await waitFor(`JSON.stringify(${listing}) === ${JSON.stringify(JSON.stringify(cells))}`, 3000);
         const listed = await ev(listing);
         await check('locate cells', "lists the running rig's cells for zq06017", same(listed, cells),
@@ -1264,7 +1215,6 @@ const SUITES = {
         await check('locate paused', 'play enables them again', await waitFor(`[...document.querySelectorAll('#fixture-info [data-cfg-test]')].every((b) => !b.disabled)`, 3000)
             && (await note()) === '', {note: await note()});
 
-        // The draft frees 13-24, which the running show still patches to spot_right.
         await selectFixture('spot_right');
         await typeInto(cfg('address'), '400');
         await selectFixture('spot_left');
@@ -1281,7 +1231,6 @@ const SUITES = {
         await exactly('locate address', 'the keep-alive keeps the test at 300', () => ev('window.__tickKeepAlive()'), [at300]);
         await exactly('locate address', 'Test clears it', () => click(testButton('test')), [CLEAR]);
 
-        // spot_left has no FocusPoint: the first edit writes one, and each edit re-aims the lit test.
         await typeInto(cfg('address'), '1');
         await click(testButton('aim'));
         const centre = [];
@@ -1298,7 +1247,6 @@ const SUITES = {
         await checkHighlightIds('locate');
     },
 
-    // A held test stays lit through yaw edits and idle time until the operator turns it off.
     cfg_test_hold: async () => {
         await cfgFresh();
         await selectFixture('spot_left');
@@ -1311,7 +1259,6 @@ const SUITES = {
             await typeInto(splitInput('matrix', 'yaw'), yaw);
             await sleep(6500);
         }
-        // macOS reports a window another one covers as hidden; that is not the page going away.
         await ev(`Object.defineProperty(document, 'hidden', {value: true, configurable: true}); document.dispatchEvent(new Event('visibilitychange'))`);
         await sleep(Math.max(0, 30000 - (Date.now() - started)));
         await ev(`delete document.hidden; document.dispatchEvent(new Event('visibilitychange'))`);
@@ -1329,7 +1276,6 @@ const SUITES = {
         await click(testButton('test'));
     },
 
-    // The first Test click after a load, a selection change or a restart sends one command and lights.
     cfg_first_press: async () => {
         const pick = async (name) => {
             await planSettled();
@@ -1345,7 +1291,6 @@ const SUITES = {
             await sleep(pause);
             await arm();
             await click(testButton('test'));
-            // Lit before the show's echo (1 s here): a dark button invites the click that clears it.
             const lit = await waitFor(`document.querySelector('${testButton('test')}').classList.contains('active')`, 300);
             await sleep(1500);
             const seen = await since();
@@ -1373,7 +1318,6 @@ const SUITES = {
         await check('first press', 'select spot_left', await pick('spot_left'));
         await once('3 s after a selection change', ROOM_UUID.spot_left, 3000);
         await off();
-        // A restart in progress: the page loads while the show reports nothing.
         await harness('rig', {restore: true});
         await fresh({blank: true});
         await tab('Config');
@@ -1446,7 +1390,6 @@ const SUITES = {
         await check('odd name', 'survives the plan SVG (label and tooltip)', svg?.label === NAME && svg?.title === NAME + ' · movers', {svg});
         await check('odd name', 'survives the DMX map', (await ev(`[...document.querySelectorAll('#fixture-channel-map .patch-block')].some((b) => b.dataset.fixtureName === ${JSON.stringify(NAME)} && b.textContent.startsWith(${JSON.stringify(NAME + ' · ')}))`)));
         await check('odd name', 'leaves no stray markup in the plan', (await ev(`document.querySelectorAll('#mvr-plan svg.plan').length === 1 && !document.querySelector('#mvr-plan svg.plan left, #mvr-plan svg.plan co')`)));
-        // A rename keeps the uuid the running rig knows, so its test lights the same fixture.
         await arm();
         await click(testButton('test'));
         await sleep(1500);
@@ -1477,9 +1420,6 @@ const SUITES = {
         await check('phone width Config form', 'the form is a single column', columns.trim().split(/\s+/).length === 1, {columns});
         await cdp('Emulation.setDeviceMetricsOverride', {width: 1280, height: 900, deviceScaleFactor: 1, mobile: false});
 
-        // Reload mid-test. Behaviour: the unloading page turns hidden, and its visibilitychange
-        // handler clears the lit test (one clear reaches the show); nothing else is sent, and
-        // the reloaded page shows no test and holds no keep-alive.
         await cfgFresh();
         await selectFixture('spot_left');
         await click(testButton('test'));
@@ -1507,7 +1447,6 @@ const SUITES = {
         await click(testButton('test'));
         await sleep(1000);
 
-        // A browser reload after a Save must show the saved patch, and say the show runs an older rig.
         await cfgFresh();
         await selectFixture('wash_left');
         await formEdit('Patch number 42', () => typeInto(cfg('FixtureID'), '42'), {action: 'set-patch-number', value: '42'});
@@ -1558,7 +1497,6 @@ const SUITES = {
             {headings: await headings()});
         await shot('pane_impl_static', '#fixture-info');
 
-        // Soft limits in degrees, clamped to the GDTF's -220–320° pan.
         await selectFixture('spot_left');
         await check('soft limits', 'the pan field shows the physical range and degrees', (await text('#fixture-info .cfg-field:has([data-cfg="Pan"]) > span small')) === '-220–320'
             && (await ev(`document.querySelector('${splitInput('Pan', 'max')}').value`)) === '320');
@@ -1570,13 +1508,11 @@ const SUITES = {
         await check('soft limits', 'the fields redraw at the clamped degrees', await waitFor(`document.querySelector('${splitInput('Pan', 'min')}').value === '-220'
             && document.querySelector('${splitInput('Pan', 'max')}').value === '50'`, 2000));
 
-        // Hanging -> standing turns the head 180° about its facing; it survives Save and Reload.
         await check('mount', 'spot_left reads hanging', (await ev(`document.querySelector('${cfg('mount')}').value`)) === 'hanging');
         await formEdit('mount standing', () => choose(cfg('mount'), 'standing'),
             {action: 'set-matrix', position: [-300, 0, 0], rotation: [180, 0, 0], standing: true});
         await check('mount', 'the rotation fields keep their values', (await ev(`document.querySelector('${splitInput('matrix', 'yaw')}').value`)) === '180');
 
-        // The heading renames the label; the uuid, and with it everything else, stays.
         const before = await rigFiles();
         await formEdit('heading rename', () => typeInto(cfg('name'), 'spot_hero'), {action: 'set-attribute', doc: 'scene', name: 'name', value: 'spot_hero'});
         await check('pane', 'Save', await save(), {status: await statusText()});
@@ -1601,7 +1537,6 @@ const SUITES = {
         const fitted = () => ev(`${plan}.dataset.fit.split(' ').map(Number)`);
         const labelPx = () => ev(`(() => { const t = document.querySelector('#mvr-plan .plan-name'); return t.getBBox().height * ${plan}.getScreenCTM().d; })()`);
         const near = (a, b, tolerance = 1.5) => Math.abs(a.x - b.x) <= tolerance && Math.abs(a.y - b.y) <= tolerance;
-        // A screen point on plan background, clear of every mark.
         const empty = () => ev(`(() => { const r = ${plan}.getBoundingClientRect();
             for (let fy = 0.1; fy < 1; fy += 0.1) for (let fx = 0.1; fx < 1; fx += 0.1) {
                 const [x, y] = [r.x + r.width * fx, r.y + r.height * fy];
@@ -1628,7 +1563,6 @@ const SUITES = {
         await wheel(m.x, m.y, -700);
         await sleep(200);
 
-        // Pan from plan background.
         m = await planMark('spot_left');
         const p = await empty();
         await arm();
@@ -1643,7 +1577,6 @@ const SUITES = {
         await check('plan nav', 'polls keep the view', same(await view(), panned), {panned, now: await view()});
         await check('plan nav', 'selecting keeps the view', await selectFixture('spot_left') && same(await view(), panned), {panned, now: await view()});
 
-        // The same 300 mm drag cfg_drag makes at fit lands on the same mm when zoomed.
         m = await planMark('spot_left');
         await pressAndMove(m.x, m.y, m.x + 300 * m.a, m.y);
         await release(m.x + 300 * m.a, m.y);
@@ -1669,7 +1602,6 @@ const SUITES = {
         await sleep(200);
         await check('plan nav', 'a double-click on empty space fits', same(await view(), await fitted()), {view: await view()});
 
-        // Two touches spreading apart pinch-zoom in.
         const touch = (type, spread) => cdp('Input.dispatchTouchEvent', {type, touchPoints: type === 'touchEnd' ? [] :
             [{x: q.x - spread, y: q.y, id: 1}, {x: q.x + spread, y: q.y, id: 2}]});
         await touch('touchStart', 20);
@@ -1683,8 +1615,6 @@ const SUITES = {
         await check('plan nav', 'a pinch zooms in about threefold', Math.abs(fit[2] / pinched[2] - 3) < 0.3, {pinched, fit});
     },
 
-    // A tiny hand-written preview of the plan's own first two fixtures, hung 3 m up where the
-    // plan has them, loaded as a file.
     cfg_preview: async () => {
         await cfgFresh();
         const [lit, strobing] = (await rigFiles()).fixtures;
@@ -1737,7 +1667,6 @@ const SUITES = {
         await check('preview', 'the label adds the sounding overlay to the base loop',
             (await text('#preview-label')) === '0:00.1 · bar 1.1 · drop · drop/chase + hit/flash', {label: await text('#preview-label')});
         await check('preview', 'a gobo other than Open dashes the beam and is named', sub(await look(lit), {dashed: true, title: `${lit.name} · 50% · gobo Dots`}), {lit: await look(lit)});
-        // Thrown straight down from 3 m: a dot on the plan, a beam ending on the elevation's floor.
         const down = await ev(`(() => {
             const line = document.querySelector('#mvr-plan svg.elevation .plan-beam');
             const box = line?.ownerSVGElement.viewBox.baseVal;
@@ -1745,7 +1674,6 @@ const SUITES = {
             return line && {y1: Number(line.getAttribute('y1')), y2, inside: x2 >= box.x && x2 <= box.x + box.width && y2 >= box.y && y2 <= box.y + box.height}; })()`);
         await check('preview', 'a beam thrown straight down stops on the floor, inside the elevation', sub(down, {y1: -3000, y2: 0, inside: true}), {down});
 
-        // The strip seeks where it is clicked; arrows then step by beat from the focused strip.
         await click('#preview-overview svg.band', {fx: 0.05});
         await check('preview', 'a click near the start of the strip seeks to the first frame',
             await waitFor(`document.getElementById('preview-label').textContent.startsWith('0:00.0')`, 3000), {label: await text('#preview-label')});
@@ -1781,8 +1709,6 @@ const SUITES = {
         await check('phone width', 'no commands from layout', (await since()).length === 0, {seen: await since()});
     },
 };
-
-// ---- run ----------------------------------------------------------------------------------
 
 for (const [name, suite] of Object.entries(SUITES)) {
     if (ONLY && !ONLY.split(',').includes(name)) {

@@ -1,6 +1,7 @@
 (() => {
     const ds = (window.dash_clientside = window.dash_clientside || {});
     const DRAG_THRESHOLD_PX = 4;
+    const LINE_DELTA_PX = 16;
     const LABEL_OFFSET_PX = 16;
     const MATRIX_DECIMALS = 6;
     const ORTHONORMAL_TOLERANCE = 1e-3;
@@ -12,9 +13,8 @@
     const PLAN_LABEL_LIMIT = 48;
     const PLAN_ZOOM = [0.5, 8];
     const PREVIEW_BEAM_MM = 3000;
-    // Where the overview's tracks start: its label column plus gap in PREVIEW_CSS.
+    // Matches the label column plus gap in PREVIEW_CSS.
     const OVERVIEW_TRACK_LEFT = "118px";
-    // The strip's overlay marks by bank: a hit near white, as white is kept for hits.
     const OVERLAY_COLOURS = { hit: "#f5f7fa", fill: "#73b6ff", riser: "#f0c674", dip: "#e5534b", accent: "#b083f0" };
     const NAME_BYTES = 128;
     const TEST_REFRESH_MS = 15000;
@@ -25,16 +25,13 @@
     const RESTARTING = "Restarting the show on the saved patch.";
     const NEW_GROUP = "\u0000new";
     const RESTART_HOLD_MS = 60000;
-    // Edits reach a lit test this soon after they settle, so a spin box does not flood the show.
     const POSE_SETTLE_MS = 150;
     const IDENTITY = [1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0];
     const GEOMETRY_TAGS = new Set(["Geometry", "Axis", "FilterBeam", "FilterColor", "FilterGobo", "FilterShaper", "Beam", "MediaServerLayer", "MediaServerCamera", "MediaServerMaster", "Display", "GeometryReference", "Laser", "WiringObject", "Inventory", "Structure", "Support", "Magnet"]);
     let drag = null;
     let planDrag = null;
-    // The plan's view as an SVG user-space box; null follows the rig's fit.
     let planView = null;
     let planNav = null;
-    // What the DOM handlers act on: the draft and selection last drawn, the show last polled.
     let rig = null;
     let show = null;
     let selectedCell = null;
@@ -42,21 +39,16 @@
     let refreshTimer = null;
     let testCommand = null;
     let poseTimer = null;
-    // A refusal stays readable over the polls until the next test action.
     let testRefusal = "";
     let restartTimer = null;
     let applyTimer = null;
-    // The show session a restart was taken in; null when none is pending.
     let restartingFrom = null;
     let suppressedClick = null;
-    // The fixture pane's Advanced disclosure stays as the operator left it, across fixtures.
     let advancedOpen = false;
     let requestId = 0;
     let keyCounter = 0;
     const drawn = new WeakMap();
-    // A loaded recording: header, frames, the frame shown and its cells, and what the views need.
     let recording = null;
-    // While Play runs: when it started, from which frame, and the frame it last showed.
     let playback = null;
 
     function* walk(node, parent = null) {
@@ -196,13 +188,10 @@
         return { pan: rotation[0], tilt: rotation[1], reversed: isStanding(matrix) };
     }
 
-    // GDTF models a fixture hanging (beam down, local Z up). Standing turns it 180° about its
-    // local Y, negating X and Z: the facing (local Y) stays, so the yaw and pitch the pane shows
-    // are the pan and tilt home Starfire derives in either mount. The flip is its own inverse.
+    // GDTF hangs a fixture beam down (local Z up); standing turns it 180° about local Y, keeping its facing.
     const isStanding = (matrix) => matrix[8] < 0;
     const flipped = (matrix) => matrix.map((value, index) => (index < 3 || (index >= 6 && index < 9) ? -value : value));
 
-    // The pane's placement: the mount, and the rotation relative to it.
     function placement(matrix) {
         const standing = isStanding(matrix);
         const rotation = rotationDegrees(standing ? flipped(matrix) : matrix);
@@ -256,7 +245,7 @@
         return channels;
     }
 
-    // Mirrors mvr.mode_cells: the geometries Starfire addresses as cells, by first offset.
+    // Mirrors mvr.mode_cells.
     function modeCells(tree, mode) {
         const node = modeNode(tree, mode);
         if (!node) return [];
@@ -290,8 +279,7 @@
             .map((cell) => cell.geometry);
     }
 
-    // Mirrors Starfire's movement_range: the mode's first Pan or Tilt function that has no channel
-    // sets (a set with no physical range or wheel slot is only a label), as [from, to] degrees.
+    // Mirrors Starfire's movement_range.
     function physicalRange(tree, mode, attribute) {
         const node = modeNode(tree, mode);
         const label = (set) => set.attributes.PhysicalFrom === undefined && set.attributes.PhysicalTo === undefined && !(Number(set.attributes.WheelSlotIndex ?? 0) > 0);
@@ -345,22 +333,19 @@
         });
     }
 
-    // The FocusPoint the fixture's MVR Focus names, and where it sits in the scene.
     function focusPoint(draft, settings, node) {
         const uuid = textOf(node, "Focus").toUpperCase();
         return uuid ? placedObjects(draft, settings).find((entry) => entry.node.tag === "FocusPoint" && (entry.node.attributes.uuid || "").toUpperCase() === uuid) : undefined;
     }
 
-    // Starfire's aim without an MVR Focus: the centre of the fixtures' plan bounding box (the box
-    // the stage areas are cut from) on the floor.
+    // Mirrors Starfire's aim without an MVR Focus.
     function stageCentre(draft, settings) {
         const positions = fixtureRows(draft, settings).map((row) => row.matrix.slice(9, 11));
         const centre = (axis) => (positions.length ? (Math.min(...positions.map((p) => p[axis])) + Math.max(...positions.map((p) => p[axis]))) / 2 : 0);
         return [centre(0), centre(1), 0];
     }
 
-    // The rig Fixture's placement fields as the save exports them (mvr.patched_fixtures), so a
-    // test can show the unsaved patch. None for a rotation Starfire refuses.
+    // Mirrors mvr.patched_fixtures, so a test can carry the unsaved patch.
     function draftPose(draft, settings, row) {
         if (typeof homeOrientation(row.matrix) !== "object") return undefined;
         const node = locate(draft.scene, row.key).node;
@@ -464,12 +449,10 @@
         return added[0];
     }
 
-    // The child `find` picks, else the one add-child creates under `parent`.
-    function ensure(draft, settings, parent, find, add) {
+    function findOrAddChild(draft, settings, parent, find, add) {
         return parent.children.find(find) || locate(draft.scene, applyAction(draft, settings, { ...add, action: "add-child", key: parent.key })).node;
     }
 
-    // Affine inverse; MVR matrices may scale, so the general 3×3 inverse, not a transpose.
     function invert(matrix) {
         const [u, v, w] = [0, 3, 6].map((start) => matrix.slice(start, start + 3));
         const rows = [cross(v, w), cross(w, u), cross(u, v)];
@@ -477,7 +460,6 @@
         return [...[0, 1, 2].flatMap((column) => rows.map((row) => row[column] / det)), ...rows.map((row) => -dot(row, matrix.slice(9)) / det)];
     }
 
-    // The fixture keeps hanging where it is: its Matrix becomes relative to the new Layer.
     function moveToLayer(draft, settings, node, layer) {
         const children = childOf(layer, "ChildList") || insertChild(layer, "Layer", element("ChildList"), settings);
         const { parent } = locate(draft.scene, node.key);
@@ -503,11 +485,10 @@
         },
         "set-class"(draft, settings, action, { node }) {
             if (!action.name) return applyAction(draft, settings, { action: "set-child-text", key: node.key, tag: "Classing", value: null });
-            const aux = ensure(draft, settings, childOf(draft.scene, "Scene"), (child) => child.tag === "AUXData", { tag: "AUXData" });
-            const found = ensure(draft, settings, aux, (child) => child.tag === "Class" && child.attributes.name === action.name, { tag: "Class" });
+            const aux = findOrAddChild(draft, settings, childOf(draft.scene, "Scene"), (child) => child.tag === "AUXData", { tag: "AUXData" });
+            const found = findOrAddChild(draft, settings, aux, (child) => child.tag === "Class" && child.attributes.name === action.name, { tag: "Class" });
             found.attributes.name = action.name;
             applyAction(draft, settings, { action: "set-child-text", key: node.key, tag: "Classing", value: found.attributes.uuid });
-            // A group's role is its Layer, so a new member joins the Layer the group already sits in.
             const member = placedObjects(draft, settings).find((entry) => entry.node !== node && entry.node.tag === "Fixture" && classOf(entry.node) === found.attributes.uuid.toUpperCase());
             if (member) moveToLayer(draft, settings, node, member.layerNode);
         },
@@ -522,7 +503,6 @@
                 if (entry.node.tag === "Fixture" && classOf(entry.node) === group) moveToLayer(draft, settings, entry.node, layer);
             }
         },
-        // A new FocusPoint sits beside its fixture; the position is in scene mm either way.
         "set-focus"(draft, settings, action, { node }) {
             const position = action.position.map(Number);
             if (position.length !== 3 || !position.every(Number.isFinite)) throw new Error("The focus point needs X, Y and Z in mm.");
@@ -542,9 +522,9 @@
             const [minimum, maximum] = [action.minimum, action.maximum].map(Number);
             if (!(minimum >= 0 && minimum <= maximum && maximum <= 1)) throw new Error("Limits need 0 ≤ min ≤ max ≤ 1.");
             const provider = settings.schema.autolux_provider;
-            const userData = ensure(draft, settings, draft.scene, (child) => child.tag === "UserData", { tag: "UserData" });
-            const data = ensure(draft, settings, userData, (child) => child.tag === "Data" && child.attributes.provider === provider, { tag: "Data", provider });
-            const movement = movementFor(draft, (node.attributes.uuid || "").toUpperCase(), action.axis) || ensure(draft, settings, data, () => false, { tag: "Movement" });
+            const userData = findOrAddChild(draft, settings, draft.scene, (child) => child.tag === "UserData", { tag: "UserData" });
+            const data = findOrAddChild(draft, settings, userData, (child) => child.tag === "Data" && child.attributes.provider === provider, { tag: "Data", provider });
+            const movement = movementFor(draft, (node.attributes.uuid || "").toUpperCase(), action.axis) || findOrAddChild(draft, settings, data, () => false, { tag: "Movement" });
             Object.assign(movement.attributes, { fixture: node.attributes.uuid, axis: action.axis, minimum: formatNumber(minimum), maximum: formatNumber(maximum) });
         },
         move(draft, settings, action) {
@@ -579,7 +559,6 @@
             const value = formatMatrix(action.standing ? flipped(matrix) : matrix);
             return applyAction(draft, settings, { action: "set-child-text", key: action.key, tag: "Matrix", value });
         },
-        // The pane's patch number is the MVR FixtureID; FixtureIDNumeric follows it.
         "set-patch-number"(draft, settings, action, { node }) {
             for (const tag of ["FixtureID", "FixtureIDNumeric"]) applyAction(draft, settings, { action: "set-child-text", key: node.key, tag, value: action.value });
         },
@@ -637,7 +616,6 @@
     const bytes = (text) => new TextEncoder().encode(text).length;
     const modesOf = (tree) => (tree ? [...walk(tree)].filter(([entry]) => entry.tag === "DMXMode").map(([entry]) => entry.attributes.Name) : []);
 
-    // The existing occupancy, with this fixture's patch edited, names whatever it would overlap.
     function overlaps(rows, row, settings, changes) {
         const edited = { ...row, ...changes };
         const { occupied } = occupancy(rows.map((entry) => (entry === row ? edited : entry)), settings, row.universe);
@@ -646,8 +624,6 @@
         return owners.size ? `Overlaps ${[...owners].map((index) => rows[index].name).join(", ")}.` : null;
     }
 
-    // One patch-form field: the draft action its value maps to, and instant feedback. An error
-    // blocks the edit; a warning only informs.
     function patchEdit(draft, settings, key, field, value) {
         const node = locate(draft.scene, key)?.node;
         const rows = fixtureRows(draft, settings);
@@ -664,7 +640,6 @@
             case "name": {
                 const twin = others.some((entry) => entry.attributes.name === value);
                 const error = !value.trim() ? "A name is required." : bytes(value) > NAME_BYTES ? `Names are at most ${NAME_BYTES} bytes.` : twin ? `Another fixture is named ${value}.` : null;
-                // The name is a label: groups, positions and a running test follow the uuid.
                 return { error, action: { action: "set-attribute", doc: "scene", key, name: "name", value } };
             }
             case "FixtureID": {
@@ -713,7 +688,6 @@
                 return { error: null, action: child(field, value ? "true" : null) };
             case "Pan":
             case "Tilt": {
-                // Degrees within the GDTF's physical range, stored as the fraction of it Starfire maps.
                 const [from, to] = physicalRange(gdtfTree(draft, settings, row.spec), row.mode, field) || [0, 1];
                 const degrees = value.map((text) => (text.trim() === "" ? NaN : Math.min(Math.max(Number(text), Math.min(from, to)), Math.max(from, to))));
                 const error = !degrees.every(Number.isFinite) ? "Enter both limits." : degrees[0] > degrees[1] ? "Min is above max." : null;
@@ -731,9 +705,6 @@
         if (note) note.textContent = text;
     }
 
-    // A refused test (409: not in the running rig, paused, blackout) is off; an unanswered one may
-    // be lit, so it stays lit for the clear. A late reply to an older test changes nothing.
-    // A refused re-send for an edit leaves `previous`, the test before it, lit and refreshed.
     function dispatchTest(command, previous) {
         window.autoluxControl?.dispatch(command).then((reply) => {
             if (!reply?.error || command !== testCommand) return;
@@ -751,21 +722,18 @@
         refreshTimer = poseTimer = null;
     };
 
-    // The pose a whole-fixture test carries: the unsaved patch's, so edits show before a restart.
     function testPose(target) {
         const row = target?.fixture && rig && fixtureRows(rig.draft, rig.settings).find((entry) => entry.fixture_uuid === target.fixture);
         return row ? draftPose(rig.draft, rig.settings, row) : undefined;
     }
 
-    // motion is "sweep" or "aim": Starfire moves a mover's head through the show's logical pan.
     function highlight(target, colour, motion, previous) {
         const pose = testPose(target);
         const command = (testCommand = target ? { action: "highlight", target, colour, ...(motion && { [motion]: true }), ...(pose && { pose }) } : { action: "highlight", target: null });
         clearTimeout(poseTimer);
         testRefusal = "";
         if (!target) stopRefresh();
-        // Starfire's 60 s dead-man only catches a vanished page: one tick, started at the first
-        // test and never reset by an edit or swatch, re-sends whatever test is lit now.
+        // One tick for Starfire's 60 s dead-man, never reset by an edit; it re-sends whatever is lit.
         else if (!lit) {
             lit = true;
             refreshTimer = setInterval(() => dispatchTest(testCommand), TEST_REFRESH_MS);
@@ -781,7 +749,6 @@
 
     const setApplyLabel = (children) => window.dash_clientside.set_props("fixture-apply", { children });
 
-    // A restart darkens the room, so one stray click mid-party only arms Restart; the second within 5 s restarts.
     function applyClick() {
         const armed = applyTimer !== null;
         clearTimeout(applyTimer);
@@ -796,7 +763,6 @@
         window.autoluxControl?.dispatch(command, "fixture-show-rig").then((reply) => {
             if (reply?.error) return;
             restartingFrom = from;
-            // An engine that never takes the restart must not hold Restart disabled for good.
             clearTimeout(restartTimer);
             restartTimer = setTimeout(() => (restartingFrom = null), RESTART_HOLD_MS);
             window.dash_clientside.set_props("fixture-show-rig", { children: RESTARTING });
@@ -804,12 +770,9 @@
         return command;
     }
 
-    // A new fixture (or a new uuid) is not in the rig the show runs until a restart, and Starfire
-    // answers an unknown target with an error that stops the show.
-    const running = (target) => (show?.rig?.fixtures || []).some((fixture) => fixture.fixture_uuid === target.fixture || fixture.cells.includes(target.cell));
+    // Starfire stops the show on a target outside the rig it runs.
+    const inRunningRig = (target) => (show?.rig?.fixtures || []).some((fixture) => fixture.fixture_uuid === target.fixture || fixture.cells.includes(target.cell));
 
-    // Test toggles the selection (or its picked cell) in white, a swatch lights or recolours it,
-    // Sweep and Aim toggle a mover's motion (a swatch keeps it).
     function testControl(spec) {
         if (!rig?.selection || testBlocked(show)) return null;
         if (spec === "test" && lit) return highlight(null);
@@ -819,21 +782,17 @@
         if (!row) return null;
         if (MOTIONS.includes(spec)) {
             const target = { fixture: row.fixture_uuid };
-            return running(target) ? highlight(target, (lit && testCommand.colour) || "white", litMotion() === spec ? undefined : spec) : null;
+            return inRunningRig(target) ? highlight(target, (lit && testCommand.colour) || "white", litMotion() === spec ? undefined : spec) : null;
         }
         if (spec in rig.settings.testColours) {
             const motion = litMotion();
             const target = selectedCell && !motion ? { cell: selectedCell } : { fixture: row.fixture_uuid };
-            return running(target) ? highlight(target, spec, motion) : null;
+            return inRunningRig(target) ? highlight(target, spec, motion) : null;
         }
     }
 
     const component = (type, props) => ({ namespace: "dash_html_components", type, props });
 
-    // The whole track in rows under the scrubber, from columns the server computes: bank names
-    // (a drop marked), each section's two strongest colours as stripes with faults in red, each
-    // group's lowest-to-highest cell level against the headroom line, white (kept for hits) and
-    // the fastest strobe against the cap, with a line at every phrase.
     function drawOverview(overview, frameCount) {
         const strip = document.getElementById("preview-overview");
         if (!strip) return;
@@ -841,7 +800,6 @@
         const slice = frameCount / columns;
         const row = (label, title, width, body, kind = "") =>
             `<div title="${escapeXml(title)}">${escapeXml(label)}</div><svg class="${kind}" viewBox="0 0 ${width} 1" preserveAspectRatio="none">${body}</svg>`;
-        // A level axis 0..1 drawn upward; a band never thinner than a hairline.
         const band = (low, high, index, fill) => (high > 0 ? `<rect x="${index}" y="${1 - high}" width="1.02" height="${Math.max(0.05, high - low)}" fill="${fill}"/>` : "");
         const share = (value, x, width, fill) => (value > 0 ? `<rect x="${x}" y="0" width="${width}" height="1" fill="${fill}" fill-opacity="${value}"/>` : "");
         const headroom = `<line class="preview-headroom" x1="0" x2="${columns}" y1="${1 - overview.headroom}" y2="${1 - overview.headroom}" vector-effect="non-scaling-stroke"/>`;
@@ -858,7 +816,6 @@
             const drop = name === "drop";
             return `<span class="${drop ? "drop" : ""}" style="${span(start, end)}">${drop ? "▼ " : ""}${escapeXml(name)}</span>`;
         });
-        // Each sounding overlay, coloured by its bank; a one-frame hit still gets a mark.
         const overlays = overview.overlays.map(
             ({ name, start, end }) =>
                 `<rect class="preview-overlay" x="${start}" y="0" width="${Math.max(end - start, frameCount / 400)}" height="1" fill="${OVERLAY_COLOURS[name.split("/")[0]] || "#8293a6"}"><title>${escapeXml(name)}</title></rect>`
@@ -884,8 +841,6 @@
         if (recording) ds.set_props("preview-frame", { value: Math.max(0, Math.min(recording.frames.length - 1, frame)) });
     }
 
-    // The frame where the beat (or bar) after `shown` starts, or with step -1 the one where the
-    // current beat starts, or the previous one's when already at a start.
     function beatStep(shown, step, perBar) {
         const { frames } = recording;
         const unit = (index) => Math.floor(frames[index].beat / perBar);
@@ -912,8 +867,6 @@
         seekPreview(Math.round(((event.clientX - left) / (box.right - left)) * (recording.frames.length - 1)));
     });
 
-    // ←/→ step a beat, with Shift a bar, and PgUp/PgDn a section. Taken in the capture phase,
-    // before the focused slider would step a single frame.
     document.addEventListener(
         "keydown",
         (event) => {
@@ -939,7 +892,6 @@
             return entry ? `${entry.modes[entry.default_mode].channels} channels` : "";
         },
 
-        // The frames the server holds for this load; frame 0 shows once they are parsed.
         async loadPreview(source) {
             let header, frames;
             try {
@@ -975,25 +927,21 @@
             const shown = Math.max(0, Math.min(index || 0, recording.frames.length - 1));
             const frame = recording.frames[shown];
             Object.assign(recording, { shown, cells: previewCells(recording.header, frame) });
-            // A redraw mid-gesture would drop the pointer's capture; the next frame catches up.
+            // A redraw mid-gesture would drop the pointer's capture.
             if (rig && !planDrag && !planNav) showPlan(planView);
             const cursor = document.querySelector?.("#preview-overview .preview-cursor");
             if (cursor) cursor.style.left = `calc(${OVERVIEW_TRACK_LEFT} + ${shown / Math.max(1, recording.frames.length - 1)} * (100% - ${OVERVIEW_TRACK_LEFT}))`;
             const perBar = recording.header.beats_per_bar;
             const whole = Math.floor(frame.beat);
             const inBar = perBar ? ((whole % perBar) + perBar) % perBar : 0;
-            // The frame a beat starts in flashes: above 150 bpm a quarter beat is shorter than a
-            // preview frame, so a phase window would skip beats. A bar's first beat is brighter.
-            const struck = shown === 0 || Math.floor(recording.frames[shown - 1].beat) !== whole;
-            const flash = !struck ? "preview-beat" : perBar && inBar === 0 ? "preview-beat on bar" : "preview-beat on";
+            const beatStarts = shown === 0 || Math.floor(recording.frames[shown - 1].beat) !== whole;
+            const flash = !beatStarts ? "preview-beat" : perBar && inBar === 0 ? "preview-beat on bar" : "preview-beat on";
             const where = perBar ? `bar ${Math.floor(whole / perBar) + 1}.${inBar + 1}` : `beat ${whole + 1}`;
             const base = [frame.bank, frame.autoloop].filter(Boolean).join("/") || "idle";
             const layers = [frame.intent, frame.overlays?.length ? `${base} + ${frame.overlays.join(", ")}` : base].filter(Boolean).join(" · ");
             return [`${previewClock(frame.t)} · ${where} · ${layers}${frame.fault ? " · dark from a script fault" : ""}`, flash];
         },
 
-        // Play shows the frame due by the time since Play, so playback runs at real time however
-        // late the clock ticks; moving the scrubber while playing plays on from there.
         stepPreview(_clicks, _ticks, value, max, paused) {
             const now = performance.now();
             if (ds.callback_context.triggered_id === "preview-play") {
@@ -1017,7 +965,7 @@
         },
 
         renderPatch(draft, universe, selection, busy, settings) {
-            finish();
+            endMapDrag();
             const rows = fixtureRows(draft, settings);
             const { occupied, errors } = occupancy(rows, settings, universe);
             const blocks = [];
@@ -1062,15 +1010,11 @@
 
         syncTest(state, tab, saved) {
             if (tab !== "config") clearTest();
-            // The show dropped the test unasked (standby, sound stop, restart): stop holding it.
             else if (lit && show?.highlight && state && !state.highlight) stopRefresh();
-            // The control state carries the rig until this page holds its revision (the gate asks
-            // with ds.fixture_rig_revision); keep the last one between.
+            // The state carries the rig until ds.fixture_rig_revision acknowledges it; keep the last one between.
             show = state && !("rig" in state) ? { ...state, rig: show?.rig } : state;
             if (state && "rig" in state) ds.fixture_rig_revision = state.rig_revision;
             paintTest();
-            // No show reporting a rig means nothing to restart. A restart holds until the next
-            // session reports, which may run the same revision: a restart without a Save.
             const loaded = state?.rig_revision ?? null;
             if (state?.session && state.session !== restartingFrom) restartingFrom = null;
             const stale = loaded !== null && loaded !== saved;
@@ -1081,16 +1025,13 @@
             const rows = fixtureRows(draft, settings);
             const path = selection ? pathTo(draft.scene, selection) : null;
             if (rig?.selection && rig.selection !== selection) {
-                // A refusal is about the fixture it was for, so it goes with that selection.
                 selectedCell = null;
                 testRefusal = "";
                 const next = lit && fixtureRows(draft, settings).find((row) => row.key === selection);
-                // The lit test follows the selection, so the old fixture is never kept alive.
-                if (!next || !running({ fixture: next.fixture_uuid })) clearTest();
+                if (!next || !inRunningRig({ fixture: next.fixture_uuid })) clearTest();
                 else if (testCommand.target.fixture !== next.fixture_uuid) highlight({ fixture: next.fixture_uuid }, testCommand.colour);
             }
             rig = { draft, settings, selection };
-            // An edit to the lit fixture's placement, limits or focus re-sends its test once settled.
             if (lit && JSON.stringify(testPose(testCommand.target)) !== JSON.stringify(testCommand.pose)) {
                 clearTimeout(poseTimer);
                 poseTimer = setTimeout(() => highlight(testCommand.target, testCommand.colour, litMotion(), testCommand), POSE_SETTLE_MS);
@@ -1199,7 +1140,6 @@
         return node;
     }
 
-
     function keepingState(container, sameNode, draw) {
         if (!sameNode) return draw();
         const open = [...container.querySelectorAll("details")].map((details) => details.open);
@@ -1209,8 +1149,6 @@
         if (focused >= 0) container.querySelectorAll("input, select")[focused]?.focus({ preventScroll: true });
     }
 
-    // Plan view in standard plot orientation: MVR/GDTF -Y (downstage, toward the audience) at
-    // the bottom, so the SVG y is -Y.
     const universes = (rows) => [...new Set(rows.map((row) => row.universe).filter((value) => value !== null))].sort((a, b) => a - b);
 
     function planMarks(draft, settings) {
@@ -1234,34 +1172,24 @@
                 x: matrix[9],
                 y: matrix[10],
                 z: matrix[11],
-                // The local Y axis in plan, i.e. the yaw; a fixture aimed straight up or down has none.
                 facing: length > 1e-6 ? [matrix[3] / length, matrix[4] / length] : null
             });
         }
         return { fixtures, others };
     }
 
-
-    // Past the configured colours, golden-angle hues keep dozens of groups apart.
     function groupColour(index, colors) {
         return index < colors.length ? colors[index] : `hsl(${Math.round((index * 137.508) % 360)},55%,58%)`;
     }
 
     const escapeXml = (text) => String(text).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 
-    // The largest 1, 2 or 5 × 10^k metres within a fifth of the plan; the tolerance absorbs
-    // float products such as 5 × 0.01 > 0.05.
     function scaleMetres(spanMm) {
         const target = spanMm / 5000;
         const power = 10 ** Math.floor(Math.log10(target));
         return [5, 2, 1].map((unit) => unit * power).find((value) => value <= target * (1 + 1e-9));
     }
 
-    // Draws the nine-area stage grid (equal thirds of the fixtures' bounding box) and its area
-    // names; it only draws lines and labels and never assigns areas, which come from
-    // stage_areas in cli/starfire_assets.py. An axis without extent has no cuts and only its
-    // centre names. A name sits in its cell's bottom-left corner, off the centre lines that
-    // fixtures tend to share.
     const AREA_ROWS = ["up", "centre", "down"];
     const AREA_COLUMNS = ["left", "centre", "right"];
     const areaName = (row, column) => (row === "centre" && column === "centre" ? "centre" : `${row} ${column}`);
@@ -1271,11 +1199,9 @@
         const ys = fixtures.map((mark) => -mark.y);
         const [x0, x1, y0, y1] = [Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)];
         const cuts = (low, high) => (high > low ? [1, 2].map((k) => low + ((high - low) * k) / 3) : []);
-        // Each third's start, end and index.
         const thirds = (low, high) => (high > low ? [0, 1, 2].map((k) => [low + ((high - low) * k) / 3, low + ((high - low) * (k + 1)) / 3, k]) : [[low, low, 1]]);
         const inset = r * 0.6;
         const line = (ax, ay, bx, by) => `<line x1="${n(ax)}" y1="${n(ay)}" x2="${n(bx)}" y2="${n(by)}"/>`;
-        // SVG y grows downstage, so the top row is upstage.
         const names = thirds(y0, y1).flatMap(([, bottom, row]) =>
             thirds(x0, x1).map(([x, , column]) => `<text class="plan-area-name" x="${n(x + inset)}" y="${n(bottom - inset)}">${areaName(AREA_ROWS[row], AREA_COLUMNS[column])}</text>`)
         );
@@ -1290,16 +1216,12 @@
         ].join("");
     }
 
-    // The view scaled by `scale` (zoom clamped to PLAN_ZOOM of the fit) that shows SVG point
-    // `anchor` where `box` shows `at`: wheel zoom, pan and pinch are all this one move.
     function zoomPlan(box, fit, anchor, at, scale) {
         const w = Math.min(fit.w / PLAN_ZOOM[0], Math.max(fit.w / PLAN_ZOOM[1], box.w * scale));
         const s = w / box.w;
         return { x: anchor[0] - (at[0] - box.x) * s, y: anchor[1] - (at[1] - box.y) * s, w, h: box.h * s };
     }
 
-    // A recording frame's cells by fixture uuid, each where the rendered rig hangs it (scene mm)
-    // with its level, colour, strobe, beam and gobo; a cell the rig could not place is left out.
     function previewCells(header, frame) {
         const cells = {};
         header.cells.forEach((cell, index) => {
@@ -1313,14 +1235,11 @@
 
     const cssRgb = (rgb, scale = 1) => `rgb(${rgb.map((value) => Math.round(255 * value * scale)).join(",")})`;
 
-    // Where a beam stops: PREVIEW_BEAM_MM along it, or on the floor (Z = 0) if it lands first.
     function beamEnd(at, direction) {
         const reach = direction[2] < 0 ? Math.min(PREVIEW_BEAM_MM, Math.max(0, at[2]) / -direction[2]) : PREVIEW_BEAM_MM;
         return at.map((value, axis) => value + direction[axis] * reach);
     }
 
-    // The X and Z extent of every placed cell and beam end over the whole recording, floor
-    // included, so the elevation keeps one frame while beams move.
     function previewReach(header, frames) {
         const placed = header.cells.map((cell) => (cell.x === null ? null : [cell.x, cell.y, cell.z].map((metres) => metres * 1000)));
         const reach = [Infinity, -Infinity, 0, 0];
@@ -1337,10 +1256,6 @@
         return [cells.length > 1 ? `${name} cell ${index + 1}` : name, `${Math.round(i * 100)}%`, strobe > 0 && `strobe ${strobe} Hz`, gobo && `gobo ${gobo}`].filter(Boolean).join(" · ");
     };
 
-    // One cell in a view drawing scene axes `axes` ([0, 1] plan, [0, 2] elevation), SVG y up:
-    // its beam (dashed through a gobo other than Open), its rgb·i disc outlined in its group's
-    // colour, as rgb·i alone reads black at both 0 and 10%, and a dashed ring whose weight
-    // follows the strobe rate.
     function cellGlyph(cell, axes, r, n, outline, title, strobeMax) {
         const [x, y] = [n(cell.at[axes[0]]), n(-cell.at[axes[1]])];
         let beam = "";
@@ -1358,8 +1273,6 @@
         return { beam, disc: disc + strobe };
     }
 
-    // A fixture's cells drawn at their own places, beams under discs; several cells share the
-    // fixture's room, so they draw smaller.
     function cellsGlyph(cells, name, axes, r, n, outline, strobeMax) {
         const glyphs = cells.map((cell, index) => cellGlyph(cell, axes, cells.length > 1 ? r * 0.6 : r, n, outline, cellTitle(name, cells, index), strobeMax));
         return glyphs.map((glyph) => glyph.beam).join("") + glyphs.map((glyph) => glyph.disc).join("");
@@ -1370,8 +1283,6 @@
         return Object.fromEntries(groups.map((group, index) => [group, group ? groupColour(index, settings.colors) : "#7f8ea3"]));
     }
 
-    // The front elevation, seen from the audience: X across, Z up, the floor at Z = 0, framed on
-    // the recording's reach. Upstage cells draw first, so nearer ones stand in front.
     function elevationSvg(fixtures, settings, preview) {
         const [x0, x1, z0, z1] = preview.reach;
         const span = Math.max(PLAN_MIN_SPAN_MM, x1 - x0, z1 - z0);
@@ -1399,19 +1310,15 @@
         const ys = all.length ? all.map((mark) => -mark.y) : [0];
         const [minX, maxX, minY, maxY] = [Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)];
         const span = Math.max(PLAN_MIN_SPAN_MM, maxX - minX, maxY - minY);
-        // Marks shrink as the plan fills; names show while they fit, else on hover or tap.
         const fitR = span * 0.018 * Math.min(1, Math.sqrt(PLAN_LABEL_LIMIT / Math.max(1, fixtures.length)));
         const labelled = fixtures.length <= PLAN_LABEL_LIMIT;
         const fitFont = Math.round(Math.max(fitR * 1.3, span * 0.014));
-        // The longest label sets how much edge room the plan needs, so none is ever clipped.
         const maxLabel = labelled ? Math.max(0, ...fixtures.map((mark) => mark.name.length * fitFont * 0.58)) : 0;
         const fitPad = span * 0.12;
         const padX = Math.max(fitPad, fitR * 1.4 + maxLabel + fitPad * 0.3);
         const padTop = Math.max(fitPad, fitFont * 1.4);
         const fit = { x: minX - padX, y: minY - padTop, w: maxX - minX + 2 * padX, h: maxY - minY + padTop + 2 * fitPad };
         const box = view || fit;
-        // Sizes divide by the zoom so marks and text keep their fitted on-screen size, and
-        // coordinates gain decimals as the zoom makes a millimetre visible.
         const zoom = fit.w / box.w;
         const q = 10 ** Math.max(0, Math.ceil(Math.log10(zoom)));
         const n = (value) => Math.round(value * q) / q;
@@ -1421,15 +1328,14 @@
         const groups = [...new Set(fixtures.map((mark) => mark.group))].sort();
         const colour = groupColours(fixtures, settings);
         const counts = fixtures.reduce((total, mark) => ({ ...total, [mark.group]: (total[mark.group] || 0) + 1 }), {});
-        const edge = n(maxY + r * 2);
+        const stageEdge = n(maxY + r * 2);
         const metres = scaleMetres(span / zoom);
         const [barX, barY] = [n(box.x + box.w - pad * 0.3 - metres * 1000), n(box.y + box.h - pad * 0.4)];
         const parts = [
             `<svg class="plan" xmlns="http://www.w3.org/2000/svg" viewBox="${rect(box)}" data-fit="${rect(fit, Math.round)}" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Rig plan, audience at the bottom" font-size="${font}" style="--r:${n(r)}">`,
             areaGrid(fixtures, n, r, font),
-            // MVR has no stage edge; the plan draws it at the most downstage object.
-            `<line class="plan-stage-edge" x1="${n(box.x)}" y1="${edge}" x2="${n(box.x + box.w)}" y2="${edge}" stroke-width="${n(r * 0.3)}"/>`,
-            `<text x="${n(box.x + pad * 0.2)}" y="${n(edge + font * 1.4)}">audience</text>`,
+            `<line class="plan-stage-edge" x1="${n(box.x)}" y1="${stageEdge}" x2="${n(box.x + box.w)}" y2="${stageEdge}" stroke-width="${n(r * 0.3)}"/>`,
+            `<text x="${n(box.x + pad * 0.2)}" y="${n(stageEdge + font * 1.4)}">audience</text>`,
             `<g class="plan-scale"><line x1="${barX}" y1="${barY}" x2="${n(barX + metres * 1000)}" y2="${barY}" stroke-width="${n(r * 0.3)}"/><text x="${barX}" y="${n(barY - font * 0.5)}">${metres} m</text></g>`,
             `<g stroke-width="${n(r * 0.25)}">`
         ];
@@ -1440,14 +1346,11 @@
         for (const mark of fixtures) {
             const cells = preview?.cells[mark.uuid];
             const [x, y, fill] = [n(mark.x), n(-mark.y), colour[mark.group]];
-            // A recording's beams show where each head points; the yaw arrow would only clutter them.
             const arrow = mark.facing && !preview ? `<line x1="${x}" y1="${y}" x2="${n(x + mark.facing[0] * r * 2.4)}" y2="${n(y - mark.facing[1] * r * 2.4)}" stroke="${fill}"/>` : "";
             const body = cells ? cellsGlyph(cells, mark.name, [0, 1], r, n, fill, preview.strobeMax) : `<circle cx="${x}" cy="${y}" r="${n(r)}" fill="${fill}"/>`;
-            // Role by glyph: every fixture is filled; an accent one also wears a dotted ring.
             const ring = mark.accent
                 ? `<circle cx="${x}" cy="${y}" r="${n(r * 1.4)}" fill="none" class="ring" style="--ring:${fill}" stroke-width="${n(r * 0.3)}" stroke-dasharray="${n(r * 0.5)} ${n(r * 0.4)}"/>`
                 : "";
-            // Near the right edge, a label would overflow it; anchor the text to the left of the mark instead.
             const flip = labelled && x + r * 1.4 + mark.name.length * charWidth > box.x + box.w;
             const label = labelled
                 ? `<text class="plan-name" x="${n(flip ? x - r * 1.4 : x + r * 1.4)}" y="${n(y + r * 0.4)}"${flip ? ' text-anchor="end"' : ""} stroke-width="${n(font * 0.3)}">${escapeXml(mark.name)}</text>`
@@ -1459,14 +1362,12 @@
         const dot = (cls) => `<circle cx="7" cy="7" r="4.5" class="${cls}"/>`;
         const legend = [
             ...groups.map((group) => key(`<circle cx="7" cy="7" r="4.5" fill="${colour[group]}"/>`, `${escapeXml(group || "no group")} <b>${counts[group]}</b>`)),
-            // Accent wears the same dotted ring as its plan mark; loop is the plain dot.
             ...settings.roles.map((role) =>
                 key(role === settings.accentRole ? `${dot("plan-role")}<circle cx="7" cy="7" r="6" class="plan-role ring"/>` : dot("plan-role"), escapeXml(role))
             )
         ];
         return `<div class="plan-legend">${legend.join("")}</div>` + parts.join("");
     }
-
 
     function redraw(container, draw) {
         const scene = JSON.stringify(rig.draft.scene);
@@ -1475,7 +1376,6 @@
         for (const node of container.querySelectorAll("[data-node-key]")) node.classList.toggle("selected", node.dataset.nodeKey === rig.selection);
     }
 
-    // With a recording loaded, the plan wears the frame shown and the elevation stands beside it.
     function planWithPreview(marks, settings, view) {
         const preview = recording?.cells ? recording : null;
         return planSvg(marks, settings, view, preview) + (preview ? elevationSvg(marks.fixtures, settings, preview) : "");
@@ -1497,19 +1397,15 @@
         const placed = placedObjects(draft, settings).find((entry) => entry.node.key === key && entry.node.tag === "Fixture");
         const original = placed && textOf(placed.node, "Matrix");
         const local = placed && parseMatrix(original);
-        // A parent rolled or pitched on edge has no plan direction to move along.
         if (!local || Math.abs(placed.parent[0] * placed.parent[4] - placed.parent[1] * placed.parent[3]) < GIMBAL_TOLERANCE) return null;
         return { key, original, local, parent: placed.parent, inverse, clientX, clientY, view, marks: planMarks(draft, settings), settings, moved: false };
     }
 
-    // Screen → plan SVG through the inverse screen CTM; the plan's SVG y is MVR −Y.
+    // The plan's SVG y is MVR −Y, so downstage is at the bottom.
     const toSvg = (inverse, x, y) => [inverse.a * x + inverse.c * y + inverse.e, inverse.b * x + inverse.d * y + inverse.f];
     const toWorld = (inverse, x, y) => toSvg(inverse, x, y).map((value, axis) => (axis ? -value : value));
     const svgBox = (svg) => ({ x: svg.viewBox.baseVal.x, y: svg.viewBox.baseVal.y, w: svg.viewBox.baseVal.width, h: svg.viewBox.baseVal.height });
 
-    // The pointer's world move solved in the parent's X/Y axes (exact under any tilt), whole mm;
-    // Z and the fixture's own rotation stay. The preview keeps the plan's
-    // frame so the view does not rescale under the pointer.
     function planMove(drag, clientX, clientY) {
         const [x0, y0] = toWorld(drag.inverse, drag.clientX, drag.clientY);
         const [x1, y1] = toWorld(drag.inverse, clientX, clientY);
@@ -1528,7 +1424,6 @@
         planDrag = null;
         if (!current?.moved) return current;
         cancelAnimationFrame(current.frame);
-        // The draft may have changed under the drag preview, so redraw from it, not from a copy.
         drawn.delete(current.container);
         redraw(current.container, drawPlan);
         suppressedClick = current.container;
@@ -1665,20 +1560,16 @@
         if (!ids.includes(selectedCell)) selectedCell = null;
         const cells = document.querySelector("#fixture-info .cfg-cells");
         const listed = JSON.stringify([row?.fixture_uuid, row?.name, ids]);
-        // Offline, the test note already says so; the cells stay empty.
         if (cells && cells.dataset.listed !== listed) {
             cells.dataset.listed = listed;
             cells.replaceChildren(...ids.map((cell) => h("button", { type: "button", "data-cfg-cell": cell, title: `Pick ${cell.replace(row.fixture_uuid, row.name)} to test`, text: cell.replace(row.fixture_uuid, row.name) })));
         }
         cells?.querySelectorAll("[data-cfg-cell]").forEach((cell) => cell.classList.toggle("selected", cell.dataset.cfgCell === selectedCell));
         const blocked = testBlocked(show);
-        const offline = row && !running({ fixture: row.fixture_uuid }) ? `${row.name} · not in the running show` : null;
-        // The page's own test, lit at the click: waiting for the show's echo left Test dark long
-        // enough that the operator's second click cleared it.
+        const offline = row && !inRunningRig({ fixture: row.fixture_uuid }) ? `${row.name} · not in the running show` : null;
         const active = lit ? testCommand : null;
         const here = Boolean(active) && (active.target.fixture === row?.fixture_uuid || ids.includes(active.target.cell));
         for (const button of strip.querySelectorAll("[data-cfg-test]")) {
-            // A lit Test still clears what the show does run.
             button.disabled = Boolean(blocked || (offline && !(lit && button.dataset.cfgTest === "test")));
             const swatch = button.classList.contains("cfg-swatch") && active?.colour === button.dataset.cfgTest;
             button.classList.toggle("active", here && (button.classList.contains("cfg-test-main") || swatch || active[button.dataset.cfgTest] === true));
@@ -1686,7 +1577,6 @@
         testNote(blocked || testRefusal || offline || "");
     }
 
-    // The console form: the test row, then one section per concern; each field maps to one draft action.
     function patchForm(draft, settings, node) {
         const row = fixtureRows(draft, settings).find((entry) => entry.key === node.key);
         if (!row) return [];
@@ -1697,14 +1587,12 @@
             control.value = value;
             return control;
         };
-        // Named inputs, labelled when `labels` is given.
         const split = (names, values, labels, attributes = {}) =>
             h(
                 "div",
                 { className: `cfg-split cfg-${values.length}`, ...attributes },
                 values.map((value, index) => h("label", {}, labels && h("span", { text: labels[index] }), h("input", { type: "number", step: "any", value, name: names[index], "aria-label": labels?.[index] ?? names[index] })))
             );
-        // A label only wraps one control; groups of inputs or buttons sit in a plain div.
         const field = (label, control, wide, tag = "label") => h(tag, { className: wide ? "cfg-field wide" : "cfg-field" }, h("span", {}, label), control, h("small", { className: "cfg-note" }));
         const section = (heading, value, ...fields) => h("section", { className: "cfg-section" }, h("h4", {}, heading, value ? h("small", { text: value }) : null), fields.flat());
         const check = (tag, label) => h("label", { className: "cfg-check" }, h("input", { type: "checkbox", "data-cfg": tag, checked: textOf(node, tag) === "true" }), label);
@@ -1718,7 +1606,6 @@
         const axes = ["Pan", "Tilt"].map((axis) => [axis, physicalRange(tree, row.mode, axis)]).filter(([, range]) => range);
         const mover = axes.some(([axis]) => axis === "Pan");
         const focus = focusPoint(draft, settings, node)?.matrix.slice(9) ?? stageCentre(draft, settings);
-        // Sorted, as a GDTF range may run from its high end.
         const limits = (axis, [from, to]) =>
             ["minimum", "maximum"]
                 .map((name, index) => Math.round((from + Number(movementFor(draft, uuid, axis)?.attributes[name] ?? index) * (to - from)) * 10) / 10)
@@ -1731,7 +1618,6 @@
                 "Patch",
                 span,
                 field("Profile", select("GDTFSpec", specs.map((spec) => [spec, profile(spec)]), row.spec), true),
-                // Mode needs room for long GDTF mode names; the patch number is short.
                 h(
                     "div",
                     { className: "cfg-field-pair" },
@@ -1758,7 +1644,6 @@
                           )
                       ]
                     : [muted("Rotation is set in Advanced.")]),
-                // Unset, the field shows Starfire's default; the MVR gains a FocusPoint on the first edit.
                 mover && field("Focus point (mm)", split(["x", "y", "z"], focus.map(formatNumber), ["X", "Y", "Z"], { "data-cfg": "focus" }), true, "div")
             ),
             section(
@@ -1775,7 +1660,6 @@
                       axes.map(([axis]) => check(`DMXInvert${axis}`, `Invert ${axis.toLowerCase()}`))
                   )
                 : null,
-            // A single cell is the fixture itself, which the Test row already covers.
             row.cells.length > 1 ? section("Cells", String(row.cells.length), h("div", { className: "cfg-cells" })) : null
         ].filter(Boolean);
     }
@@ -1863,16 +1747,16 @@
         return channel <= count ? channel : null;
     }
 
-    const clearPreview = (grid) => grid.querySelectorAll(".drop-valid, .drop-invalid").forEach((cell) => cell.classList.remove("drop-valid", "drop-invalid"));
+    const clearDropMarks = (grid) => grid.querySelectorAll(".drop-valid, .drop-invalid").forEach((cell) => cell.classList.remove("drop-valid", "drop-invalid"));
 
-    function preview(event) {
+    function previewDrop(event) {
         const { grid, fixtureName, offset, channelCount, label, cells, ranges, geometry } = drag;
         const channel = channelAt(geometry, event.clientX, event.clientY);
         label.style.left = `${event.clientX + LABEL_OFFSET_PX}px`;
         label.style.top = `${event.clientY + LABEL_OFFSET_PX}px`;
         if (channel === drag.hovered) return channel === null ? null : channel - offset;
         drag.hovered = channel;
-        clearPreview(grid);
+        clearDropMarks(grid);
         if (channel === null) {
             label.textContent = "Drop inside the universe to move";
             label.classList.add("invalid");
@@ -1889,17 +1773,16 @@
         return start;
     }
 
-    function finish() {
+    function endMapDrag() {
         if (!drag) return;
         const current = drag;
         drag = null;
         cancelAnimationFrame(current.frame);
-        clearPreview(current.grid);
+        clearDropMarks(current.grid);
         current.grid.querySelectorAll(".dragging").forEach((block) => block.classList.remove("dragging"));
         current.label?.remove();
         if (current.moved) {
             suppressedClick = current.block;
-            // Swallow only the click this pointer release generates, never a later keyboard click.
             setTimeout(() => suppressedClick === current.block && (suppressedClick = null));
         }
         if (current.grid.hasPointerCapture(current.pointerId)) current.grid.releasePointerCapture(current.pointerId);
@@ -1908,7 +1791,7 @@
     document.addEventListener("pointerdown", (event) => {
         const block = event.target.closest("#fixture-channel-map .patch-block");
         if (!block || event.button !== 0 || !event.isPrimary || block.closest('[aria-busy="true"]')) return;
-        finish();
+        endMapDrag();
         suppressedClick = null;
         const grid = block.closest(".patch-map");
         const address = Number(block.dataset.startAddress);
@@ -1946,9 +1829,6 @@
         if (planDrag) Object.assign(planDrag, { container: svg.parentElement, pointerId: event.pointerId });
     });
 
-    // Empty plan space pans under one pointer and pinch-zooms under two; a second finger joins
-    // even on a mark. Each gesture maps from the view and screen CTM it started with, so a
-    // preview frame not yet drawn never skews it.
     const planAt = (target) => target.closest?.("#mvr-plan svg.plan");
     const svgFit = (svg) => Object.fromEntries(svg.dataset.fit.split(" ").map((value, index) => ["xywh"[index], Number(value)]));
     function navCentre(points) {
@@ -2010,8 +1890,7 @@
             if (!svg || planDrag || planNav) return;
             event.preventDefault();
             const at = toSvg(svg.getScreenCTM().inverse(), event.clientX, event.clientY);
-            // A line or page delta counts as 16 px, about one wheel notch.
-            showPlan(zoomPlan(svgBox(svg), svgFit(svg), at, at, Math.exp(event.deltaY * (event.deltaMode ? 16 : 1) * 0.002)));
+            showPlan(zoomPlan(svgBox(svg), svgFit(svg), at, at, Math.exp(event.deltaY * (event.deltaMode ? LINE_DELTA_PX : 1) * 0.002)));
         },
         { passive: false }
     );
@@ -2057,15 +1936,15 @@
         drag.event = event;
         drag.frame ||= requestAnimationFrame(() => {
             drag.frame = null;
-            preview(drag.event);
+            previewDrop(drag.event);
         });
     });
 
     document.addEventListener("pointerup", (event) => {
         if (!drag || drag.pointerId !== event.pointerId) return;
         const current = drag;
-        const address = current.moved ? preview(event) : null;
-        finish();
+        const address = current.moved ? previewDrop(event) : null;
+        endMapDrag();
         if (!current.moved || address === null) return;
         event.preventDefault();
         sendAction({
@@ -2101,7 +1980,6 @@
                 return;
             }
             let key = block?.dataset.fixtureKey ?? event.target.closest("#config-panel [data-node-key]")?.dataset.nodeKey;
-            // Stacked marks take turns under repeated clicks, so a covered fixture stays reachable.
             if (key && event.target.closest("#mvr-plan")) {
                 const stack = [...new Set(document.elementsFromPoint(event.clientX, event.clientY).map((node) => node.closest("#mvr-plan [data-node-key]")?.dataset.nodeKey).filter(Boolean))];
                 key = stack[(stack.indexOf(rig?.selection) + 1) % stack.length];
@@ -2146,17 +2024,16 @@
         if (field && field.tagName !== "SELECT") fieldCheck(field, false);
     });
 
-    const cancelDrags = () => (finish(), endPlanDrag(), (planNav = null));
+    const cancelDrags = () => (endMapDrag(), endPlanDrag(), (planNav = null));
     document.addEventListener("pointercancel", cancelDrags);
     document.addEventListener("lostpointercapture", (event) => {
-        if (drag?.pointerId === event.pointerId) finish();
+        if (drag?.pointerId === event.pointerId) endMapDrag();
         // A touch's implicit capture on its first target is lost when the plan takes it over.
         if (event.target.id !== "mvr-plan") return;
         if (planDrag?.pointerId === event.pointerId) endPlanDrag();
         navLift(event.pointerId);
     });
-    // Only a page that goes away ends a test: macOS reports a covered window as hidden, which
-    // ended a test while the operator looked at another window.
+    // Not visibilitychange: macOS reports a covered window as hidden.
     window.addEventListener("pagehide", clearTest);
     document.addEventListener("keydown", (event) => {
         if (event.target.closest?.('#config-panel[aria-busy="true"]')) event.preventDefault();

@@ -1,15 +1,12 @@
-// Operator commands go straight from the browser to the show's control bridge.
 (function () {
     'use strict';
 
-    // Long enough for the show's echo of a click to land, so older polls cannot flip it back.
     const HOLD_MS = 2000;
     const config = () => window.autoluxControlConfig || {};
     const holds = {};
     const latest = {};
     const inflight = {};
-    // Nothing leaves the page before the operator's first pointer or key press: a restored
-    // value, the first poll or a component settling on load must never command the show.
+    // Dash fires callbacks on load (a restored value, the first poll); none may reach the show before the operator acts.
     let operatorActed = false;
     const operatorActs = () => {
         operatorActed = true;
@@ -19,20 +16,13 @@
             document.addEventListener(type, operatorActs, {capture: true, once: true}));
     }
 
-    // The FX chips, Intensity Auto and the levels send only what a real click pressed, read
-    // off the element before Dash's own handler queues DIRECT_AUTO_JS. Dash can run that
-    // callback with an input no click changed (the poll's set_props on the level radio,
-    // merged requests); such a run finds no press and sends nothing.
+    // Dash re-runs these callbacks with inputs no click changed (a poll's set_props, merged requests), so only a recorded press sends.
     const presses = {};
-    // A level press no run takes within this window (its callback never fired) must not be
-    // spent by a later poll's run: the poll's set_props on the level radio re-runs that
-    // callback. A chip press is taken only by a real n_clicks run, so it never expires;
-    // a stalled page that runs it late still sends it.
+    // An untaken level press expires before a poll's set_props re-run can spend it; a chip press waits for its n_clicks run.
     const PRESS_TTL_MS = 1000;
     const press = (action, value) => {
         presses[action] = {value: value, at: performance.now()};
     };
-    // One click, one command: the first callback run takes the press.
     const takePress = (action) => {
         const taken = presses[action];
         delete presses[action];
@@ -43,8 +33,6 @@
     function pressOf(target, type) {
         const level = target.closest('#control-intensity label');
         const radio = level && level.querySelector('input');
-        // Before the first settings poll the levels sit in a disabled fieldset: no callback.
-        // A level already chosen changes nothing either.
         if (radio && !radio.matches(':disabled')
                 && level.getAttribute('aria-selected') !== 'true') {
             return ['intensity', Number(radio.value)];
@@ -58,14 +46,12 @@
         }
         const follow = target.closest('#control-intensity-auto');
         if (follow) {
-            // What the operator sees lit, not the last poll, decides which way Auto flips.
             return ['intensity_auto', !follow.classList.contains('active')];
         }
         return null;
     }
     if (typeof document !== 'undefined') {
-        // Space on a button or radio and arrow keys between levels arrive as a click, but
-        // Dash's RadioItems picks the focused level on Enter's keyup with no click.
+        // Dash's RadioItems picks the focused level on Enter's keyup, with no click.
         const record = (event) => {
             const pressed = event.isTrusted && event.target instanceof Element
                 && (event.type === 'click' || event.key === 'Enter')
@@ -113,8 +99,6 @@
         return null;
     }
 
-    // The row already held on the target sends nothing, so a poll syncing the picker never
-    // re-fires it.
     function staticFxCommand(row, target, state) {
         const active = ((state && state.static) || {}).special_fx || {};
         if (!row || (active.name === row && active.group === target)) {
@@ -137,7 +121,6 @@
         staticFxClear: () => ({action: 'static', kind: 'special_fx_clear'}),
     };
 
-    // A host that drops packets silently would otherwise hang the fader's one request in flight.
     const POST_TIMEOUT_MS = 3000;
 
     function post(url, command) {
@@ -145,22 +128,18 @@
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify(command),
-            // A command sent as the page unloads (the Config test's clear on a reload) must outlive
-            // the page; without it Chrome may cancel the request and a test stays lit until
-            // Starfire's 60 s dead-man.
+            // A clear sent on unload must outlive the page, or the test stays lit until Starfire's 60 s dead-man.
             keepalive: true,
             signal: AbortSignal.timeout(POST_TIMEOUT_MS),
         });
     }
 
-    // Any non-2xx answer is a refusal (4xx) or a stalled engine (504); either way not applied.
     async function readReply(response) {
         let reply = {};
         try {
             reply = await response.json();
         } catch (error) {}
         if (!response.ok) {
-            // The status tells a refusal (409: the command cannot apply now) from a stall.
             reply = {error: (reply && reply.error) || 'the show answered ' + response.status, status: response.status};
         }
         return reply;
@@ -183,8 +162,6 @@
         }
     }
 
-    // A refused command drops only what it held: the fields of a settings hold that other
-    // clicks still hold stay held.
     function release(held) {
         Object.entries(held || {}).forEach(([key, value]) => {
             const kept = holds[key] && holds[key].value;
@@ -208,7 +185,6 @@
         return reply;
     }
 
-    // held: what the caller passed to hold() for this command, released if it fails.
     function dispatch(command, statusId, held) {
         return send(command).then(
             (reply) => report(reply, statusId, held),
@@ -216,7 +192,6 @@
         );
     }
 
-    // One request in flight per key; while it runs only the newest command waits.
     function sendLatest(key, command, statusId) {
         latest[key] = command;
         if (inflight[key]) {
@@ -234,7 +209,6 @@
     }
 
     const isDict = (value) => !!value && typeof value === 'object' && !Array.isArray(value);
-    // A dict holds only the fields it names (one setting), merged over what the poll reports.
     const merged = (base, value) => (isDict(base) && isDict(value) ? {...base, ...value} : value);
 
     function hold(values) {
@@ -246,8 +220,6 @@
         return values;
     }
 
-    // A held value wins over every poll for HOLD_MS, so an echo of an older click arriving
-    // late cannot flip the control back.
     function view(state) {
         if (!state) {
             return state;
@@ -267,11 +239,9 @@
     const FX_CHIPS = ['control-fx-auto', 'control-fx-off'];
     const FOLLOW_CHIPS = ['control-intensity-auto', 'control-intensity-set'];
     const fxClasses = (on) => [on ? 'active' : '', on ? '' : 'active'];
-    // Following the music greys the segments but keeps the chosen level lit.
     const followClasses = (on) => [on ? 'active' : '', on ? 'following' : ''];
 
-    // Both the click and the poll paint the chips through set_props, which applies at once: a
-    // poll's Output computed before a click would land after it and flip the chip back.
+    // set_props applies at once, unlike an Output: a poll computed before a click would land after it and flip the chip back.
     function paintFx(on) {
         FX_CHIPS.forEach((id, index) => window.dash_clientside.set_props(
             id, {className: on === null ? '' : fxClasses(on)[index]}));
@@ -281,7 +251,6 @@
             id, {className: followClasses(on)[index]}));
     }
 
-    // A bar elapsedSeconds after the poll that reported remaining.
     function cooldownView(total, remaining, elapsedSeconds) {
         const left = Math.max(0, remaining - elapsedSeconds);
         const ready = left <= 0;
@@ -296,10 +265,6 @@
     // Outlasts the cooldown-fire animation in control.css.
     const FLASH_MS = 650;
 
-    // Whether a group fired between two polls of it ({last, remaining, ready, total}): a new
-    // special, a ready bar going busy, or the time left jumping back up. A changed total is the
-    // operator editing the cooldown, not a fire. Polls only ever count down otherwise, so the
-    // 0.05 s slack only absorbs float noise.
     function cooldownFired(previous, polled) {
         if (!previous) {
             return false;
@@ -309,12 +274,9 @@
             || (polled.total === previous.total && polled.remaining > previous.remaining + 0.05);
     }
 
-    // Per group, so a fire is told apart from Dash handing this element another group's entry.
+    // By group, not element: Dash may reuse a bar's element for another group's entry.
     const cooldownSeen = {};
 
-    // Draws the FX Effects bars from their data attributes, filling them up between polls, and
-    // flashes a bar whose group just fired. Dash may reuse a bar's element for another entry, so
-    // a poll is spotted by its data attributes changing, not by the node.
     function tickCooldowns() {
         const now = performance.now();
         document.querySelectorAll('.cooldown-row').forEach((row) => {
@@ -335,7 +297,6 @@
             const state = cooldownSeen[data.group];
             const shown = cooldownView(polled.total, polled.remaining,
                 (now - state.polledAt) / 1000);
-            // Python renders neither, so React never overwrites them.
             row.querySelector('.cooldown-fill').style.width = shown.fill;
             row.querySelector('.cooldown-caption').textContent = shown.caption;
             row.classList.toggle('ready', shown.ready);
