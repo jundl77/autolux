@@ -118,6 +118,8 @@ function sf.palette(name)
     return palette
 end
 
+function sf.white() return active_palette.white end
+
 function sf.group(name) return { group = name } end
 function sf.fixture(name) return { fixture = name } end
 function sf.all() return "all" end
@@ -227,15 +229,16 @@ local function random_index(value)
     return value
 end
 
+local function splitmix64_finalise(x)
+    x = (x ~ (x >> 30)) * 0xBF58476D1CE4E5B9
+    x = (x ~ (x >> 27)) * 0x94D049BB133111EB
+    return x ~ (x >> 31)
+end
+
 function sf.random(ctx, i, j, k)
     local x = ctx.seed ~ (random_index(i) * 0x9E3779B97F4A7C15) ~ (random_index(j) << 21)
         ~ (random_index(k) << 42)
-    for _ = 1, 2 do
-        x = (x ~ (x >> 30)) * 0xBF58476D1CE4E5B9
-        x = (x ~ (x >> 27)) * 0x94D049BB133111EB
-        x = x ~ (x >> 31)
-    end
-    return (x >> 11) / 2.0 ^ 53
+    return (splitmix64_finalise(splitmix64_finalise(x)) >> 11) / 2.0 ^ 53
 end
 
 local UNMEASURED_FEATURE = 0.5
@@ -380,6 +383,7 @@ function sf.phaser(target, ctx, spec)
     local effects = {}
     for index, cell in ipairs(aimable_members) do
         local cycle = measure and (elapsed / measure - phase_spread * rank[cell] / ranks) % 1
+        -- A centre member takes +1, so it circles like the +X side instead of nodding in a line.
         local side = across[cell] < 0 and -1 or 1
         local spread, elevation = shape(cycle, across[cell], side, ctx, index)
         local beam = direction
@@ -393,10 +397,6 @@ function sf.phaser(target, ctx, spec)
     end
     return effects
 end
-
--- Fixture vocabulary
-
-function sf.white() return active_palette.white end
 
 -- Show helpers
 
@@ -442,9 +442,14 @@ function sf.snap(ctx, period)
     return math.floor(beats / period) % 2, beats % period < SNAP_DARK_BEATS
 end
 
+local UNSNAPPED_PHASER_KEYS = { "tilt_size", "measure", "phase", "wings", "centre_pan", "at", "direction" }
+
 function sf.snap_look(ctx, period, looks, reach)
     local index, dark = sf.snap(ctx, period)
     local look = looks[index + 1]
+    for _, key in ipairs(UNSNAPPED_PHASER_KEYS) do
+        assert(look[key] == nil, "a snap look holds only shape, size and centre_tilt")
+    end
     return { shape = look.shape, size = look.size * reach, centre_tilt = (look.centre_tilt or 0) * reach },
         dark, index
 end

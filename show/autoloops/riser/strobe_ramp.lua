@@ -5,6 +5,7 @@
 -- texture: mixed
 local STROBE_BEATS = 8
 
+-- Flashes per beat double every two beats: 0.5, 1, 2, 4, then 8 at the end.
 local function strobe_hz(ctx, remaining)
     if remaining > STROBE_BEATS then return 0 end
     return sf.beat_strobe_hz(ctx, 2 ^ (math.floor((STROBE_BEATS - remaining) / 2) - 1))
