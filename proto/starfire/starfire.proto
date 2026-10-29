@@ -11,8 +11,7 @@ import "proto/starfire/rig.proto";
 
 enum ProtocolVersion {
   PROTOCOL_VERSION_UNSPECIFIED = 0;
-  PROTOCOL_MINOR = 2;
-  PROTOCOL_MAJOR = 3;
+  PROTOCOL_MAJOR = 4;
 }
 
 enum MessageType {
@@ -61,14 +60,13 @@ message Login {
   repeated AutoloopDefinition autoloops = 3;
   oneof output {
     string artnet_destination = 4;  // IPv4:port.
-    RadiusOutput radius = 10;
+    RadiusOutput radius = 5;
   }
   repeated Parameter parameters = 6;
-  uint32 protocol_major = 7;  // Must match the server's major version.
-  uint32 protocol_minor = 8;
-  fixed64 run_id = 9;
-  optional uint32 render_core = 11;  // Logical CPU index.
-  repeated Palette palettes = 12;
+  uint32 protocol_major = 7;  // Must equal the server's.
+  fixed64 run_id = 8;
+  optional uint32 render_core = 9;  // Logical CPU index.
+  repeated Palette palettes = 10;
 
   message RadiusOutput {
     string receiver_address = 1;  // IPv4:TCP port.
@@ -84,12 +82,11 @@ message Login {
 
 message LoginReply {
   uint64 command_id = 1;
-  uint32 frame_rate_hz = 3;
-  uint32 max_message_bytes = 4;  // Cap for every type except LOGIN.
-  uint32 protocol_major = 5;
-  uint32 protocol_minor = 6;
-  fixed64 run_id = 7;
-  repeated GroupCapability groups = 8;
+  uint32 frame_rate_hz = 2;
+  uint32 max_message_bytes = 3;  // Cap for every type except LOGIN.
+  uint32 protocol_major = 4;
+  fixed64 run_id = 5;
+  repeated GroupCapability groups = 6;
 }
 
 message GroupCapability {
@@ -112,12 +109,20 @@ message ErrorReply {
 message PlayAutoloop {
   uint64 command_id = 1;
   string autoloop_id = 2;  // Empty enters idle: effects cleared, darkness. Every cue is cleared.
-  Transition transition = 4;
-  string palette = 5;
+  Transition transition = 3;
+  string palette = 4;
+}
 
-  message Transition {
-    optional double crossfade_beats = 1;  // Absent means cut; otherwise positive.
-  }
+// An absent Transition crossfades over DEFAULT_CROSSFADE_BEATS.
+message Transition {
+  optional double crossfade_beats = 1;  // Absent means cut; otherwise 0 < beats <= 1024.
+}
+
+// Linear, in beats, each 0..1024: the level rises from 0 to 1 over attack_beats after the start,
+// and on release falls from the level reached to 0 over release_beats.
+message Envelope {
+  double attack_beats = 1;
+  double release_beats = 2;
 }
 
 message SetActiveEffect {
@@ -166,9 +171,8 @@ message SpecialFX {
   float energy = 2;        // 0..1.
   float speed = 3;         // 0..1.
   optional uint32 pulse_beats = 4;
-  float attack_beats = 5;
-  float release_beats = 6;
-  optional float pattern = 7;  // 0..1.
+  optional float pattern = 5;  // 0..1.
+  Envelope envelope = 6;       // Starts on the beat the command applies.
 }
 
 message UnsetActiveEffect {
@@ -206,30 +210,33 @@ message CueSection {
   uint64 command_id = 1;
   uint64 start_beat_index = 2;  // An UpdateBeat.beat_index whose bar_phase is 0.
   SectionIntent intent = 3;
-  repeated BaseLook rotation = 4;  // 1..8 entries, played in order from the start, then cycled.
-  repeated Overlay overlays = 5;   // 0..8.
+  repeated Step rotation = 4;     // 1..8 steps, played in order from the start, then cycled.
+  repeated Overlay overlays = 5;  // 0..8.
   string palette = 6;
   optional double drop_strength = 7;  // 0..1, DROP only.
   uint32 seed = 8;
 
-  message BaseLook {
+  message Step {
     string autoloop_id = 1;
     uint32 bars = 2;  // At least 1.
-    PlayAutoloop.Transition transition = 3;
+    Transition transition = 3;
   }
 
-  // A pre-roll row from the "dip" bank is the blackout before the section: Starfire derives
-  // ctx.beats_until_dip and the move in black from that bank name alone.
   message Overlay {
     string autoloop_id = 1;
-    sint32 priority = 2;  // Higher composes later; ties keep list order.
+    // Orders overlays among themselves: higher composes later; ties keep list order. Every
+    // SetActiveEffect composes above all overlays.
+    sint32 priority = 2;
     // From the section start. Playing once: -64..1024, negative is pre-roll. Repeating: within the
     // period, and length plus release fit it.
     double begin_beats = 3;
-    double length_beats = 4;  // Positive.
+    double length_beats = 4;  // 0 < beats <= 1024.
     uint32 every_bars = 5;    // 0 plays once.
-    double attack_beats = 6;
-    double release_beats = 7;
+    Envelope envelope = 6;    // Starts on the row's first rendered frame.
+    // The blackout before the section: playing once with a negative begin. The earliest one sets
+    // ctx.beats_until_dip; while one reaching the section start holds fixtures dark, they move in
+    // black to the first step's look if that step cuts to a new loop.
+    bool blackout = 7;
   }
 }
 
