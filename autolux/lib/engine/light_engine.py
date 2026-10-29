@@ -27,6 +27,7 @@ from autolux.lib.engine.effect_definitions import (
     BEAT_LOSS_SECONDS,
     QUIET_HOLD_SECONDS,
     QUIET_RMS,
+    STANDBY_AUTOLOOP,
     LightIntent,
     ShowSettings,
     intensity_level,
@@ -44,7 +45,12 @@ from autolux.lib.engine.intensity_follow import (
     FollowMusic,
 )
 from autolux.lib.engine.section_decoder import BEATS_PER_BAR
-from autolux.lib.engine.static_mode import StaticLooks, StaticRig
+from autolux.lib.engine.static_mode import (
+    AUTOMATION_REST_ID,
+    AUTOMATION_REST_PRIORITY,
+    StaticLooks,
+    StaticRig,
+)
 from autolux.lib.engine.track_mood import (
     MAX_MEASURED_BARS,
     MeasuredBeat,
@@ -215,6 +221,7 @@ class LightEngine(IMusicAnalyserHandler):
         self.follow_music = FollowMusic()
         self.on_auto_intensity: Callable[[float, str], None] | None = None
         self._static_mode = False
+        self._rest_restores: tuple[tuple[str, str] | None, str | None] | None = None
         self.static_looks = StaticLooks(
             lighting_client,
             static_rig,
@@ -268,6 +275,7 @@ class LightEngine(IMusicAnalyserHandler):
             # Pause before the cut so play does not revive it.
             self.lighting_client.set_paused(True)
         self.effect_controller.forget_special(instantaneous=True)
+        self._sync_rest()
         self._send_brightness(BRIGHTNESS_FADE_SECONDS)
 
     async def resume(self) -> None:
@@ -277,6 +285,7 @@ class LightEngine(IMusicAnalyserHandler):
         self._paused = False
         if not self._static_mode:
             self.lighting_client.set_paused(False)
+        self._sync_rest()
         self._send_brightness(BRIGHTNESS_FADE_SECONDS)
         await self._rejoin_current_intent()
 
@@ -304,6 +313,7 @@ class LightEngine(IMusicAnalyserHandler):
             self.lighting_client.set_paused(False)
         self.lighting_client.clear_cues()
         self.effect_controller.release_special(instantaneous=True)
+        self._sync_rest()
         self._send_brightness(OPERATOR_FADE_SECONDS)
 
     async def leave_static(self) -> None:
@@ -315,11 +325,36 @@ class LightEngine(IMusicAnalyserHandler):
         if self._paused:
             self.static_looks.clear_highlight()
             self.lighting_client.set_paused(True)
+        self._sync_rest()
         self._send_brightness(OPERATOR_FADE_SECONDS)
         if self._showing_standby and (self._current_intent is None or not self._room_playing):
             self.effect_controller.enter_standby(None if self._paused else self._last_bpm)
         self._resend_cues(current=True)
         await self._rejoin_current_intent()
+
+    def _sync_rest(self) -> None:
+        # Stopped automation must not show through the static look, not even its motion.
+        rest = self._static_mode and (self._paused or self._standby)
+        if rest and self._rest_restores is None:
+            held = self.lighting_client.selected_autoloop or self.effect_controller.entered_autoloop
+            self._rest_restores = held, self.lighting_client.palette
+            self.lighting_client.select_autoloop(*STANDBY_AUTOLOOP, crossfade_beats=0.0)
+            self._send_rest()
+        elif not rest and self._rest_restores is not None:
+            (held, palette), self._rest_restores = self._rest_restores, None
+            self.lighting_client.clear_override(AUTOMATION_REST_ID)
+            if held is not None and not self._standby:
+                self.lighting_client.select_autoloop(*held, palette=palette, crossfade_beats=0.0)
+
+    def _send_rest(self) -> None:
+        self.lighting_client.set_override(
+            {
+                'id': AUTOMATION_REST_ID,
+                'target': 'all',
+                'values': {'intensity': 0.0},
+                'priority': AUTOMATION_REST_PRIORITY,
+            }
+        )
 
     async def sync_static(self) -> None:
         if self.static_looks.active:
@@ -495,6 +530,7 @@ class LightEngine(IMusicAnalyserHandler):
                 STANDBY_INTENT, song_sec=self.event_buffer.elapsed(), trigger=SILENCE_TRIGGER
             )
         if self._static_mode:
+            self._sync_rest()
             return
         # Paused, the beat clock is frozen: a crossfade would only start on play.
         self.effect_controller.enter_standby(None if self._paused else self._last_bpm)
@@ -553,6 +589,7 @@ class LightEngine(IMusicAnalyserHandler):
     def on_signal_return(self):
         LOGGER.info('[engine] signal returned — the show restarts from scratch')
         self._standby = False
+        self._sync_rest()
         self._last_bpm = None
         self._room_beat_at = float('-inf')
         self._committing_late = False
@@ -590,6 +627,8 @@ class LightEngine(IMusicAnalyserHandler):
         self.static_looks.clear_highlight()
         if self._static_mode:
             self.static_looks.resend()
+        if self._rest_restores is not None:
+            self._send_rest()
 
     async def _start_room_baseline(self) -> None:
         if not self._startup_baseline_pending or not self._room_playing:
