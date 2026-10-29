@@ -1645,6 +1645,67 @@ async def test_standby_undims_a_quiet_room_and_return_finds_the_quiet_state_clea
     assert show.light._room_quiet is False
 
 
+LOOK_COMMANDS = {
+    'select',
+    'set_palette',
+    'set_override',
+    'clear_override',
+    'set_master',
+    'stop',
+    'cue_section',
+}
+
+
+def _look_commands(commands):
+    return [c for c in commands if c['kind'] in LOOK_COMMANDS]
+
+
+async def _static_red_show() -> _Show:
+    show = _Show()
+    await show.play(20.0, 0.2)
+    show.light.static_looks.preset('red')
+    await show.light.sync_static()
+    return show
+
+
+async def test_a_pause_under_static_leaves_the_static_look_and_brightness_alone():
+    show = await _static_red_show()
+    held = len(show.lighting.events)
+    show.analyser.enter_standby('media session paused')
+    show.light.pause()
+    await show.play(3.0, 0.0)
+    assert show.light.standby
+    assert _look_commands(show.commands(held)) == []
+
+
+async def test_a_resume_under_static_leaves_the_static_look_and_brightness_alone():
+    show = await _static_red_show()
+    show.analyser.enter_standby('media session paused')
+    await show.play(3.0, 0.0)
+    held = len(show.lighting.events)
+    show.analyser.leave_standby()
+    await show.play(20.0, 0.2)
+    assert not show.light.standby and show.light.current_intent is not None
+    assert _look_commands(show.commands(held)) == []
+
+
+@pytest.mark.parametrize('playing', [False, True])
+async def test_leaving_static_returns_to_what_the_automation_does_now(playing):
+    show = await _static_red_show()
+    show.analyser.enter_standby('media session paused')
+    await show.play(3.0, 0.0)
+    if playing:
+        show.analyser.leave_standby()
+        await show.play(20.0, 0.2)
+    held = len(show.lighting.events)
+    show.light.static_looks.clear()
+    await show.light.sync_static()
+    assert {'kind': 'clear_override', 'id': 'static_all'} in show.commands(held)
+    standby = ('standby', 'white') in _selections(show.commands(held))
+    assert standby is not playing
+    assert show.light._showing_standby is not playing
+
+
 async def test_telemetry_shows_standby_instead_of_the_last_intent_and_posterior():
     show = _Show()
     fake_reset = show.decoder.reset
