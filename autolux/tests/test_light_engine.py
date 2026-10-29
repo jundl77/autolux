@@ -1534,7 +1534,7 @@ def _selections(commands):
 async def test_two_seconds_of_digital_silence_park_the_rig_and_silence_the_room_at_once():
     show = _Show()
     await show.play(20.0, 0.2)
-    assert _selections(show.commands()) == [('atmospheric', 'cold_breathe')]
+    assert _selections(show.commands()) == [('atmospheric', 'dawn')]
     assert show.queue.pending > 0, 'beats for the buffered audio are still due'
     stopped = len(show.lighting.events)
 
@@ -1611,7 +1611,7 @@ async def test_returning_signal_restarts_the_show_from_scratch_after_one_playbac
     await show.play(12.5, 0.2)
     assert _selections(show.commands(parked)) == []
     await show.play(1.5, 0.2)
-    assert _selections(show.commands(parked)) == [('atmospheric', 'cold_breathe')]
+    assert _selections(show.commands(parked)) == [('atmospheric', 'dawn')]
     await show.play(3.0, 0.2)
     assert any(c['kind'] == 'beat' for c in show.commands(parked))
     indices = [c['beat_index'] for c in show.commands() if c['kind'] == 'beat']
@@ -1635,7 +1635,7 @@ async def test_a_paused_show_still_leaves_standby_for_the_dimmed_baseline():
 
     await show.play(15.5, 0.2)
     assert show.light.paused
-    assert _selections(show.commands(parked)) == [('atmospheric', 'cold_breathe')]
+    assert _selections(show.commands(parked)) == [('atmospheric', 'dawn')]
     assert masters(show.lighting)[-1] == pytest.approx(QUIET_BRIGHTNESS)
 
 

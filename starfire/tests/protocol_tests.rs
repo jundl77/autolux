@@ -81,7 +81,7 @@ fn engine() -> Engine {
 
 #[test]
 fn fragmented_coalesced_frames_use_standalone_generated_payloads() {
-    let selection = play("atmospheric", "cold_breathe");
+    let selection = play("atmospheric", "dawn");
     let mut data = encoded(selection.clone());
     assert_eq!(data[0], wire::MessageType::PlayAutoloop as u8);
     assert_eq!(
@@ -89,7 +89,7 @@ fn fragmented_coalesced_frames_use_standalone_generated_payloads() {
         data.len() - 5
     );
     let payload = wire::PlayAutoloop::decode(&data[5..]).unwrap();
-    assert_eq!(payload.autoloop_id, "atmospheric/cold_breathe");
+    assert_eq!(payload.autoloop_id, "atmospheric/dawn");
     assert_eq!(payload.command_id, 1);
     data.extend(encoded(play("", "")));
     let mut input = Fragmented(Cursor::new(data));
@@ -127,12 +127,12 @@ fn discarding_delayed_audio_round_trips_and_leaves_lighting_untouched() {
     assert!(matches!(decoded, Operation::DiscardDelayedAudio(_)));
 
     let mut engine = engine();
-    apply_command(&mut engine, 0.0, &play("atmospheric", "cold_breathe")).unwrap();
+    apply_command(&mut engine, 0.0, &play("atmospheric", "dawn")).unwrap();
     let before = engine.render_at(0.5).unwrap();
     apply_command(&mut engine, 0.5, &decoded).unwrap();
     let after = engine.render_at(0.5).unwrap();
     assert_eq!(before.dmx_frames_by_universe, after.dmx_frames_by_universe);
-    assert_eq!(after.active_autoloop.as_deref(), Some("cold_breathe"));
+    assert_eq!(after.active_autoloop.as_deref(), Some("dawn"));
 }
 
 fn login_with_sources(count: usize, source_bytes: usize) -> Operation {
@@ -274,7 +274,7 @@ fn metrics_at_maximum_field_lengths_fit_the_realtime_limit() {
 
 #[test]
 fn truncated_oversized_unknown_and_wrong_direction_frames_are_rejected() {
-    let message = encoded(play("atmospheric", "cold_breathe"));
+    let message = encoded(play("atmospheric", "dawn"));
     for length in 1..message.len() {
         assert!(read_control(&mut Cursor::new(&message[..length])).is_err());
     }
@@ -306,7 +306,7 @@ fn truncated_oversized_unknown_and_wrong_direction_frames_are_rejected() {
 fn global_parameter_types_are_enforced_and_invalid_updates_preserve_output() {
     use wire::{ParameterType as Kind, parameter::Value};
     let mut engine = engine();
-    apply_command(&mut engine, 0.0, &play("atmospheric", "cold_breathe")).unwrap();
+    apply_command(&mut engine, 0.0, &play("atmospheric", "dawn")).unwrap();
     let expected = engine.render_at(0.0).unwrap();
     for invalid in [
         parameter(Kind::OutputBrightness, Value::Number(-1.0)),
@@ -351,17 +351,17 @@ fn global_parameter_types_are_enforced_and_invalid_updates_preserve_output() {
 #[test]
 fn playback_resolves_autoloop_ids_or_idle_and_validates_repeated_selection() {
     let mut engine = engine();
-    apply_command(&mut engine, 0.0, &play("atmospheric", "cold_breathe")).unwrap();
+    apply_command(&mut engine, 0.0, &play("atmospheric", "dawn")).unwrap();
     let expected = engine.render_at(0.0).unwrap();
     for operation in [
         play("atmospheric", ""),
-        play("", "cold_breathe"),
+        play("", "dawn"),
         Operation::PlayAutoloop(wire::PlayAutoloop {
             transition: Some(wire::play_autoloop::Transition::default()),
             ..Default::default()
         }),
         Operation::PlayAutoloop(wire::PlayAutoloop {
-            autoloop_id: "atmospheric/cold_breathe".into(),
+            autoloop_id: "atmospheric/dawn".into(),
             transition: Some(wire::play_autoloop::Transition {
                 crossfade_beats: Some(f64::NAN),
             }),
@@ -392,7 +392,7 @@ fn playback_resolves_autoloop_ids_or_idle_and_validates_repeated_selection() {
 #[test]
 fn optional_effect_properties_preserve_zero_and_invalid_replacements_preserve_expiry() {
     let mut engine = engine();
-    apply_command(&mut engine, 0.0, &play("atmospheric", "cold_breathe")).unwrap();
+    apply_command(&mut engine, 0.0, &play("atmospheric", "dawn")).unwrap();
     let effect = wire::SetActiveEffect {
         command_id: 1,
         effect_id: "accent".into(),
@@ -468,10 +468,10 @@ fn standalone_controls_and_recorded_commands_produce_identical_dmx() {
         ),
         (
             0.0,
-            play("atmospheric", "cold_breathe"),
+            play("atmospheric", "dawn"),
             Command::Select {
                 bank: "atmospheric".into(),
-                autoloop: "cold_breathe".into(),
+                autoloop: "dawn".into(),
                 transition: Transition::Cut,
                 palette: "techno".into(),
             },
@@ -662,8 +662,8 @@ fn attribute_engine() -> Engine {
         AutoloopCatalog::from_definitions(&[
             definition(
                 "atmospheric",
-                "atmospheric/cold_breathe",
-                std::fs::read_to_string(root.join("atmospheric/cold_breathe.lua")).unwrap(),
+                "atmospheric/dawn",
+                std::fs::read_to_string(root.join("atmospheric/dawn.lua")).unwrap(),
             ),
             definition(
                 "drop",
@@ -687,7 +687,7 @@ fn attribute_engine() -> Engine {
 fn an_omitted_transition_fades_by_default_taking_target_attributes_at_once_and_an_empty_one_cuts() {
     use wire::{ParameterType as Kind, parameter::Value};
     let mut engine = attribute_engine();
-    apply_command(&mut engine, 0.0, &play("atmospheric", "cold_breathe")).unwrap();
+    apply_command(&mut engine, 0.0, &play("atmospheric", "dawn")).unwrap();
     apply_command(
         &mut engine,
         0.0,
@@ -704,7 +704,7 @@ fn an_omitted_transition_fades_by_default_taking_target_attributes_at_once_and_a
     let mut cutting = engine;
     apply_command(&mut cutting, 0.0, &cut).unwrap();
     let mut defaulted = attribute_engine();
-    apply_command(&mut defaulted, 0.0, &play("atmospheric", "cold_breathe")).unwrap();
+    apply_command(&mut defaulted, 0.0, &play("atmospheric", "dawn")).unwrap();
     apply_command(
         &mut defaulted,
         0.0,

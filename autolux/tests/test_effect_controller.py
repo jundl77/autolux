@@ -36,15 +36,15 @@ async def test_applied_lighting_change_has_one_useful_info_line(effect_controlle
     with caplog.at_level(logging.INFO):
         await effect_controller.change_effect(LightIntent.BUILDUP)
     assert len(caplog.records) == 1
-    assert 'intent=BUILDUP | autoloop=buildup/ramp' in caplog.text
+    assert 'intent=BUILDUP | autoloop=buildup/stutter' in caplog.text
 
 
 @pytest.mark.parametrize(
     ('intent', 'autoloop'),
     [
-        (LightIntent.ATMOSPHERIC, 'cold_breathe'),
-        (LightIntent.BREAKDOWN, 'wide_space'),
-        (LightIntent.BUILDUP, 'ramp'),
+        (LightIntent.ATMOSPHERIC, 'dawn'),
+        (LightIntent.BREAKDOWN, 'drift_apart'),
+        (LightIntent.BUILDUP, 'stutter'),
         (LightIntent.DROP, 'kick'),
     ],
 )
@@ -96,7 +96,7 @@ async def _drop_after(controller, lighting, clock, seconds):
 ROTATION = {
     **{intent: ((intent.value, 'only'),) for intent in LightIntent},
     LightIntent.ATMOSPHERIC: (
-        ('atmospheric', 'cold_breathe'),
+        ('atmospheric', 'dawn'),
         ('atmospheric', 'amber_drift'),
         ('atmospheric', 'pixel_rain'),
     ),
@@ -239,10 +239,10 @@ async def test_a_realistic_set_gets_tiers_that_follow_the_music(recorded_lightin
 
 
 TWO_BREAKDOWN_LOOPS = {
-    LightIntent.BREAKDOWN: (('breakdown', 'wide_space'), ('breakdown', 'deep_space'))
+    LightIntent.BREAKDOWN: (('breakdown', 'drift_apart'), ('breakdown', 'deep_space'))
 }
 TWO_BREAKDOWN_META = {
-    ('breakdown', 'wide_space'): AutoloopMeta(1, 'sweep', 'mixed'),
+    ('breakdown', 'drift_apart'): AutoloopMeta(1, 'sweep', 'mixed'),
     ('breakdown', 'deep_space'): AutoloopMeta(1, 'sweep', 'beam'),
 }
 
@@ -608,7 +608,7 @@ async def test_lowering_intensity_swaps_an_over_cap_loop_at_once_and_raising_it_
 
 @pytest.mark.parametrize(
     ('decision', 'calm_look'),
-    [('drop', 'breakdown/wide_space'), ('buildup', 'atmospheric/cold_breathe')],
+    [('drop', 'breakdown/drift_apart'), ('buildup', 'atmospheric/dawn')],
 )
 async def test_calm_swaps_a_drop_or_build_to_its_quiet_bank_at_once_and_back_on_leaving(
     tmp_path, caplog, decision, calm_look
@@ -640,7 +640,7 @@ async def test_a_calm_drop_entry_plays_a_breakdown_look_without_a_strobe(recorde
     controller = EffectController(recorded_lighting, settings=lambda: settings)
     await controller.change_effect(LightIntent.DROP)
     [select] = [e['command'] for e in recorded_lighting.events]
-    assert (select['bank'], select['autoloop']) == ('breakdown', 'wide_space')
+    assert (select['bank'], select['autoloop']) == ('breakdown', 'drift_apart')
     assert 'transition' not in select, 'a calm drop takes the renderer crossfade, not a cut'
 
 
@@ -694,7 +694,7 @@ async def test_a_calm_swap_during_a_drop_reaches_the_snapshot_with_the_real_inte
     clock.advance(1.0)
     await _set_intensity(control, light, INTENSITY_CALM)
     after = light.event_buffer.snapshot()
-    assert after['current_effect']['name'] == 'breakdown/wide_space'
+    assert after['current_effect']['name'] == 'breakdown/drift_apart'
     selection = after['current_effect']['selection']
     assert (selection['intent'], selection['look'], selection['level']) == (
         'drop',

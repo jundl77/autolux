@@ -7,7 +7,7 @@ local LOOP_BEATS = 16
 local WASH_LEVEL = 0.16
 local HORIZON_LEVEL = 0.22
 local MOVER_LEVEL = 0.25
-local CENTRE_PAN, PARK_PAN, TILT = 0.5, 0.3, 0.58
+local PARK_DEGREES = 25
 
 return {
     render = function(ctx)
@@ -24,12 +24,8 @@ return {
                 return sf.dimmer(pixel, HORIZON_LEVEL * band * level)
             end),
             sf.colour(sf.group("movers"), palette.secondary),
-            sf.each(sf.group("movers"), function(mover, index)
-                return {
-                    sf.pan_tilt(mover, CENTRE_PAN + sf.side(index) * PARK_PAN, TILT),
-                    sf.dimmer(mover, MOVER_LEVEL * level)
-                }
-            end)
+            sf.dimmer(sf.group("movers"), MOVER_LEVEL * level),
+            sf.phaser(sf.group("movers"), ctx, { shape = "fan", size = PARK_DEGREES })
         }
     end
 }

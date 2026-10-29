@@ -25,9 +25,9 @@ SECTION_CLASS_INTENTS: dict[str, LightIntent] = {
 }
 
 PREFERRED_AUTOLOOPS: dict[LightIntent, str] = {
-    LightIntent.ATMOSPHERIC: 'cold_breathe',
-    LightIntent.BREAKDOWN: 'wide_space',
-    LightIntent.BUILDUP: 'ramp',
+    LightIntent.ATMOSPHERIC: 'dawn',
+    LightIntent.BREAKDOWN: 'drift_apart',
+    LightIntent.BUILDUP: 'stutter',
     LightIntent.DROP: 'kick',
 }
 
@@ -92,9 +92,9 @@ class OverlayMeta:
 OverlayMetaTable = Mapping[tuple[str, str], OverlayMeta]
 
 DEFAULT_AUTOLOOP_META: AutoloopMetaTable = {
-    ('atmospheric', 'cold_breathe'): AutoloopMeta(1, 'sweep', 'mixed'),
-    ('breakdown', 'wide_space'): AutoloopMeta(1, 'sweep', 'mixed'),
-    ('buildup', 'ramp'): AutoloopMeta(2, 'sweep', 'mixed'),
+    ('atmospheric', 'dawn'): AutoloopMeta(1, 'sweep', 'mixed'),
+    ('breakdown', 'drift_apart'): AutoloopMeta(1, 'sweep', 'beam'),
+    ('buildup', 'stutter'): AutoloopMeta(3, 'snap', 'wash'),
     ('drop', 'kick'): AutoloopMeta(3, 'snap', 'wash'),
 }
 

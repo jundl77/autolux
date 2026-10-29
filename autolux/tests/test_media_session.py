@@ -102,7 +102,7 @@ async def test_the_fade_after_a_pause_does_not_rearm_but_play_does():
     await show.keep_reporting(1.0, 0.2)
     assert show.chain.resets > resets, 'the show restarts from scratch as after silence'
     await show.keep_reporting(PLAYBACK_DELAY_SEC + 1.0, 0.2)
-    assert _selections(show.commands(parked)) == [('atmospheric', 'cold_breathe')]
+    assert _selections(show.commands(parked)) == [('atmospheric', 'dawn')]
 
 
 async def test_the_audio_cues_are_dormant_while_the_session_reports_and_return_after_it_goes_quiet():

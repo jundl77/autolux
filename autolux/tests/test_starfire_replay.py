@@ -111,8 +111,10 @@ def test_silence_stops_immediately_and_same_autoloop_can_resume_after_transport_
 
 
 def overlay_catalogue(directory):
-    """The shipped base banks with a generic overlay of every kind the director names."""
-    shutil.copytree(AUTOLOOP_DIRECTORY, directory, ignore=shutil.ignore_patterns('*.md'))
+    """The shipped base banks with a generic overlay of every kind the director names, in
+    place of the shipped overlays, so the plan depends only on the base banks."""
+    skipped = shutil.ignore_patterns('*.md', 'hit', 'fill', 'riser', 'dip', 'accent')
+    shutil.copytree(AUTOLOOP_DIRECTORY, directory, ignore=skipped)
     header = '-- overlay\n-- strobe: no\n-- intensity: htp\n-- movement: still\n-- texture: mixed\n'
     for bank, name in [
         ('dip', 'last_beat'),
