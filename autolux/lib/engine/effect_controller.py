@@ -327,7 +327,7 @@ class EffectController:
         self.lighting_client.selected_autoloop = None
         self.lighting_client.palette = plan.cue.palette
         self._publish_palette()
-        self._announce('[lighting] cue |', intent, choice, plan.cue.palette)
+        self._announce('[lighting] cue |', intent, choice, plan.cue.palette, plan.cue)
         if fresh:
             self._enter_special(intent, bpm, context.arrival_of_peak, moment)
         else:
@@ -390,13 +390,19 @@ class EffectController:
         return choice
 
     def _announce(
-        self, prefix: str, intent: LightIntent, choice: AutoloopChoice, palette: str
+        self,
+        prefix: str,
+        intent: LightIntent,
+        choice: AutoloopChoice,
+        palette: str,
+        cue: Cue | None = None,
     ) -> None:
         bank, autoloop, meta = choice.bank, choice.autoloop, choice.meta
         if self.event_buffer:
             self.event_buffer.add_effect(
                 f'{bank}/{autoloop}',
                 'AUTOLOOP',
+                cue_start_beat_index=None if cue is None else cue.start_beat_index,
                 selection={
                     # A calm remap plays another bank's look; the section stays the intent.
                     'intent': intent.value,

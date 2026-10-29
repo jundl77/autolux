@@ -3,14 +3,13 @@
 -- movement: sweep
 -- texture: mixed
 local palette = sf.palette()
-local WASH_ENTRY, MOVER_ENTRY = 0.33, 0.66
 local PULSE_WIDTH_BEATS = 0.4
 local FAN_DEGREES, LIFT_DEGREES = 12, 35
 local WASH_PEAK, STRIP_PEAK, MOVER_PEAK = 0.9, 0.9, 0.85
 
--- Each group enters on the downbeat after the build's tension passes its line, so the look
--- stacks strip, then washes, then movers, and the beams lift with the tension. The last bar
--- locks every pulse solid.
+-- Each group enters on the downbeat its build stage begins, so the look stacks strip, then
+-- washes, then movers, and the beams lift with the tension. The last bar locks every pulse
+-- solid and lands the beams.
 local function pulsing(ctx, build)
     if build.left ~= nil and build.left <= ctx.beats_per_bar then return 1 end
     return sf.lerp(0.35, 1, sf.on_beat(ctx, PULSE_WIDTH_BEATS))
@@ -21,9 +20,10 @@ return {
         local build = sf.build(ctx)
         local pulse = pulsing(ctx, build)
         local level = build.drive * pulse
-        local washes_in = build.step >= WASH_ENTRY
-        local movers_in = build.step >= MOVER_ENTRY
+        local washes_in = build.stage >= 1
+        local movers_in = build.stage >= 2
         local beat = math.floor(ctx.beat_position)
+        local landing = 1 - sf.approach(build, ctx.beats_per_bar)
         return sf.scene {
             sf.colour(sf.all(), palette.primary),
             sf.each(sf.group("strip"), function(pixel, index)
@@ -33,8 +33,8 @@ return {
             sf.dimmer(sf.group("wash"), washes_in and WASH_PEAK * level or 0),
             sf.dimmer(sf.group("movers"), movers_in and MOVER_PEAK * level or 0),
             sf.phaser(sf.group("movers"), ctx, {
-                shape = "fan", size = FAN_DEGREES, measure = build.measure,
-                centre_tilt = LIFT_DEGREES * build.tension
+                shape = "fan", size = FAN_DEGREES * landing, measure = build.measure,
+                centre_tilt = LIFT_DEGREES * build.tension * landing
             })
         }
     end

@@ -218,6 +218,15 @@ fn finale_for(look: &Look) -> Replay {
     )
 }
 
+/// The late replay: a 16-bar build whose drop is cued at beat 52 for beat 64, under the Balanced
+/// plan (a 1-beat dip, the white rise, the white hit).
+fn late_for(look: &Look) -> Replay {
+    substitute(
+        Replay::load(&root().join("tests/replays/buildup_late.json")).unwrap(),
+        look,
+    )
+}
+
 /// The look under test takes the place of its bank's loop: in selections, in the first rotation
 /// entry and in the first overlay row. It panics unless exactly one command (sent once or
 /// repeated) took the look, so a fixture cannot silently test something else.
@@ -500,15 +509,12 @@ fn every_autoloop_replays_deterministically_and_matches_any_golden() {
 
 #[test]
 fn every_autoloop_repeats_on_its_declared_loop_length() {
-    for look in looks() {
-        let start = if look.ramps() {
-            RAMP_PLATEAU_BEATS
-        } else {
-            0.0
-        };
+    // Builds keep climbing for as long as they last, so they repeat in shape, not in level:
+    // buildups_keep_climbing_and_never_restart covers them.
+    for look in looks().into_iter().filter(|look| !look.ramps()) {
         let (mut first, mut repeated) = (look.engine(0.0), look.engine(0.0));
         for step in 0..(2.0 * look.loop_beats / 0.07) as usize {
-            let beat = start + step as f64 * 0.07;
+            let beat = step as f64 * 0.07;
             let a = render(&mut first, beat);
             let b = render(&mut repeated, beat + look.loop_beats);
             for (id, state) in &a.fixture_properties_before_strobe {
@@ -1752,5 +1758,127 @@ fn the_semantic_rules_hold_on_a_bigger_generic_rig() {
                 assert_pulses_at_most_half_beats(&look, &run, &rig, "on the bigger rig");
             }
         }
+    }
+}
+
+#[test]
+fn buildups_keep_climbing_and_never_restart() {
+    // Past the old 128-beat plateau an uncued build still never falls back: each loop-length
+    // window peaks at least as high as the one before.
+    let cells = loop_cells();
+    for look in looks_in(&["buildup"]) {
+        let mut engine = look.engine(0.0);
+        let mut previous = 0.0;
+        for window in 0..4 {
+            let from = RAMP_PLATEAU_BEATS + window as f64 * look.loop_beats;
+            let peak = (0..(look.loop_beats / SAMPLE_BEATS) as usize)
+                .map(|step| {
+                    total_light(
+                        &render(&mut engine, from + step as f64 * SAMPLE_BEATS),
+                        &cells,
+                    )
+                })
+                .fold(0.0, f64::max);
+            assert!(
+                peak >= previous - FLOAT_TOLERANCE,
+                "{look}: beats {from}.. peak {peak} after {previous}"
+            );
+            previous = peak;
+        }
+    }
+}
+
+const LATE_CUE_BEAT: f64 = 52.0;
+const LATE_DROP_BEAT: f64 = 64.0;
+/// How far a build may move in the first frames after its drop is cued, against the same frames
+/// uncued: a fast hand-over moves it a little, the old jump moved it by a third.
+const CUE_ARRIVAL_SHARE: f64 = 0.03;
+const CUE_ARRIVAL_BEATS: f64 = 0.1;
+
+#[test]
+fn a_late_cue_hands_over_without_a_jump() {
+    let cells = loop_cells();
+    let movers = support::stage().groups()["movers"].clone();
+    for look in looks_in(&["buildup"]) {
+        let cued = without_overlays(late_for(&look), &OVERLAY_BANKS);
+        let mut uncued = cued.clone();
+        uncued
+            .events
+            .retain(|event| !matches!(&event.command, Command::CueSection { value } if value.start_beat_index > 0));
+        let cued = render_replay(&cued, support::stage(), support::show_catalog()).unwrap();
+        let uncued = render_replay(&uncued, support::stage(), support::show_catalog()).unwrap();
+        for (a, b) in cued.iter().zip(&uncued).filter(|(a, _)| {
+            a.beat_position >= LATE_CUE_BEAT && a.beat_position < LATE_CUE_BEAT + CUE_ARRIVAL_BEATS
+        }) {
+            let (with, without) = (total_light(a, &cells), total_light(b, &cells));
+            assert!(
+                (with - without).abs() <= CUE_ARRIVAL_SHARE * without + PULSE_DEPTH,
+                "{look}: the cue moved the light from {without} to {with} at beat {}",
+                a.beat_position
+            );
+            for id in &movers {
+                let (head, alone) = (
+                    &a.fixture_properties_before_strobe[id],
+                    &b.fixture_properties_before_strobe[id],
+                );
+                assert!(
+                    head.intensity == 0.0
+                        || (head.pan - alone.pan).hypot(head.tilt - alone.tilt) <= 0.01,
+                    "{look}: {id} jumps lit when the drop is cued at beat {}",
+                    a.beat_position
+                );
+            }
+        }
+    }
+}
+
+/// After the entry hit the drop's beams show colour B, so the drop changes colour.
+fn assert_beams_in_b_after_the_hit(look: &Look, replay: &Replay, drop_beat: f64) {
+    let secondary = replay.palettes[0].secondary;
+    let frames = render_replay(replay, support::stage(), support::show_catalog()).unwrap();
+    let after = frames_between(&frames, drop_beat + 2.5, drop_beat + 3.0);
+    for id in &support::stage().groups()["movers"] {
+        let state = &after[0].fixture_properties_before_strobe[id];
+        assert!(
+            state.intensity > 0.0,
+            "{look}: {id} dark after the drop's one"
+        );
+        assert_eq!(
+            state.colour, secondary,
+            "{look}: {id} is not on colour B in the drop"
+        );
+    }
+}
+
+#[test]
+fn a_balanced_late_build_lands_dark_and_the_drop_turns_to_colour_b() {
+    let cells = loop_cells();
+    for look in looks_in(&["buildup"]) {
+        let replay = late_for(&look);
+        let frames = render_replay(&replay, support::stage(), support::show_catalog()).unwrap();
+        for frame in &frames {
+            assert!(
+                frame.script_error.is_none(),
+                "{look}: {:?}",
+                frame.script_error
+            );
+            assert!(
+                frame
+                    .fixture_properties_before_strobe
+                    .values()
+                    .all(|state| state.strobe_hz == 0.0),
+                "{look}: a Balanced plan strobes"
+            );
+        }
+        for frame in frames_between(&frames, LATE_DROP_BEAT - 0.95, LATE_DROP_BEAT - 0.05) {
+            assert_eq!(
+                total_light(frame, &cells),
+                0.0,
+                "{look}: lit in the dip at {}",
+                frame.beat_position
+            );
+        }
+        assert_beams_in_b_after_the_hit(&look, &replay, LATE_DROP_BEAT);
+        assert_beams_in_b_after_the_hit(&look, &finale_for(&look), DROP_BEAT);
     }
 }

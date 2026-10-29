@@ -89,7 +89,16 @@ async def test_report_conversion_writes_native_input_without_modifying_report(tm
     args = argparse.Namespace(input=source, output=output, frame_rate_hz=40)
     await starfire.convert_report(args)
     replay = json.loads(output.read_text())
-    assert replay['events'][0]['at_seconds'] == replay['events'][1]['at_seconds'] == 1.0
+    # The drop's cue goes out the look-ahead before its start beat (clamped to the start of
+    # the recording), the beat at its source time, and the lights stop at the end.
+    assert [(event['at_seconds'], event['command']['kind']) for event in replay['events']] == [
+        (0.0, 'cue_section'),
+        (1.0, 'beat'),
+        (20.0, 'stop'),
+    ]
+    cue = replay['events'][0]['command']['value']
+    assert (cue['start_beat_index'], cue['intent']) == (0, 'drop')
+    assert replay['events'][1]['command']['beat_index'] == 0
     assert json.loads(source.read_text()) == report
     args.output = source
     with pytest.raises(ValueError, match='must differ'):

@@ -3,7 +3,7 @@
 -- movement: still
 -- texture: wash
 local palette = sf.palette()
-local BREATH_BEATS, HOLD_BEATS = 8, 16
+local BREATH_BEATS, HOLD_BEATS, HOLD_REACH = 8, 16, 4 / 3
 local RISE_DEGREES, FAN_DEGREES = 15, 10
 local WASH_PEAK, STRIP_PEAK, MOVER_PEAK = 0.9, 0.9, 0.85
 
@@ -11,9 +11,8 @@ local WASH_PEAK, STRIP_PEAK, MOVER_PEAK = 0.9, 0.9, 0.85
 -- every layer freezes at the top of the inhale and is completely still for the last bar.
 local function held_breath(ctx, build)
     local breath = sf.osc.sine(sf.section_beats(ctx), BREATH_BEATS)
-    if build.left == nil then return breath end
-    local hold = (HOLD_BEATS - build.left) / (HOLD_BEATS - ctx.beats_per_bar)
-    return sf.lerp(breath, 1, math.max(0, math.min(1, hold)))
+    local hold = math.min(1, HOLD_REACH * sf.approach(build, HOLD_BEATS))
+    return sf.lerp(breath, 1, hold)
 end
 
 return {

@@ -18,7 +18,7 @@ return {
         return sf.scene {
             sf.colour(sf.group("wash"), palette.secondary),
             sf.each(sf.group("wash"), function(wash, index, count)
-                local across = count > 1 and 2 * (index - 1) / (count - 1) - 1 or 0
+                local across = (index > (count + 1) / 2 and 1 or -1) * sf.from_centre(index, count)
                 local near = 0.5 + 0.5 * math.sin(turn) * across
                 return sf.dimmer(wash, sf.lerp(WASH_LOW, WASH_HIGH, near) * level)
             end),

@@ -70,7 +70,16 @@ def test_history_is_bounded_by_both_time_and_number_of_samples():
 
 def test_offline_report_omits_unmeasured_hardware_telemetry():
     report = EventBuffer().to_report()
-    assert set(report) == {'duration_sec', 'beats', 'effects', 'intents', 'timing_log', 'metrics'}
+    # 'planning' joins only once a show records its plan inputs, like the hardware keys.
+    assert set(report) == {
+        'duration_sec',
+        'beats',
+        'effects',
+        'cues',
+        'intents',
+        'timing_log',
+        'metrics',
+    }
 
 
 def test_session_report_retains_health_history_without_exposing_mutable_state():

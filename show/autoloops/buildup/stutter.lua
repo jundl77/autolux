@@ -12,8 +12,7 @@ local WIDE_DEGREES, NARROW_DEGREES, RISE_DEGREES = 20, 6, 15
 -- fill in, so by the dip the roll has become a wall of light.
 local function pulse_period(ctx, build)
     if build.left ~= nil and build.left <= ROLL_BEATS then return 0.5 end
-    local bar = ctx.beats_per_bar
-    return build.step < 0.33 and bar or build.step < 0.66 and bar / 2 or 1
+    return ({ ctx.beats_per_bar, ctx.beats_per_bar / 2, 1 })[build.stage + 1]
 end
 
 return {
@@ -22,7 +21,7 @@ return {
         local period = pulse_period(ctx, build)
         local pulse = sf.on_beat(ctx, PULSE_SHARE * period, period)
         local count = math.floor(ctx.beat_position / period)
-        local filled = build.left and math.max(0, 1 - build.left / ROLL_BEATS) or 0
+        local filled = sf.approach(build, ROLL_BEATS)
         local level = sf.lerp(sf.lerp(0.08, 1, filled), 1, pulse)
         local look, dark = sf.snap(ctx, ctx.beats_per_bar)
         local rolling = period < 1

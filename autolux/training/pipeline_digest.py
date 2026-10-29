@@ -82,11 +82,41 @@ def _command_effect(command: dict) -> tuple[str, str] | None:
     return None
 
 
-def _effects_match_report(events: list, report_effects: list) -> bool:
-    applied = [_command_effect(event['command']) for event in events]
-    return [effect for effect in applied if effect is not None] == [
-        (event['type'], event['name']) for event in report_effects
+CUE_RECORD_KEYS = ('start_beat_index', 'intent', 'rotation', 'overlays')
+
+
+def _cue_record(value: dict) -> dict:
+    return {
+        'start_beat_index': value['start_beat_index'],
+        'intent': value['intent'],
+        'rotation': [f"{look['bank']}/{look['autoloop']}" for look in value['rotation']],
+        'overlays': [f"{row['bank']}/{row['autoloop']}" for row in value['overlays']],
+    }
+
+
+def _effects_match_report(events: list, report: dict) -> bool:
+    """Selections and accents match the looks the report played, in order; every cue sent is
+    recorded once, in order, with its base looks and overlay rows; and every look a cue entered
+    was its section's first planned look."""
+    commands = [event['command'] for event in events]
+    applied = [_command_effect(command) for command in commands]
+    played = [
+        (effect['type'], effect['name'])
+        for effect in report['effects']
+        if 'cue_start_beat_index' not in effect
     ]
+    if [effect for effect in applied if effect is not None] != played:
+        return False
+    sent = [_cue_record(c['value']) for c in commands if c['kind'] == 'cue_section']
+    recorded = [{key: cue[key] for key in CUE_RECORD_KEYS} for cue in report['cues']]
+    if sent != recorded:
+        return False
+    planned = {(cue['start_beat_index'], cue['rotation'][0]) for cue in report['cues']}
+    return all(
+        (effect['cue_start_beat_index'], effect['name']) in planned
+        for effect in report['effects']
+        if 'cue_start_beat_index' in effect
+    )
 
 
 def _intent_at(intents: list, t: float) -> str | None:
@@ -98,7 +128,7 @@ def _intent_at(intents: list, t: float) -> str | None:
 
 
 def _effects_match_intents(report: dict) -> bool:
-    from autolux.lib.engine.effect_definitions import STANDBY_AUTOLOOP, LightIntent
+    from autolux.lib.engine.effect_definitions import STANDBY_AUTOLOOP
     from autolux.lib.engine.event_buffer import STANDBY_INTENT
     from autolux.lighting.autoloop_catalogue import discover_autoloops
 
@@ -106,11 +136,11 @@ def _effects_match_intents(report: dict) -> bool:
         intent.value: {f'{bank}/{autoloop}' for bank, autoloop in loops}
         for intent, loops in discover_autoloops().items()
     }
-    pools[LightIntent.DROP.value].add('drop_arrival')
     pools[STANDBY_INTENT] = {'/'.join(STANDBY_AUTOLOOP)}
     return all(
         effect['name'] in pools.get(_intent_at(report['intents'], effect['t']), ())
         for effect in report['effects']
+        if effect['type'] == 'AUTOLOOP'
     )
 
 
@@ -120,7 +150,7 @@ def relations_digest(report: dict, streams: dict | None = None) -> dict:
     errors_ms = _queue_errors_ms(report)
     return {
         'lighting_arrives_in_order': _non_decreasing(e['at_seconds'] for e in events),
-        'lighting_matches_report': _effects_match_report(events, report['effects']),
+        'lighting_matches_report': _effects_match_report(events, report),
         'autoloops_match_intents': _effects_match_intents(report),
         'queue_error_within_tolerance': max(errors_ms, default=0.0) < TIMING_ACCURACY_MAX_MS,
     }

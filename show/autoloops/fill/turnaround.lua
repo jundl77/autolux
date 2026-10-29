@@ -23,15 +23,15 @@ return {
         local strip_level = roll(ctx, left, progress < 0.5 and 0.5 or 0.25)
         local movers = sf.group("movers")
         return sf.scene {
-            sf.colour(sf.group("wash"), palette.secondary),
+            sf.colour(sf.group("wash"), palette.accent),
             sf.dimmer(sf.group("wash"), level),
-            sf.colour(sf.group("strip"), palette.secondary),
+            sf.colour(sf.group("strip"), palette.accent),
             sf.each(sf.group("strip"), function(pixel, index, count)
                 local distance = math.abs(sf.from_centre(index, count) - (1 - progress)) * (count - 1) / 2
                 local wiped = math.max(0, 1 - distance / sf.pixels(WIPE_SHARE, count))
                 return sf.dimmer(pixel, strip_level * wiped)
             end),
-            sf.colour(movers, palette.secondary),
+            sf.colour(movers, palette.accent),
             sf.dimmer(movers, level),
             sf.phaser(movers, ctx, { shape = "cross", size = CROSS_DEGREES * math.sin(math.pi * progress) })
         }

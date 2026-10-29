@@ -33,6 +33,8 @@ class EventBuffer:
         self._beats: deque[dict] = deque(maxlen=None if window_sec == float('inf') else 3000)
         self._beats_detected: int = 0
         self._effects: list[dict] = []
+        # Every cue sent to Starfire, once per send, as the director planned it.
+        self._cues: list[dict] = []
         self._intents: list[dict] = []
         self._timing_log: list[dict] = []
         self._current_intent: str | None = None
@@ -98,7 +100,10 @@ class EventBuffer:
         *,
         duration_seconds: float | None = None,
         selection: dict | None = None,
+        cue_start_beat_index: int | None = None,
     ) -> None:
+        """cue_start_beat_index: the look entered with its section's cue, which Starfire
+        switched on its own clock; no selection went out for it."""
         if duration_seconds is not None and (
             not math.isfinite(duration_seconds) or duration_seconds <= 0
         ):
@@ -116,9 +121,25 @@ class EventBuffer:
                 effect['end'] = now + duration_seconds
             if selection is not None:
                 effect['selection'] = selection
+            if cue_start_beat_index is not None:
+                effect['cue_start_beat_index'] = cue_start_beat_index
             self._effects.append(effect)
             cutoff = now - self._window_sec * 2
             self._effects = [e for e in self._effects if e.get('end', now) >= cutoff]
+
+    def add_cue(self, cue: dict) -> None:
+        """A cue as sent (Starfire's `cue_section` value): its base looks and overlay rows."""
+        with self._lock:
+            now = self.elapsed()
+            record = {
+                't': now,
+                'start_beat_index': cue['start_beat_index'],
+                'intent': cue['intent'],
+                'rotation': [f"{look['bank']}/{look['autoloop']}" for look in cue['rotation']],
+                'overlays': [f"{row['bank']}/{row['autoloop']}" for row in cue['overlays']],
+            }
+            cutoff = now - self._window_sec * 2
+            self._cues = [*(c for c in self._cues if c['t'] >= cutoff), record]
 
     def stop_effects(self) -> None:
         with self._lock:
@@ -370,6 +391,7 @@ class EventBuffer:
                 'duration_sec': now,
                 'beats': all_beats,
                 'effects': all_effects,
+                'cues': [copy.deepcopy(cue) for cue in self._cues],
                 'intents': all_intents,
                 'timing_log': tlog,
                 'metrics': {
