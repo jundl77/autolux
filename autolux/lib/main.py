@@ -1,4 +1,5 @@
 import asyncio
+import concurrent.futures
 import dataclasses
 import datetime
 import json
@@ -429,10 +430,10 @@ class AutoluxController:
         self.light_engine.send_renderer_settings()
 
         self._monitor.arm()
-        self.media_session.start(asyncio.get_running_loop())
+        media_watch = self.media_session.start(asyncio.get_running_loop())
         drain = asyncio.create_task(self._drain_operator_commands())
         try:
-            await self._play(drain)
+            await self._play(drain, media_watch)
         finally:
             drain.cancel()
 
@@ -441,7 +442,9 @@ class AutoluxController:
             await asyncio.sleep(STARFIRE_FRAME_PERIOD_SEC)
             await self.control.apply_pending(self.light_engine)
 
-    async def _play(self, drain: asyncio.Task) -> None:
+    async def _play(
+        self, drain: asyncio.Task, media_watch: concurrent.futures.Future | None
+    ) -> None:
         last_100ms_callback_execution: datetime.datetime = datetime.datetime.now()
         last_1sec_callback_execution: datetime.datetime = datetime.datetime.now()
         last_10sec_callback_execution: datetime.datetime = datetime.datetime.now()
@@ -452,6 +455,8 @@ class AutoluxController:
             await asyncio.sleep(0)
             if drain.done():
                 drain.result()
+            if media_watch is not None and media_watch.done():
+                media_watch.result()
             await self.light_engine.on_audio(audio_signal)
             new_audio_signal = await self.music_analyser.analyse(audio_signal)
             await self.command_queue.drain()
