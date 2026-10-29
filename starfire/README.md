@@ -22,9 +22,9 @@ named groups and helpers in `src/lua/lighting.lua`; never depend on render count
 `ctx.normalized_rms_level` is measured audio RMS normalized to 0..1, or `nil` until
 measured. Bundled autoloops keep their baseline brightness when it is unknown.
 The supplied autoloops expect `wash`, `movers` and `strip` groups in the rig.
-Selecting the current autoloop ID keeps it running. Overrides affect only their
-properties; clearing reveals the continuing baseline. Global brightness,
-animation speed, blackout and measured audio level use typed parameters.
+Overrides affect only their properties; clearing reveals the continuing
+baseline. Global brightness, animation speed, blackout and measured audio level
+use typed parameters.
 
 Every autoloop has a checked full-DMX replay plus behavior assertions. Run
 `cargo test --locked --manifest-path starfire/Cargo.toml`. The build also runs
