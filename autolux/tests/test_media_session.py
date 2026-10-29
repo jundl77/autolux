@@ -85,7 +85,7 @@ async def test_a_pause_stops_the_show_at_once_and_drops_the_delayed_audio(status
     assert commands.count({'kind': 'discard_delayed_audio'}) == 1
     assert show.monitor_silenced == 1
     assert show.queue.pending == 0
-    assert ('standby', 'warm_white') in _selections(commands)
+    assert ('standby', 'white') in _selections(commands)
 
 
 async def test_the_fade_after_a_pause_does_not_rearm_but_play_does():

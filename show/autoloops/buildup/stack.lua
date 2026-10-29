@@ -33,7 +33,8 @@ return {
             sf.dimmer(sf.group("wash"), washes_in and WASH_PEAK * level or 0),
             sf.dimmer(sf.group("movers"), movers_in and MOVER_PEAK * level or 0),
             sf.phaser(sf.group("movers"), ctx, {
-                shape = "fan", size = FAN_DEGREES, centre_tilt = LIFT_DEGREES * build.tension
+                shape = "fan", size = FAN_DEGREES, measure = build.measure,
+                centre_tilt = LIFT_DEGREES * build.tension
             })
         }
     end

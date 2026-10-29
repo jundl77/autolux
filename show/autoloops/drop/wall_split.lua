@@ -3,16 +3,18 @@
 -- movement: snap
 -- texture: wash
 local palette = sf.palette()
-local KICK_WIDTH_BEATS, WIPE_PIXELS = 0.4, 1.5
+local KICK_WIDTH_BEATS, WIPE_SHARE = 0.4, 0.19
 local FLOOR_QUIET, FLOOR_LOUD = 0.06, 0.25
-local WASH_PEAK, STRIP_PEAK, MOVER_FLOOR, MOVER_PEAK = 0.9, 0.9, 0.35, 0.85
+local WASH_PEAK, STRIP_PEAK, MOVER_FLOOR, MOVER_PEAK = 0.9, 0.9, 0.6, 0.85
 local CROSS_DEGREES, CROSS_MEASURE = 18, 4
 local OUTER_FROM = 0.5
 
--- Outer members carry the second colour and inner ones the first, so the wall reads as two
--- layers; the strip wipes outside-in over each bar to tie the halves together.
-local function split(index, count)
-    return sf.from_centre(index, count) > OUTER_FROM and palette.secondary or palette.primary
+-- Outer members carry the second colour over the group's first, so the wall reads as two
+-- layers in one colour change per outer member; the strip wipes outside-in over each bar.
+local function outer_in_b(target)
+    return sf.each(target, function(member, index, count)
+        if sf.from_centre(index, count) > OUTER_FROM then return sf.colour(member, palette.secondary) end
+    end)
 end
 
 return {
@@ -23,14 +25,15 @@ return {
         local kick = sf.on_beat(ctx, KICK_WIDTH_BEATS)
         local wipe = 1 - sf.phrase_phase(ctx, 1)
         return sf.scene {
-            sf.each(sf.group("wash"), function(wash, index, count)
-                local level = sf.lerp(floor, WASH_PEAK, kick) * gain
-                return { sf.colour(wash, split(index, count)), sf.dimmer(wash, level) }
-            end),
+            sf.colour(sf.group("wash"), palette.primary),
+            outer_in_b(sf.group("wash")),
+            sf.dimmer(sf.group("wash"), sf.lerp(floor, WASH_PEAK, kick) * gain),
+            sf.colour(sf.group("strip"), palette.primary),
+            outer_in_b(sf.group("strip")),
             sf.each(sf.group("strip"), function(pixel, index, count)
                 local distance = math.abs(sf.from_centre(index, count) - wipe) * (count - 1) / 2
-                local lit = math.max(0, 1 - distance / WIPE_PIXELS)
-                return { sf.colour(pixel, split(index, count)), sf.dimmer(pixel, STRIP_PEAK * lit * gain) }
+                local lit = math.max(0, 1 - distance / sf.pixels(WIPE_SHARE, count))
+                return sf.dimmer(pixel, STRIP_PEAK * lit * gain)
             end),
             sf.colour(sf.group("movers"), palette.secondary),
             sf.dimmer(sf.group("movers"), sf.lerp(MOVER_FLOOR, MOVER_PEAK, kick) * gain),
