@@ -7,7 +7,6 @@ local LOOP_BARS = 4
 local IGNITE_SHARE = 1 / 32
 local WASH_PEAK, STRIP_PEAK = 0.6, 0.18
 local MOVER_LEVEL = 0.2
-local CENTRE_PAN, TILT = 0.5, 0.6
 
 local function glow(phase)
     if phase < IGNITE_SHARE then return phase / IGNITE_SHARE end
@@ -23,7 +22,7 @@ return {
             sf.colour(sf.all(), palette.accent),
             sf.dimmer(sf.group("wash"), WASH_PEAK * envelope),
             sf.dimmer(sf.group("strip"), STRIP_PEAK * envelope),
-            sf.pan_tilt(sf.group("movers"), CENTRE_PAN, TILT),
+            sf.phaser(sf.group("movers"), ctx, { shape = "fan", size = 0 }),
             sf.dimmer(sf.group("movers"), MOVER_LEVEL * level)
         }
     end

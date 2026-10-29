@@ -1,0 +1,1421 @@
+{
+  "duration_seconds": 40.0,
+  "frame_rate_hz": 40,
+  "palettes": [
+    {
+      "name": "techno",
+      "primary": {
+        "red": 1,
+        "green": 0.82,
+        "blue": 0.6
+      },
+      "secondary": {
+        "red": 1,
+        "green": 0.55,
+        "blue": 0.1
+      },
+      "accent": {
+        "red": 0.75,
+        "green": 0,
+        "blue": 0.02
+      },
+      "cold": {
+        "red": 0.75,
+        "green": 0.85,
+        "blue": 1
+      },
+      "black": {
+        "red": 0,
+        "green": 0,
+        "blue": 0
+      }
+    }
+  ],
+  "events": [
+    {
+      "at_seconds": 0.0,
+      "command": {
+        "kind": "set_intensity",
+        "level": 1.0
+      }
+    },
+    {
+      "at_seconds": 0.0,
+      "command": {
+        "kind": "set_normalized_rms_level",
+        "level": 0.6
+      }
+    },
+    {
+      "at_seconds": 0.0,
+      "command": {
+        "kind": "beat",
+        "beat_index": 0,
+        "bar_phase": 0,
+        "beats_per_bar": 4,
+        "bpm": 120,
+        "features": {
+          "onset": 1.0,
+          "bass": 0.8,
+          "mid": 0.5,
+          "high": 0.3
+        }
+      }
+    },
+    {
+      "at_seconds": 0.0,
+      "command": {
+        "kind": "cue_section",
+        "value": {
+          "start_beat_index": 0,
+          "intent": "atmospheric",
+          "rotation": [
+            {
+              "bank": "atmospheric",
+              "autoloop": "dawn",
+              "bars": 32,
+              "transition": {
+                "kind": "cut"
+              }
+            }
+          ],
+          "overlays": [
+            {
+              "bank": "dip",
+              "autoloop": "last_beat",
+              "priority": 50,
+              "begin_beats": 16,
+              "length_beats": 4,
+              "every_bars": 0,
+              "attack_beats": 0.0,
+              "release_beats": 0.0
+            }
+          ],
+          "palette": "techno",
+          "seed": 7
+        }
+      }
+    },
+    {
+      "at_seconds": 0.5,
+      "command": {
+        "kind": "beat",
+        "beat_index": 1,
+        "bar_phase": 1,
+        "beats_per_bar": 4,
+        "bpm": 120,
+        "features": {
+          "onset": 0.5,
+          "bass": 0.8,
+          "mid": 0.5,
+          "high": 0.3
+        }
+      }
+    },
+    {
+      "at_seconds": 1.0,
+      "command": {
+        "kind": "beat",
+        "beat_index": 2,
+        "bar_phase": 2,
+        "beats_per_bar": 4,
+        "bpm": 120,
+        "features": {
+          "onset": 0.5,
+          "bass": 0.8,
+          "mid": 0.5,
+          "high": 0.3
+        }
+      }
+    },
+    {
+      "at_seconds": 1.5,
+      "command": {
+        "kind": "beat",
+        "beat_index": 3,
+        "bar_phase": 3,
+        "beats_per_bar": 4,
+        "bpm": 120,
+        "features": {
+          "onset": 0.5,
+          "bass": 0.8,
+          "mid": 0.5,
+          "high": 0.3
+        }
+      }
+    },
+    {
+      "at_seconds": 2.0,
+      "command": {
+        "kind": "beat",
+        "beat_index": 4,
+        "bar_phase": 0,
+        "beats_per_bar": 4,
+        "bpm": 120,
+        "features": {
+          "onset": 1.0,
+          "bass": 0.8,
+          "mid": 0.5,
+          "high": 0.3
+        }
+      }
+    },
+    {
+      "at_seconds": 2.5,
+      "command": {
+        "kind": "beat",
+        "beat_index": 5,
+        "bar_phase": 1,
+        "beats_per_bar": 4,
+        "bpm": 120,
+        "features": {
+          "onset": 0.5,
+          "bass": 0.8,
+          "mid": 0.5,
+          "high": 0.3
+        }
+      }
+    },
+    {
+      "at_seconds": 3.0,
+      "command": {
+        "kind": "beat",
+        "beat_index": 6,
+        "bar_phase": 2,
+        "beats_per_bar": 4,
+        "bpm": 120,
+        "features": {
+          "onset": 0.5,
+          "bass": 0.8,
+          "mid": 0.5,
+          "high": 0.3
+        }
+      }
+    },
+    {
+      "at_seconds": 3.5,
+      "command": {
+        "kind": "beat",
+        "beat_index": 7,
+        "bar_phase": 3,
+        "beats_per_bar": 4,
+        "bpm": 120,
+        "features": {
+          "onset": 0.5,
+          "bass": 0.8,
+          "mid": 0.5,
+          "high": 0.3
+        }
+      }
+    },
+    {
+      "at_seconds": 4.0,
+      "command": {
+        "kind": "beat",
+        "beat_index": 8,
+        "bar_phase": 0,
+        "beats_per_bar": 4,
+        "bpm": 120,
+        "features": {
+          "onset": 1.0,
+          "bass": 0.8,
+          "mid": 0.5,
+          "high": 0.3
+        }
+      }
+    },
+    {
+      "at_seconds": 4.0,
+      "command": {
+        "kind": "cue_section",
+        "value": {
+          "start_beat_index": 0,
+          "intent": "atmospheric",
+          "rotation": [
+            {
+              "bank": "atmospheric",
+              "autoloop": "dawn",
+              "bars": 32,
+              "transition": {
+                "kind": "cut"
+              }
+            }
+          ],
+          "overlays": [
+            {
+              "bank": "dip",
+              "autoloop": "last_beat",
+              "priority": 50,
+              "begin_beats": 16,
+              "length_beats": 4,
+              "every_bars": 0,
+              "attack_beats": 0.0,
+              "release_beats": 0.0
+            }
+          ],
+          "palette": "techno",
+          "seed": 7
+        }
+      }
+    },
+    {
+      "at_seconds": 4.5,
+      "command": {
+        "kind": "beat",
+        "beat_index": 9,
+        "bar_phase": 1,
+        "beats_per_bar": 4,
+        "bpm": 120,
+        "features": {
+          "onset": 0.5,
+          "bass": 0.8,
+          "mid": 0.5,
+          "high": 0.3
+        }
+      }
+    },
+    {
+      "at_seconds": 5.0,
+      "command": {
+        "kind": "beat",
+        "beat_index": 10,
+        "bar_phase": 2,
+        "beats_per_bar": 4,
+        "bpm": 120,
+        "features": {
+          "onset": 0.5,
+          "bass": 0.8,
+          "mid": 0.5,
+          "high": 0.3
+        }
+      }
+    },
+    {
+      "at_seconds": 5.5,
+      "command": {
+        "kind": "beat",
+        "beat_index": 11,
+        "bar_phase": 3,
+        "beats_per_bar": 4,
+        "bpm": 120,
+        "features": {
+          "onset": 0.5,
+          "bass": 0.8,
+          "mid": 0.5,
+          "high": 0.3
+        }
+      }
+    },
+    {
+      "at_seconds": 6.0,
+      "command": {
+        "kind": "beat",
+        "beat_index": 12,
+        "bar_phase": 0,
+        "beats_per_bar": 4,
+        "bpm": 120,
+        "features": {
+          "onset": 1.0,
+          "bass": 0.8,
+          "mid": 0.5,
+          "high": 0.3
+        }
+      }
+    },
+    {
+      "at_seconds": 6.5,
+      "command": {
+        "kind": "beat",
+        "beat_index": 13,
+        "bar_phase": 1,
+        "beats_per_bar": 4,
+        "bpm": 120,
+        "features": {
+          "onset": 0.5,
+          "bass": 0.8,
+          "mid": 0.5,
+          "high": 0.3
+        }
+      }
+    },
+    {
+      "at_seconds": 7.0,
+      "command": {
+        "kind": "beat",
+        "beat_index": 14,
+        "bar_phase": 2,
+        "beats_per_bar": 4,
+        "bpm": 120,
+        "features": {
+          "onset": 0.5,
+          "bass": 0.8,
+          "mid": 0.5,
+          "high": 0.3
+        }
+      }
+    },
+    {
+      "at_seconds": 7.5,
+      "command": {
+        "kind": "beat",
+        "beat_index": 15,
+        "bar_phase": 3,
+        "beats_per_bar": 4,
+        "bpm": 120,
+        "features": {
+          "onset": 0.5,
+          "bass": 0.8,
+          "mid": 0.5,
+          "high": 0.3
+        }
+      }
+    },
+    {
+      "at_seconds": 8.0,
+      "command": {
+        "kind": "beat",
+        "beat_index": 16,
+        "bar_phase": 0,
+        "beats_per_bar": 4,
+        "bpm": 120,
+        "features": {
+          "onset": 1.0,
+          "bass": 0.8,
+          "mid": 0.5,
+          "high": 0.3
+        }
+      }
+    },
+    {
+      "at_seconds": 8.5,
+      "command": {
+        "kind": "beat",
+        "beat_index": 17,
+        "bar_phase": 1,
+        "beats_per_bar": 4,
+        "bpm": 120,
+        "features": {
+          "onset": 0.5,
+          "bass": 0.8,
+          "mid": 0.5,
+          "high": 0.3
+        }
+      }
+    },
+    {
+      "at_seconds": 9.0,
+      "command": {
+        "kind": "beat",
+        "beat_index": 18,
+        "bar_phase": 2,
+        "beats_per_bar": 4,
+        "bpm": 120,
+        "features": {
+          "onset": 0.5,
+          "bass": 0.8,
+          "mid": 0.5,
+          "high": 0.3
+        }
+      }
+    },
+    {
+      "at_seconds": 9.5,
+      "command": {
+        "kind": "beat",
+        "beat_index": 19,
+        "bar_phase": 3,
+        "beats_per_bar": 4,
+        "bpm": 120,
+        "features": {
+          "onset": 0.5,
+          "bass": 0.8,
+          "mid": 0.5,
+          "high": 0.3
+        }
+      }
+    },
+    {
+      "at_seconds": 10.0,
+      "command": {
+        "kind": "beat",
+        "beat_index": 20,
+        "bar_phase": 0,
+        "beats_per_bar": 4,
+        "bpm": 120,
+        "features": {
+          "onset": 1.0,
+          "bass": 0.8,
+          "mid": 0.5,
+          "high": 0.3
+        }
+      }
+    },
+    {
+      "at_seconds": 10.5,
+      "command": {
+        "kind": "beat",
+        "beat_index": 21,
+        "bar_phase": 1,
+        "beats_per_bar": 4,
+        "bpm": 120,
+        "features": {
+          "onset": 0.5,
+          "bass": 0.8,
+          "mid": 0.5,
+          "high": 0.3
+        }
+      }
+    },
+    {
+      "at_seconds": 11.0,
+      "command": {
+        "kind": "beat",
+        "beat_index": 22,
+        "bar_phase": 2,
+        "beats_per_bar": 4,
+        "bpm": 120,
+        "features": {
+          "onset": 0.5,
+          "bass": 0.8,
+          "mid": 0.5,
+          "high": 0.3
+        }
+      }
+    },
+    {
+      "at_seconds": 11.5,
+      "command": {
+        "kind": "beat",
+        "beat_index": 23,
+        "bar_phase": 3,
+        "beats_per_bar": 4,
+        "bpm": 120,
+        "features": {
+          "onset": 0.5,
+          "bass": 0.8,
+          "mid": 0.5,
+          "high": 0.3
+        }
+      }
+    },
+    {
+      "at_seconds": 12.0,
+      "command": {
+        "kind": "beat",
+        "beat_index": 24,
+        "bar_phase": 0,
+        "beats_per_bar": 4,
+        "bpm": 120,
+        "features": {
+          "onset": 1.0,
+          "bass": 0.8,
+          "mid": 0.5,
+          "high": 0.3
+        }
+      }
+    },
+    {
+      "at_seconds": 12.5,
+      "command": {
+        "kind": "beat",
+        "beat_index": 25,
+        "bar_phase": 1,
+        "beats_per_bar": 4,
+        "bpm": 120,
+        "features": {
+          "onset": 0.5,
+          "bass": 0.8,
+          "mid": 0.5,
+          "high": 0.3
+        }
+      }
+    },
+    {
+      "at_seconds": 13.0,
+      "command": {
+        "kind": "beat",
+        "beat_index": 26,
+        "bar_phase": 2,
+        "beats_per_bar": 4,
+        "bpm": 120,
+        "features": {
+          "onset": 0.5,
+          "bass": 0.8,
+          "mid": 0.5,
+          "high": 0.3
+        }
+      }
+    },
+    {
+      "at_seconds": 13.5,
+      "command": {
+        "kind": "beat",
+        "beat_index": 27,
+        "bar_phase": 3,
+        "beats_per_bar": 4,
+        "bpm": 120,
+        "features": {
+          "onset": 0.5,
+          "bass": 0.8,
+          "mid": 0.5,
+          "high": 0.3
+        }
+      }
+    },
+    {
+      "at_seconds": 14.0,
+      "command": {
+        "kind": "beat",
+        "beat_index": 28,
+        "bar_phase": 0,
+        "beats_per_bar": 4,
+        "bpm": 120,
+        "features": {
+          "onset": 1.0,
+          "bass": 0.8,
+          "mid": 0.5,
+          "high": 0.3
+        }
+      }
+    },
+    {
+      "at_seconds": 14.5,
+      "command": {
+        "kind": "beat",
+        "beat_index": 29,
+        "bar_phase": 1,
+        "beats_per_bar": 4,
+        "bpm": 120,
+        "features": {
+          "onset": 0.5,
+          "bass": 0.8,
+          "mid": 0.5,
+          "high": 0.3
+        }
+      }
+    },
+    {
+      "at_seconds": 15.0,
+      "command": {
+        "kind": "beat",
+        "beat_index": 30,
+        "bar_phase": 2,
+        "beats_per_bar": 4,
+        "bpm": 120,
+        "features": {
+          "onset": 0.5,
+          "bass": 0.8,
+          "mid": 0.5,
+          "high": 0.3
+        }
+      }
+    },
+    {
+      "at_seconds": 15.5,
+      "command": {
+        "kind": "beat",
+        "beat_index": 31,
+        "bar_phase": 3,
+        "beats_per_bar": 4,
+        "bpm": 120,
+        "features": {
+          "onset": 0.5,
+          "bass": 0.8,
+          "mid": 0.5,
+          "high": 0.3
+        }
+      }
+    },
+    {
+      "at_seconds": 16.0,
+      "command": {
+        "kind": "beat",
+        "beat_index": 32,
+        "bar_phase": 0,
+        "beats_per_bar": 4,
+        "bpm": 120,
+        "features": {
+          "onset": 1.0,
+          "bass": 0.8,
+          "mid": 0.5,
+          "high": 0.3
+        }
+      }
+    },
+    {
+      "at_seconds": 16.5,
+      "command": {
+        "kind": "beat",
+        "beat_index": 33,
+        "bar_phase": 1,
+        "beats_per_bar": 4,
+        "bpm": 120,
+        "features": {
+          "onset": 0.5,
+          "bass": 0.8,
+          "mid": 0.5,
+          "high": 0.3
+        }
+      }
+    },
+    {
+      "at_seconds": 17.0,
+      "command": {
+        "kind": "beat",
+        "beat_index": 34,
+        "bar_phase": 2,
+        "beats_per_bar": 4,
+        "bpm": 120,
+        "features": {
+          "onset": 0.5,
+          "bass": 0.8,
+          "mid": 0.5,
+          "high": 0.3
+        }
+      }
+    },
+    {
+      "at_seconds": 17.5,
+      "command": {
+        "kind": "beat",
+        "beat_index": 35,
+        "bar_phase": 3,
+        "beats_per_bar": 4,
+        "bpm": 120,
+        "features": {
+          "onset": 0.5,
+          "bass": 0.8,
+          "mid": 0.5,
+          "high": 0.3
+        }
+      }
+    },
+    {
+      "at_seconds": 18.0,
+      "command": {
+        "kind": "beat",
+        "beat_index": 36,
+        "bar_phase": 0,
+        "beats_per_bar": 4,
+        "bpm": 120,
+        "features": {
+          "onset": 1.0,
+          "bass": 0.8,
+          "mid": 0.5,
+          "high": 0.3
+        }
+      }
+    },
+    {
+      "at_seconds": 18.5,
+      "command": {
+        "kind": "beat",
+        "beat_index": 37,
+        "bar_phase": 1,
+        "beats_per_bar": 4,
+        "bpm": 120,
+        "features": {
+          "onset": 0.5,
+          "bass": 0.8,
+          "mid": 0.5,
+          "high": 0.3
+        }
+      }
+    },
+    {
+      "at_seconds": 19.0,
+      "command": {
+        "kind": "beat",
+        "beat_index": 38,
+        "bar_phase": 2,
+        "beats_per_bar": 4,
+        "bpm": 120,
+        "features": {
+          "onset": 0.5,
+          "bass": 0.8,
+          "mid": 0.5,
+          "high": 0.3
+        }
+      }
+    },
+    {
+      "at_seconds": 19.5,
+      "command": {
+        "kind": "beat",
+        "beat_index": 39,
+        "bar_phase": 3,
+        "beats_per_bar": 4,
+        "bpm": 120,
+        "features": {
+          "onset": 0.5,
+          "bass": 0.8,
+          "mid": 0.5,
+          "high": 0.3
+        }
+      }
+    },
+    {
+      "at_seconds": 20.0,
+      "command": {
+        "kind": "beat",
+        "beat_index": 40,
+        "bar_phase": 0,
+        "beats_per_bar": 4,
+        "bpm": 120,
+        "features": {
+          "onset": 1.0,
+          "bass": 0.8,
+          "mid": 0.5,
+          "high": 0.3
+        }
+      }
+    },
+    {
+      "at_seconds": 20.5,
+      "command": {
+        "kind": "beat",
+        "beat_index": 41,
+        "bar_phase": 1,
+        "beats_per_bar": 4,
+        "bpm": 120,
+        "features": {
+          "onset": 0.5,
+          "bass": 0.8,
+          "mid": 0.5,
+          "high": 0.3
+        }
+      }
+    },
+    {
+      "at_seconds": 21.0,
+      "command": {
+        "kind": "beat",
+        "beat_index": 42,
+        "bar_phase": 2,
+        "beats_per_bar": 4,
+        "bpm": 120,
+        "features": {
+          "onset": 0.5,
+          "bass": 0.8,
+          "mid": 0.5,
+          "high": 0.3
+        }
+      }
+    },
+    {
+      "at_seconds": 21.5,
+      "command": {
+        "kind": "beat",
+        "beat_index": 43,
+        "bar_phase": 3,
+        "beats_per_bar": 4,
+        "bpm": 120,
+        "features": {
+          "onset": 0.5,
+          "bass": 0.8,
+          "mid": 0.5,
+          "high": 0.3
+        }
+      }
+    },
+    {
+      "at_seconds": 22.0,
+      "command": {
+        "kind": "beat",
+        "beat_index": 44,
+        "bar_phase": 0,
+        "beats_per_bar": 4,
+        "bpm": 120,
+        "features": {
+          "onset": 1.0,
+          "bass": 0.8,
+          "mid": 0.5,
+          "high": 0.3
+        }
+      }
+    },
+    {
+      "at_seconds": 22.5,
+      "command": {
+        "kind": "beat",
+        "beat_index": 45,
+        "bar_phase": 1,
+        "beats_per_bar": 4,
+        "bpm": 120,
+        "features": {
+          "onset": 0.5,
+          "bass": 0.8,
+          "mid": 0.5,
+          "high": 0.3
+        }
+      }
+    },
+    {
+      "at_seconds": 23.0,
+      "command": {
+        "kind": "beat",
+        "beat_index": 46,
+        "bar_phase": 2,
+        "beats_per_bar": 4,
+        "bpm": 120,
+        "features": {
+          "onset": 0.5,
+          "bass": 0.8,
+          "mid": 0.5,
+          "high": 0.3
+        }
+      }
+    },
+    {
+      "at_seconds": 23.5,
+      "command": {
+        "kind": "beat",
+        "beat_index": 47,
+        "bar_phase": 3,
+        "beats_per_bar": 4,
+        "bpm": 120,
+        "features": {
+          "onset": 0.5,
+          "bass": 0.8,
+          "mid": 0.5,
+          "high": 0.3
+        }
+      }
+    },
+    {
+      "at_seconds": 24.0,
+      "command": {
+        "kind": "beat",
+        "beat_index": 48,
+        "bar_phase": 0,
+        "beats_per_bar": 4,
+        "bpm": 120,
+        "features": {
+          "onset": 1.0,
+          "bass": 0.8,
+          "mid": 0.5,
+          "high": 0.3
+        }
+      }
+    },
+    {
+      "at_seconds": 24.5,
+      "command": {
+        "kind": "beat",
+        "beat_index": 49,
+        "bar_phase": 1,
+        "beats_per_bar": 4,
+        "bpm": 120,
+        "features": {
+          "onset": 0.5,
+          "bass": 0.8,
+          "mid": 0.5,
+          "high": 0.3
+        }
+      }
+    },
+    {
+      "at_seconds": 25.0,
+      "command": {
+        "kind": "beat",
+        "beat_index": 50,
+        "bar_phase": 2,
+        "beats_per_bar": 4,
+        "bpm": 120,
+        "features": {
+          "onset": 0.5,
+          "bass": 0.8,
+          "mid": 0.5,
+          "high": 0.3
+        }
+      }
+    },
+    {
+      "at_seconds": 25.5,
+      "command": {
+        "kind": "beat",
+        "beat_index": 51,
+        "bar_phase": 3,
+        "beats_per_bar": 4,
+        "bpm": 120,
+        "features": {
+          "onset": 0.5,
+          "bass": 0.8,
+          "mid": 0.5,
+          "high": 0.3
+        }
+      }
+    },
+    {
+      "at_seconds": 26.0,
+      "command": {
+        "kind": "beat",
+        "beat_index": 52,
+        "bar_phase": 0,
+        "beats_per_bar": 4,
+        "bpm": 120,
+        "features": {
+          "onset": 1.0,
+          "bass": 0.8,
+          "mid": 0.5,
+          "high": 0.3
+        }
+      }
+    },
+    {
+      "at_seconds": 26.5,
+      "command": {
+        "kind": "beat",
+        "beat_index": 53,
+        "bar_phase": 1,
+        "beats_per_bar": 4,
+        "bpm": 120,
+        "features": {
+          "onset": 0.5,
+          "bass": 0.8,
+          "mid": 0.5,
+          "high": 0.3
+        }
+      }
+    },
+    {
+      "at_seconds": 27.0,
+      "command": {
+        "kind": "beat",
+        "beat_index": 54,
+        "bar_phase": 2,
+        "beats_per_bar": 4,
+        "bpm": 120,
+        "features": {
+          "onset": 0.5,
+          "bass": 0.8,
+          "mid": 0.5,
+          "high": 0.3
+        }
+      }
+    },
+    {
+      "at_seconds": 27.5,
+      "command": {
+        "kind": "beat",
+        "beat_index": 55,
+        "bar_phase": 3,
+        "beats_per_bar": 4,
+        "bpm": 120,
+        "features": {
+          "onset": 0.5,
+          "bass": 0.8,
+          "mid": 0.5,
+          "high": 0.3
+        }
+      }
+    },
+    {
+      "at_seconds": 28.0,
+      "command": {
+        "kind": "beat",
+        "beat_index": 56,
+        "bar_phase": 0,
+        "beats_per_bar": 4,
+        "bpm": 120,
+        "features": {
+          "onset": 1.0,
+          "bass": 0.8,
+          "mid": 0.5,
+          "high": 0.3
+        }
+      }
+    },
+    {
+      "at_seconds": 28.5,
+      "command": {
+        "kind": "beat",
+        "beat_index": 57,
+        "bar_phase": 1,
+        "beats_per_bar": 4,
+        "bpm": 120,
+        "features": {
+          "onset": 0.5,
+          "bass": 0.8,
+          "mid": 0.5,
+          "high": 0.3
+        }
+      }
+    },
+    {
+      "at_seconds": 29.0,
+      "command": {
+        "kind": "beat",
+        "beat_index": 58,
+        "bar_phase": 2,
+        "beats_per_bar": 4,
+        "bpm": 120,
+        "features": {
+          "onset": 0.5,
+          "bass": 0.8,
+          "mid": 0.5,
+          "high": 0.3
+        }
+      }
+    },
+    {
+      "at_seconds": 29.5,
+      "command": {
+        "kind": "beat",
+        "beat_index": 59,
+        "bar_phase": 3,
+        "beats_per_bar": 4,
+        "bpm": 120,
+        "features": {
+          "onset": 0.5,
+          "bass": 0.8,
+          "mid": 0.5,
+          "high": 0.3
+        }
+      }
+    },
+    {
+      "at_seconds": 30.0,
+      "command": {
+        "kind": "beat",
+        "beat_index": 60,
+        "bar_phase": 0,
+        "beats_per_bar": 4,
+        "bpm": 120,
+        "features": {
+          "onset": 1.0,
+          "bass": 0.8,
+          "mid": 0.5,
+          "high": 0.3
+        }
+      }
+    },
+    {
+      "at_seconds": 30.5,
+      "command": {
+        "kind": "beat",
+        "beat_index": 61,
+        "bar_phase": 1,
+        "beats_per_bar": 4,
+        "bpm": 120,
+        "features": {
+          "onset": 0.5,
+          "bass": 0.8,
+          "mid": 0.5,
+          "high": 0.3
+        }
+      }
+    },
+    {
+      "at_seconds": 31.0,
+      "command": {
+        "kind": "beat",
+        "beat_index": 62,
+        "bar_phase": 2,
+        "beats_per_bar": 4,
+        "bpm": 120,
+        "features": {
+          "onset": 0.5,
+          "bass": 0.8,
+          "mid": 0.5,
+          "high": 0.3
+        }
+      }
+    },
+    {
+      "at_seconds": 31.5,
+      "command": {
+        "kind": "beat",
+        "beat_index": 63,
+        "bar_phase": 3,
+        "beats_per_bar": 4,
+        "bpm": 120,
+        "features": {
+          "onset": 0.5,
+          "bass": 0.8,
+          "mid": 0.5,
+          "high": 0.3
+        }
+      }
+    },
+    {
+      "at_seconds": 32.0,
+      "command": {
+        "kind": "beat",
+        "beat_index": 64,
+        "bar_phase": 0,
+        "beats_per_bar": 4,
+        "bpm": 120,
+        "features": {
+          "onset": 0.1,
+          "bass": 0.1,
+          "mid": 0.1,
+          "high": 0.1
+        }
+      }
+    },
+    {
+      "at_seconds": 32.0,
+      "command": {
+        "kind": "set_normalized_rms_level",
+        "level": 0.1
+      }
+    },
+    {
+      "at_seconds": 32.5,
+      "command": {
+        "kind": "beat",
+        "beat_index": 65,
+        "bar_phase": 1,
+        "beats_per_bar": 4,
+        "bpm": 120,
+        "features": {
+          "onset": 0.1,
+          "bass": 0.1,
+          "mid": 0.1,
+          "high": 0.1
+        }
+      }
+    },
+    {
+      "at_seconds": 33.0,
+      "command": {
+        "kind": "beat",
+        "beat_index": 66,
+        "bar_phase": 2,
+        "beats_per_bar": 4,
+        "bpm": 120,
+        "features": {
+          "onset": 0.1,
+          "bass": 0.1,
+          "mid": 0.1,
+          "high": 0.1
+        }
+      }
+    },
+    {
+      "at_seconds": 33.5,
+      "command": {
+        "kind": "beat",
+        "beat_index": 67,
+        "bar_phase": 3,
+        "beats_per_bar": 4,
+        "bpm": 120,
+        "features": {
+          "onset": 0.1,
+          "bass": 0.1,
+          "mid": 0.1,
+          "high": 0.1
+        }
+      }
+    },
+    {
+      "at_seconds": 34.0,
+      "command": {
+        "kind": "beat",
+        "beat_index": 68,
+        "bar_phase": 0,
+        "beats_per_bar": 4,
+        "bpm": 120,
+        "features": {
+          "onset": 0.1,
+          "bass": 0.1,
+          "mid": 0.1,
+          "high": 0.1
+        }
+      }
+    },
+    {
+      "at_seconds": 34.5,
+      "command": {
+        "kind": "beat",
+        "beat_index": 69,
+        "bar_phase": 1,
+        "beats_per_bar": 4,
+        "bpm": 120,
+        "features": {
+          "onset": 0.1,
+          "bass": 0.1,
+          "mid": 0.1,
+          "high": 0.1
+        }
+      }
+    },
+    {
+      "at_seconds": 35.0,
+      "command": {
+        "kind": "beat",
+        "beat_index": 70,
+        "bar_phase": 2,
+        "beats_per_bar": 4,
+        "bpm": 120,
+        "features": {
+          "onset": 0.1,
+          "bass": 0.1,
+          "mid": 0.1,
+          "high": 0.1
+        }
+      }
+    },
+    {
+      "at_seconds": 35.5,
+      "command": {
+        "kind": "beat",
+        "beat_index": 71,
+        "bar_phase": 3,
+        "beats_per_bar": 4,
+        "bpm": 120,
+        "features": {
+          "onset": 0.1,
+          "bass": 0.1,
+          "mid": 0.1,
+          "high": 0.1
+        }
+      }
+    },
+    {
+      "at_seconds": 36.0,
+      "command": {
+        "kind": "beat",
+        "beat_index": 72,
+        "bar_phase": 0,
+        "beats_per_bar": 4,
+        "bpm": 120,
+        "features": {
+          "onset": 0.1,
+          "bass": 0.1,
+          "mid": 0.1,
+          "high": 0.1
+        }
+      }
+    },
+    {
+      "at_seconds": 36.5,
+      "command": {
+        "kind": "beat",
+        "beat_index": 73,
+        "bar_phase": 1,
+        "beats_per_bar": 4,
+        "bpm": 120,
+        "features": {
+          "onset": 0.1,
+          "bass": 0.1,
+          "mid": 0.1,
+          "high": 0.1
+        }
+      }
+    },
+    {
+      "at_seconds": 37.0,
+      "command": {
+        "kind": "beat",
+        "beat_index": 74,
+        "bar_phase": 2,
+        "beats_per_bar": 4,
+        "bpm": 120,
+        "features": {
+          "onset": 0.1,
+          "bass": 0.1,
+          "mid": 0.1,
+          "high": 0.1
+        }
+      }
+    },
+    {
+      "at_seconds": 37.5,
+      "command": {
+        "kind": "beat",
+        "beat_index": 75,
+        "bar_phase": 3,
+        "beats_per_bar": 4,
+        "bpm": 120,
+        "features": {
+          "onset": 0.1,
+          "bass": 0.1,
+          "mid": 0.1,
+          "high": 0.1
+        }
+      }
+    },
+    {
+      "at_seconds": 38.0,
+      "command": {
+        "kind": "beat",
+        "beat_index": 76,
+        "bar_phase": 0,
+        "beats_per_bar": 4,
+        "bpm": 120,
+        "features": {
+          "onset": 0.1,
+          "bass": 0.1,
+          "mid": 0.1,
+          "high": 0.1
+        }
+      }
+    },
+    {
+      "at_seconds": 38.5,
+      "command": {
+        "kind": "beat",
+        "beat_index": 77,
+        "bar_phase": 1,
+        "beats_per_bar": 4,
+        "bpm": 120,
+        "features": {
+          "onset": 0.1,
+          "bass": 0.1,
+          "mid": 0.1,
+          "high": 0.1
+        }
+      }
+    },
+    {
+      "at_seconds": 39.0,
+      "command": {
+        "kind": "beat",
+        "beat_index": 78,
+        "bar_phase": 2,
+        "beats_per_bar": 4,
+        "bpm": 120,
+        "features": {
+          "onset": 0.1,
+          "bass": 0.1,
+          "mid": 0.1,
+          "high": 0.1
+        }
+      }
+    },
+    {
+      "at_seconds": 39.5,
+      "command": {
+        "kind": "beat",
+        "beat_index": 79,
+        "bar_phase": 3,
+        "beats_per_bar": 4,
+        "bpm": 120,
+        "features": {
+          "onset": 0.1,
+          "bass": 0.1,
+          "mid": 0.1,
+          "high": 0.1
+        }
+      }
+    },
+    {
+      "at_seconds": 40.0,
+      "command": {
+        "kind": "beat",
+        "beat_index": 80,
+        "bar_phase": 0,
+        "beats_per_bar": 4,
+        "bpm": 120,
+        "features": {
+          "onset": 0.1,
+          "bass": 0.1,
+          "mid": 0.1,
+          "high": 0.1
+        }
+      }
+    }
+  ]
+}

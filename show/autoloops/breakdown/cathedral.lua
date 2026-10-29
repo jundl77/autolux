@@ -5,10 +5,8 @@
 local palette = sf.palette()
 local LOOP_BEATS = 16
 local PIXEL_LOW, PIXEL_HIGH = 0.03, 0.3
-local CENTRE_PIXELS = { [4] = true, [5] = true }
 local MOVER_LEVEL = 0.4
-local CENTRE_PAN, PAN_SWING = 0.5, 0.2
-local TILT_LOW, TILT_HIGH = 0.6, 0.82
+local CROSS_DEGREES, RISE_DEGREES = 20, 12
 
 return {
     render = function(ctx)
@@ -16,22 +14,19 @@ return {
         local energy = sf.energy(ctx)
         local level = sf.loudness_gain(ctx.normalized_rms_level)
         local breath = sf.osc.sine(beat, LOOP_BEATS / 2, PIXEL_LOW, PIXEL_HIGH)
-        local cross = PAN_SWING * sf.lerp(0.5, 1, energy) * sf.osc.sine(beat, LOOP_BEATS, 1, -1)
-        local tilt = sf.osc.sine(beat, LOOP_BEATS, TILT_LOW, TILT_HIGH)
+        local cross = CROSS_DEGREES * sf.lerp(0.5, 1, energy) * sf.osc.sine(beat, LOOP_BEATS, -1, 1)
+        local rise = RISE_DEGREES * sf.osc.sine(beat, LOOP_BEATS)
         return sf.scene {
             sf.colour(sf.group("wash"), palette.black),
             sf.dimmer(sf.group("wash"), 0),
             sf.colour(sf.group("strip"), palette.cold),
-            sf.each(sf.group("strip"), function(pixel, index)
-                return sf.dimmer(pixel, CENTRE_PIXELS[index] and breath * level or 0)
+            sf.each(sf.group("strip"), function(pixel, index, count)
+                local centre = math.abs(index - (count + 1) / 2) < 1
+                return sf.dimmer(pixel, centre and breath * level or 0)
             end),
             sf.colour(sf.group("movers"), palette.cold),
-            sf.each(sf.group("movers"), function(mover, index)
-                return {
-                    sf.pan_tilt(mover, CENTRE_PAN + sf.side(index) * cross, tilt),
-                    sf.dimmer(mover, MOVER_LEVEL * level)
-                }
-            end)
+            sf.dimmer(sf.group("movers"), MOVER_LEVEL * level),
+            sf.phaser(sf.group("movers"), ctx, { shape = "cross", size = cross, centre_tilt = rise })
         }
     end
 }
