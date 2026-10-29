@@ -82,7 +82,7 @@
           "overlays": [
             {
               "bank": "hit",
-              "autoloop": "blinder",
+              "autoloop": "white",
               "priority": 40,
               "begin_beats": 16,
               "length_beats": 2,
@@ -244,7 +244,7 @@
           "overlays": [
             {
               "bank": "hit",
-              "autoloop": "blinder",
+              "autoloop": "white",
               "priority": 40,
               "begin_beats": 16,
               "length_beats": 2,

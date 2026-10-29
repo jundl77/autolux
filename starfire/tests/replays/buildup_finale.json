@@ -1604,7 +1604,7 @@
             },
             {
               "bank": "hit",
-              "autoloop": "blinder",
+              "autoloop": "white",
               "priority": 40,
               "begin_beats": 0,
               "length_beats": 2,
