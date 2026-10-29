@@ -1589,8 +1589,11 @@
               "begin_beats": -1,
               "length_beats": 1,
               "every_bars": 0,
-              "attack_beats": 0.0,
-              "release_beats": 0.0
+              "envelope": {
+                "attack_beats": 0.0,
+                "release_beats": 0.0
+              },
+              "blackout": true
             },
             {
               "bank": "riser",
@@ -1599,8 +1602,11 @@
               "begin_beats": -17,
               "length_beats": 16,
               "every_bars": 0,
-              "attack_beats": 0.5,
-              "release_beats": 0.0
+              "envelope": {
+                "attack_beats": 0.5,
+                "release_beats": 0.0
+              },
+              "blackout": false
             },
             {
               "bank": "hit",
@@ -1609,8 +1615,11 @@
               "begin_beats": 0,
               "length_beats": 2,
               "every_bars": 0,
-              "attack_beats": 0.0,
-              "release_beats": 0.0
+              "envelope": {
+                "attack_beats": 0.0,
+                "release_beats": 0.0
+              },
+              "blackout": false
             }
           ],
           "palette": "techno",

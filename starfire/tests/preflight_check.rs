@@ -76,12 +76,12 @@ fn preflight_executes_render_callbacks_in_every_autoloop() {
     fs::create_dir(&bank).unwrap();
     fs::write(
         bank.join("a_valid.lua"),
-        "return { render = function(ctx) return {} end }",
+        support::base_loop("return { render = function(ctx) return {} end }"),
     )
     .unwrap();
     fs::write(
         bank.join("z_failure.lua"),
-        "return { render = function(ctx) error('render callback failed') end }",
+        support::base_loop("return { render = function(ctx) error('render callback failed') end }"),
     )
     .unwrap();
 

@@ -87,8 +87,11 @@
               "begin_beats": 16,
               "length_beats": 2,
               "every_bars": 0,
-              "attack_beats": 0.0,
-              "release_beats": 0.0
+              "envelope": {
+                "attack_beats": 0.0,
+                "release_beats": 0.0
+              },
+              "blackout": false
             }
           ],
           "palette": "techno",
@@ -249,8 +252,11 @@
               "begin_beats": 16,
               "length_beats": 2,
               "every_bars": 0,
-              "attack_beats": 0.0,
-              "release_beats": 0.0
+              "envelope": {
+                "attack_beats": 0.0,
+                "release_beats": 0.0
+              },
+              "blackout": false
             }
           ],
           "palette": "techno",

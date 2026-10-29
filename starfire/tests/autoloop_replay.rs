@@ -1288,7 +1288,7 @@ fn overlays_end_within_length_plus_release() {
                 Command::CueSection { value } => value
                     .overlays
                     .first()
-                    .map(|row| row.begin_beats + row.length_beats + row.release_beats),
+                    .map(|row| row.begin_beats + row.length_beats + row.envelope.release_beats),
                 _ => None,
             })
             .unwrap();

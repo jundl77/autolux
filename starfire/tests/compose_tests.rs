@@ -8,8 +8,8 @@ use starfire::engine::{Engine, RenderedFrame, perceptual_to_linear_master};
 use starfire::fixtures::FixtureRig;
 use starfire::intensity::STROBE_GATE_INTENSITY;
 use starfire::model::{
-    AttributeValue, Command, FixtureState, LightingOverride, OverlayCue, OverrideLifetime,
-    PropertyValues, Rgb, RotationEntry, SectionCue, SectionIntent, Target, Transition,
+    AttributeValue, Command, CueSection, Envelope, FixtureState, LightingOverride, Overlay,
+    OverrideLifetime, PropertyValues, Rgb, SectionIntent, Step, Target, Transition,
 };
 use starfire::protocol::wire;
 use starfire::script::AutoloopCatalog;
@@ -174,41 +174,47 @@ fn at(beat: f64) -> f64 {
     beat * SECONDS_PER_BEAT
 }
 
-fn overlay(id: &str, begin_beats: f64, length_beats: f64) -> OverlayCue {
+fn overlay(id: &str, begin_beats: f64, length_beats: f64) -> Overlay {
     let (bank, autoloop) = identity(id);
-    OverlayCue {
+    Overlay {
         bank,
         autoloop,
         priority: 0,
         begin_beats,
         length_beats,
         every_bars: 0,
-        attack_beats: 0.0,
-        release_beats: 0.0,
+        envelope: Envelope::default(),
+        blackout: false,
     }
 }
 
-fn enveloped(id: &str, length_beats: f64, attack_beats: f64, release_beats: f64) -> OverlayCue {
-    OverlayCue {
-        attack_beats,
-        release_beats,
+fn enveloped(id: &str, length_beats: f64, attack_beats: f64, release_beats: f64) -> Overlay {
+    Overlay {
+        envelope: Envelope {
+            attack_beats,
+            release_beats,
+        },
         ..overlay(id, 0.0, length_beats)
     }
 }
 
-fn dip(beats: f64, attack_beats: f64) -> OverlayCue {
-    OverlayCue {
-        attack_beats,
+fn dip(beats: f64, attack_beats: f64) -> Overlay {
+    Overlay {
+        envelope: Envelope {
+            attack_beats,
+            release_beats: 0.0,
+        },
+        blackout: true,
         ..overlay("dip/dip", -beats, beats)
     }
 }
 
-fn cue(start: u64, base: &str, transition: Transition, overlays: Vec<OverlayCue>) -> SectionCue {
+fn cue(start: u64, base: &str, transition: Transition, overlays: Vec<Overlay>) -> CueSection {
     let (bank, autoloop) = identity(base);
-    SectionCue {
+    CueSection {
         start_beat_index: start,
         intent: SectionIntent::Drop,
-        rotation: vec![RotationEntry {
+        rotation: vec![Step {
             bank,
             autoloop,
             bars: 4,
@@ -221,11 +227,11 @@ fn cue(start: u64, base: &str, transition: Transition, overlays: Vec<OverlayCue>
     }
 }
 
-fn send_cue(engine: &mut Engine, beat: f64, cue: SectionCue) {
+fn send_cue(engine: &mut Engine, beat: f64, cue: CueSection) {
     engine.apply(at(beat), &support::cue(cue)).unwrap();
 }
 
-fn send(engine: &mut Engine, beat: f64, start: u64, base: &str, overlays: Vec<OverlayCue>) {
+fn send(engine: &mut Engine, beat: f64, start: u64, base: &str, overlays: Vec<Overlay>) {
     send_cue(engine, beat, cue(start, base, Transition::Cut, overlays));
 }
 
@@ -526,7 +532,7 @@ fn blackout_darkens_an_overlay_with_everything_else() {
 
 #[test]
 fn higher_priority_composes_later_and_ties_keep_list_order() {
-    let row = |id: &str, priority: i32| OverlayCue {
+    let row = |id: &str, priority: i32| Overlay {
         priority,
         ..overlay(id, 0.0, 8.0)
     };
@@ -599,8 +605,11 @@ fn envelopes_attack_from_the_first_frame_release_from_the_level_reached_and_then
         }
     }
     let mut engine = playing("dark");
-    let late = OverlayCue {
-        attack_beats: 2.0,
+    let late = Overlay {
+        envelope: Envelope {
+            attack_beats: 2.0,
+            release_beats: 0.0,
+        },
         ..overlay("full", -4.0, 4.0)
     };
     send(&mut engine, 6.0, 8, "dark", vec![late]);
@@ -887,7 +896,7 @@ fn a_failing_overlay_stops_alone_and_never_darkens_the_show() {
 #[test]
 fn a_failing_recurring_overlay_stays_stopped_for_the_rest_of_its_cue() {
     let mut engine = playing("base");
-    let every_bar = OverlayCue {
+    let every_bar = Overlay {
         every_bars: 1,
         ..overlay("breaks_at_two", 0.0, 3.0)
     };
@@ -906,10 +915,7 @@ fn a_failing_recurring_overlay_stays_stopped_for_the_rest_of_its_cue() {
 #[test]
 fn pause_drops_a_releasing_overlay_and_keeps_a_running_one() {
     let mut engine = playing("base");
-    let short = OverlayCue {
-        release_beats: 8.0,
-        ..overlay("left_full", 0.0, 1.0)
-    };
+    let short = enveloped("left_full", 1.0, 0.0, 8.0);
     send(
         &mut engine,
         0.0,
@@ -1038,29 +1044,31 @@ fn move_in_black_follows_the_dip_through_a_late_beat_and_a_bar_phase_correction(
 }
 
 #[test]
-fn only_the_dip_bank_moves_in_black() {
-    let mut engine = playing("before");
-    let fill = OverlayCue {
-        ..overlay("fill/dark_left_mover", -2.0, 2.0)
-    };
-    send(&mut engine, 0.0, 8, "after", vec![fill]);
-    render(&mut engine, 6.0);
-    let head = state(&render(&mut engine, 7.0), "mover_left").clone();
-    near(head.intensity, 0.0, "dark");
-    near(head.pan, 0.2, "a fill's dark is not a move");
+fn only_a_blackout_moves_in_black_whatever_its_bank() {
+    for id in ["fill/dark_left_mover", "dip/dip"] {
+        let mut engine = playing("before");
+        send(&mut engine, 0.0, 8, "after", vec![overlay(id, -2.0, 2.0)]);
+        render(&mut engine, 6.0);
+        let head = state(&render(&mut engine, 7.0), "mover_left").clone();
+        near(head.intensity, 0.0, id);
+        near(
+            head.pan,
+            0.2,
+            &format!("{id}: dark without the flag is not a move"),
+        );
+    }
 }
 
 #[test]
-fn a_dip_that_ends_before_the_next_cue_moves_nothing() {
+fn a_blackout_that_ends_before_its_cue_moves_nothing() {
     let mut engine = playing("before");
-    let every_bar = OverlayCue {
-        every_bars: 1,
-        ..overlay("dip/dip", 1.0, 1.0)
+    let early = Overlay {
+        blackout: true,
+        ..overlay("dip/dip", -4.0, 1.0)
     };
-    send(&mut engine, 0.0, 4, "before", vec![every_bar]);
-    send(&mut engine, 0.0, 16, "after", vec![]);
-    render(&mut engine, 4.0);
-    let frame = render(&mut engine, 5.5);
+    send(&mut engine, 0.0, 16, "after", vec![early]);
+    render(&mut engine, 12.0);
+    let frame = render(&mut engine, 12.5);
     let head = state(&frame, "mover_left");
     near(head.intensity, 0.0, "dipped");
     near(head.pan, 0.2, "held in the section");

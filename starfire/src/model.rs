@@ -6,6 +6,8 @@ pub const DMX_CHANNELS: usize = 512;
 pub const DEFAULT_FRAME_RATE_HZ: u32 = 40;
 pub const MAX_FRAME_RATE_HZ: u32 = 100;
 pub const MAX_STROBE_HZ: f64 = DEFAULT_FRAME_RATE_HZ as f64 / 4.0;
+/// Bounds every envelope, transition and overlay span a command names.
+pub const MAX_SPAN_BEATS: f64 = 1_024.0;
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -190,12 +192,12 @@ impl Default for RenderContext {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct SectionCue {
+pub struct CueSection {
     pub start_beat_index: u64,
     pub intent: SectionIntent,
-    pub rotation: Vec<RotationEntry>,
+    pub rotation: Vec<Step>,
     #[serde(default)]
-    pub overlays: Vec<OverlayCue>,
+    pub overlays: Vec<Overlay>,
     pub palette: String,
     #[serde(default)]
     pub drop_strength: Option<f64>,
@@ -205,7 +207,7 @@ pub struct SectionCue {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct RotationEntry {
+pub struct Step {
     pub bank: String,
     pub autoloop: String,
     pub bars: u32,
@@ -215,7 +217,7 @@ pub struct RotationEntry {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct OverlayCue {
+pub struct Overlay {
     pub bank: String,
     pub autoloop: String,
     #[serde(default)]
@@ -225,9 +227,43 @@ pub struct OverlayCue {
     #[serde(default)]
     pub every_bars: u32,
     #[serde(default)]
-    pub attack_beats: f64,
+    pub envelope: Envelope,
     #[serde(default)]
+    pub blackout: bool,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Envelope {
+    pub attack_beats: f64,
     pub release_beats: f64,
+}
+
+impl Envelope {
+    pub fn is_valid(&self) -> bool {
+        [self.attack_beats, self.release_beats]
+            .iter()
+            .all(|beats| beats.is_finite() && (0.0..=MAX_SPAN_BEATS).contains(beats))
+    }
+
+    /// All three in elapsed musical beats.
+    pub fn level(&self, started: f64, released_at: Option<f64>, now: f64) -> f64 {
+        let attack = |at: f64| {
+            if self.attack_beats > 0.0 {
+                ((at - started) / self.attack_beats).clamp(0.0, 1.0)
+            } else {
+                1.0
+            }
+        };
+        match released_at {
+            None => attack(now),
+            Some(released_at) if self.release_beats > 0.0 => {
+                attack(released_at)
+                    * (1.0 - (now - released_at) / self.release_beats).clamp(0.0, 1.0)
+            }
+            Some(_) => 0.0,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -270,9 +306,8 @@ pub struct SpecialFx {
     pub energy: f64,
     pub speed: f64,
     pub pulse_beats: Option<u32>,
-    pub attack_beats: f64,
-    pub release_beats: f64,
     pub pattern: Option<f64>,
+    pub envelope: Envelope,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -340,7 +375,7 @@ pub enum Command {
     },
     /// A re-sent cue's rows that are already playing carry on.
     CueSection {
-        value: Box<SectionCue>,
+        value: Box<CueSection>,
     },
     /// Overlays release; the base look plays on.
     ClearCues,

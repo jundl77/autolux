@@ -26,7 +26,11 @@ fn rig() -> FixtureRig {
 fn catalog(source: &str) -> AutoloopCatalog {
     let directory = tempfile::tempdir().unwrap();
     fs::create_dir(directory.path().join("test")).unwrap();
-    fs::write(directory.path().join("test/autoloop.lua"), source).unwrap();
+    fs::write(
+        directory.path().join("test/autoloop.lua"),
+        support::base_loop(source),
+    )
+    .unwrap();
     AutoloopCatalog::load(directory.path()).unwrap()
 }
 

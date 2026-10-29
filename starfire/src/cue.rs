@@ -5,7 +5,7 @@
 use anyhow::{Result, ensure};
 
 use crate::clock::ReceivedBeat;
-use crate::model::{OverlayCue, SectionCue, SectionIntent, Transition};
+use crate::model::{CueSection, Overlay, SectionIntent, Transition};
 
 pub const MAX_ROTATION: usize = 8;
 pub const MAX_OVERLAYS: usize = 8;
@@ -14,8 +14,6 @@ pub const MAX_ACTIVE_OVERLAYS: usize = 8;
 pub const MAX_PREROLL_BEATS: f64 = 64.0;
 pub const MAX_OVERLAY_ERROR_BYTES: usize = 256;
 const ROW_STOPPED: u64 = u64::MAX;
-/// The proto Overlay dip contract: beats_until_dip and move in black key on this bank name.
-pub const DIP_BANK: &str = "dip";
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct CueSample {
@@ -56,7 +54,7 @@ pub struct SectionContext {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct BaseStep {
+pub struct DueStep {
     pub bank: String,
     pub autoloop: String,
     pub transition: Transition,
@@ -81,7 +79,7 @@ pub enum InstanceState {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct OverlayInstance {
-    pub overlay: OverlayCue,
+    pub overlay: Overlay,
     pub order: u64,
     pub state: InstanceState,
     pub seed: u32,
@@ -100,6 +98,17 @@ impl OverlayInstance {
         }
     }
 
+    pub fn level(&self, now: f64) -> f64 {
+        let envelope = self.overlay.envelope;
+        match self.state {
+            InstanceState::Pending => 0.0,
+            InstanceState::Running(span) => envelope.level(span.started, None, now),
+            InstanceState::Releasing { span, released_at } => {
+                envelope.level(span.started, Some(released_at), now)
+            }
+        }
+    }
+
     pub fn nominal_end(&self, now: &CueSample) -> Option<f64> {
         Some(self.nominal_begin(now)? + self.overlay.length_beats)
     }
@@ -108,7 +117,7 @@ impl OverlayInstance {
         Some(now.grid_of(self.anchor_index)? + self.overlay.begin_beats)
     }
 
-    fn is_same_row(&self, row: &OverlayCue, anchor_index: i128) -> bool {
+    fn is_same_row(&self, row: &Overlay, anchor_index: i128) -> bool {
         let own = &self.overlay;
         self.anchor_index == anchor_index
             && (own.bank.as_str(), own.autoloop.as_str(), own.every_bars)
@@ -162,7 +171,7 @@ impl OverlayInstance {
         }
         match self.state {
             InstanceState::Releasing { released_at, .. } => {
-                at < released_at + self.overlay.release_beats
+                at < released_at + self.overlay.envelope.release_beats
             }
             _ => true,
         }
@@ -171,7 +180,7 @@ impl OverlayInstance {
 
 #[derive(Clone, Debug)]
 struct PendingCue {
-    cue: SectionCue,
+    cue: CueSection,
     id: u64,
     received_at: f64,
     activates_at: Option<i128>,
@@ -179,9 +188,9 @@ struct PendingCue {
 
 #[derive(Clone, Debug)]
 struct ActiveCue {
-    cue: SectionCue,
+    cue: CueSection,
     id: u64,
-    step: Option<u64>,
+    step_number: Option<u64>,
     next_repetition: Vec<u64>,
 }
 
@@ -196,7 +205,7 @@ pub struct CueTimeline {
 }
 
 impl CueTimeline {
-    pub fn receive(&mut self, cue: SectionCue, now: CueSample) -> Result<()> {
+    pub fn receive(&mut self, cue: CueSection, now: CueSample) -> Result<()> {
         let start = cue.start_beat_index;
         let kept = self
             .pending
@@ -251,7 +260,7 @@ impl CueTimeline {
             .retain(|instance| !matches!(instance.state, InstanceState::Releasing { .. }));
     }
 
-    pub fn advance(&mut self, now: CueSample) -> Option<BaseStep> {
+    pub fn advance(&mut self, now: CueSample) -> Option<DueStep> {
         now.anchor?;
         let mut pending = std::mem::take(&mut self.pending);
         for cue in &mut pending {
@@ -297,7 +306,7 @@ impl CueTimeline {
             context.beats_until_dip = cue
                 .overlays
                 .iter()
-                .filter(|row| row.bank == DIP_BANK && row.begin_beats < 0.0)
+                .filter(|row| row.blackout)
                 .map(|row| row.begin_beats)
                 .reduce(f64::min)
                 .map(|begin| (until + begin).max(0.0));
@@ -305,7 +314,7 @@ impl CueTimeline {
         context
     }
 
-    pub fn next_cue(&self, now: &CueSample) -> Option<(&SectionCue, f64)> {
+    pub fn next_cue(&self, now: &CueSample) -> Option<(&CueSection, f64)> {
         self.next_pending(now)
             .map(|(pending, grid)| (&pending.cue, grid))
     }
@@ -444,7 +453,7 @@ impl CueTimeline {
             next_repetition: vec![0; cue.cue.overlays.len()],
             cue: cue.cue,
             id: cue.id,
-            step: None,
+            step_number: None,
         };
         if let Some(previous) = self.active.take() {
             self.hand_over(previous.id, active.id, Some(&mut active), now);
@@ -547,39 +556,36 @@ impl CueTimeline {
         }
     }
 
-    fn rotate(&mut self, now: &CueSample) -> Option<BaseStep> {
+    fn rotate(&mut self, now: &CueSample) -> Option<DueStep> {
         let start_grid = self.start_grid(self.active.as_ref()?, now)?;
         let active = self.active.as_mut()?;
         let bar = now.bar_beats();
         let rotation = &active.cue.rotation;
-        let cycle: f64 = rotation
-            .iter()
-            .map(|entry| f64::from(entry.bars) * bar)
-            .sum();
+        let cycle: f64 = rotation.iter().map(|step| f64::from(step.bars) * bar).sum();
         let elapsed = (now.beat_position - start_grid).max(0.0);
         let cycles = (elapsed / cycle).floor();
-        let mut entry_begin = cycles * cycle;
+        let mut step_begin = cycles * cycle;
         let mut index = rotation.len() - 1;
-        for (candidate, entry) in rotation.iter().enumerate().take(rotation.len() - 1) {
-            let length = f64::from(entry.bars) * bar;
-            if elapsed < entry_begin + length {
+        for (candidate, step) in rotation.iter().enumerate().take(rotation.len() - 1) {
+            let length = f64::from(step.bars) * bar;
+            if elapsed < step_begin + length {
                 index = candidate;
                 break;
             }
-            entry_begin += length;
+            step_begin += length;
         }
-        let step = cycles as u64 * rotation.len() as u64 + index as u64;
-        let entering = active.step.is_none();
-        if active.step.is_some_and(|current| step <= current) {
+        let number = cycles as u64 * rotation.len() as u64 + index as u64;
+        let entering = active.step_number.is_none();
+        if active.step_number.is_some_and(|current| number <= current) {
             return None;
         }
-        active.step = Some(step);
-        let entry = &rotation[index];
-        Some(BaseStep {
-            bank: entry.bank.clone(),
-            autoloop: entry.autoloop.clone(),
-            transition: entry.transition.clone(),
-            begin_beat: start_grid + entry_begin,
+        active.step_number = Some(number);
+        let step = &rotation[index];
+        Some(DueStep {
+            bank: step.bank.clone(),
+            autoloop: step.autoloop.clone(),
+            transition: step.transition.clone(),
+            begin_beat: start_grid + step_begin,
             seed: active.cue.seed,
             palette: entering.then(|| active.cue.palette.clone()),
         })

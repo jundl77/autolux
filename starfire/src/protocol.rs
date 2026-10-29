@@ -5,9 +5,9 @@ use prost::Message;
 
 use crate::engine::Engine;
 use crate::model::{
-    AttributeValue, BeatFeatures, Command, FixturePose, LightingOverride, MovementRange,
-    OverlayCue, OverrideLifetime, PropertyValues, Rgb, RotationEntry, SectionCue, SectionIntent,
-    SpecialFx, Target, Transition,
+    AttributeValue, BeatFeatures, Command, CueSection, Envelope, FixturePose, LightingOverride,
+    MovementRange, Overlay, OverrideLifetime, PropertyValues, Rgb, SectionIntent, SpecialFx, Step,
+    Target, Transition,
 };
 
 pub const MAX_LOGIN_BYTES: usize = 4 * 1024 * 1024;
@@ -195,7 +195,7 @@ pub fn read_event(input: &mut impl Read) -> Result<Option<ServerMessage>> {
     Ok(Some(ServerMessage::decode(kind, &payload)?))
 }
 
-fn transition(value: Option<&wire::play_autoloop::Transition>) -> Transition {
+fn transition(value: Option<&wire::Transition>) -> Transition {
     match value {
         None => Transition::RendererDefault,
         Some(value) => value
@@ -205,7 +205,14 @@ fn transition(value: Option<&wire::play_autoloop::Transition>) -> Transition {
     }
 }
 
-fn section_cue(engine: &Engine, value: &wire::CueSection) -> Result<SectionCue> {
+fn envelope(value: Option<&wire::Envelope>) -> Envelope {
+    value.map_or_else(Envelope::default, |value| Envelope {
+        attack_beats: value.attack_beats,
+        release_beats: value.release_beats,
+    })
+}
+
+fn cue_section(engine: &Engine, value: &wire::CueSection) -> Result<CueSection> {
     let intent = match wire::SectionIntent::try_from(value.intent) {
         Ok(wire::SectionIntent::Atmospheric) => SectionIntent::Atmospheric,
         Ok(wire::SectionIntent::Breakdown) => SectionIntent::Breakdown,
@@ -216,13 +223,13 @@ fn section_cue(engine: &Engine, value: &wire::CueSection) -> Result<SectionCue> 
     let rotation = value
         .rotation
         .iter()
-        .map(|entry| {
-            let (bank, autoloop) = engine.resolve_autoloop(&entry.autoloop_id)?;
-            Ok(RotationEntry {
+        .map(|step| {
+            let (bank, autoloop) = engine.resolve_autoloop(&step.autoloop_id)?;
+            Ok(Step {
                 bank,
                 autoloop,
-                bars: entry.bars,
-                transition: transition(entry.transition.as_ref()),
+                bars: step.bars,
+                transition: transition(step.transition.as_ref()),
             })
         })
         .collect::<Result<_>>()?;
@@ -231,19 +238,19 @@ fn section_cue(engine: &Engine, value: &wire::CueSection) -> Result<SectionCue> 
         .iter()
         .map(|overlay| {
             let (bank, autoloop) = engine.resolve_autoloop(&overlay.autoloop_id)?;
-            Ok(OverlayCue {
+            Ok(Overlay {
                 bank,
                 autoloop,
                 priority: overlay.priority,
                 begin_beats: overlay.begin_beats,
                 length_beats: overlay.length_beats,
                 every_bars: overlay.every_bars,
-                attack_beats: overlay.attack_beats,
-                release_beats: overlay.release_beats,
+                envelope: envelope(overlay.envelope.as_ref()),
+                blackout: overlay.blackout,
             })
         })
         .collect::<Result<_>>()?;
-    Ok(SectionCue {
+    Ok(CueSection {
         start_beat_index: value.start_beat_index,
         intent,
         rotation,
@@ -275,7 +282,7 @@ pub fn apply_command(engine: &mut Engine, at_seconds: f64, command: &ClientMessa
             },
         ),
         ClientMessage::CueSection(value) => {
-            let cue = section_cue(engine, value)?;
+            let cue = cue_section(engine, value)?;
             engine.apply(
                 at_seconds,
                 &Command::CueSection {
@@ -342,9 +349,8 @@ pub fn apply_command(engine: &mut Engine, at_seconds: f64, command: &ClientMessa
                     energy: f64::from(special.energy),
                     speed: f64::from(special.speed),
                     pulse_beats: special.pulse_beats,
-                    attack_beats: f64::from(special.attack_beats),
-                    release_beats: f64::from(special.release_beats),
                     pattern: special.pattern.map(f64::from),
+                    envelope: envelope(special.envelope.as_ref()),
                 })
             });
             ensure!(

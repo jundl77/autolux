@@ -8,6 +8,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     prost_build::Config::new()
         .protoc_executable(protoc_bin_vendored::protoc_bin_path()?)
+        .boxed(".autolux.starfire.SetActiveEffect.special_fx")
         .compile_protos(SCHEMAS, &[".."])?;
     Ok(())
 }

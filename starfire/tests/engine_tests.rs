@@ -32,7 +32,7 @@ fn engine(scripts: &[(&str, &str)]) -> Engine {
     for (name, source) in scripts {
         fs::write(
             directory.path().join("test").join(format!("{name}.lua")),
-            source,
+            support::base_loop(source),
         )
         .unwrap();
     }
@@ -1319,7 +1319,7 @@ fn engine_on(rig: FixtureRig, scripts: &[(&str, &str)]) -> Engine {
     for (name, source) in scripts {
         fs::write(
             directory.path().join("test").join(format!("{name}.lua")),
-            source,
+            support::base_loop(source),
         )
         .unwrap();
     }

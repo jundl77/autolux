@@ -837,7 +837,7 @@ impl GdtfProfile {
         Ok(colour)
     }
 
-    pub fn overlay_attributes(
+    pub fn replace_attributes(
         &self,
         target: &mut BTreeMap<String, AttributeValue>,
         layer: &BTreeMap<String, AttributeValue>,

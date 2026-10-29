@@ -45,7 +45,6 @@ pub struct AutoloopCatalog {
     intensity_htp: BTreeSet<(String, String)>,
 }
 
-const OVERLAY_BANKS: [&str; 5] = ["hit", "fill", "riser", "dip", "accent"];
 /// Mirrors Autolux's OVERLAY_META_VALUES.
 const OVERLAY_HEADER: [(&str, &[&str]); 4] = [
     ("strobe", &["yes", "no"]),
@@ -54,17 +53,30 @@ const OVERLAY_HEADER: [(&str, &[&str]); 4] = [
     ("texture", &["wash", "beam", "pixel", "mixed"]),
 ];
 
-/// Mirrors Autolux's read_overlay_meta: the `-- key: value` block after the first line.
-fn overlay_htp(source: &str) -> Result<bool> {
-    let mut values: BTreeMap<&str, &str> = BTreeMap::new();
-    for line in source.split('\n').skip(1) {
-        let line = line.strip_suffix('\r').unwrap_or(line);
-        let Some((key, value)) = line
+/// The `-- key: value` block after the first line, as Autolux's catalogue reads it.
+fn header(source: &str) -> impl Iterator<Item = (&str, &str)> {
+    source.split('\n').skip(1).map_while(|line| {
+        line.strip_suffix('\r')
+            .unwrap_or(line)
             .strip_prefix("-- ")
             .and_then(|entry| entry.split_once(": "))
-        else {
-            break;
-        };
+    })
+}
+
+/// An `energy` key marks a base loop (never HTP); `strobe` and `intensity` keys mark an overlay.
+fn header_intensity_htp(source: &str) -> Result<bool> {
+    let keys: BTreeSet<&str> = header(source).map(|(key, _)| key).collect();
+    let base = keys.contains("energy");
+    let overlay = keys.contains("strobe") && keys.contains("intensity");
+    ensure!(
+        base != overlay,
+        "the header must declare a base loop's energy or an overlay's strobe and intensity"
+    );
+    if base {
+        return Ok(false);
+    }
+    let mut values: BTreeMap<&str, &str> = BTreeMap::new();
+    for (key, value) in header(source) {
         let Some((_, allowed)) = OVERLAY_HEADER.iter().find(|(name, _)| *name == key) else {
             break;
         };
@@ -197,9 +209,8 @@ impl AutoloopCatalog {
             .collect();
         let mut intensity_htp = BTreeSet::new();
         for ((bank, autoloop), source) in &sources {
-            let htp = OVERLAY_BANKS.contains(&bank.as_str())
-                && overlay_htp(source)
-                    .with_context(|| format!("invalid overlay header in {bank}/{autoloop}.lua"))?;
+            let htp = header_intensity_htp(source)
+                .with_context(|| format!("invalid header in {bank}/{autoloop}.lua"))?;
             if htp {
                 intensity_htp.insert((bank.clone(), autoloop.clone()));
             }

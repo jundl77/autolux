@@ -31,7 +31,6 @@ const METRICS_INTERVAL: Duration = Duration::from_secs(1);
 const STOP_POLL_INTERVAL: Duration = Duration::from_millis(10);
 const NANOSECONDS_PER_SECOND: u128 = 1_000_000_000;
 pub const PROTOCOL_MAJOR: u32 = wire::ProtocolVersion::ProtocolMajor as u32;
-pub const PROTOCOL_MINOR: u32 = wire::ProtocolVersion::ProtocolMinor as u32;
 
 type SharedFailure = Arc<Mutex<Option<String>>>;
 
@@ -172,7 +171,6 @@ impl LiveSession {
             frame_rate_hz: DEFAULT_FRAME_RATE_HZ,
             max_message_bytes: MAX_MESSAGE_BYTES as u32,
             protocol_major: PROTOCOL_MAJOR,
-            protocol_minor: login.protocol_minor.min(PROTOCOL_MINOR),
             groups: special::capabilities(&rig),
         };
         ensure!(
@@ -562,7 +560,6 @@ mod tests {
         let login = wire::Login {
             run_id: 1,
             protocol_major: PROTOCOL_MAJOR,
-            protocol_minor: PROTOCOL_MINOR,
             rig: Some(wire::RigDefinition {
                 fixtures: vec![wire::Fixture {
                     area: wire::StageArea::Centre as i32,

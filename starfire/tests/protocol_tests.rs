@@ -357,12 +357,12 @@ fn playback_resolves_autoloop_ids_or_idle_and_validates_repeated_selection() {
         play("atmospheric", ""),
         play("", "dawn"),
         Operation::PlayAutoloop(wire::PlayAutoloop {
-            transition: Some(wire::play_autoloop::Transition::default()),
+            transition: Some(wire::Transition::default()),
             ..Default::default()
         }),
         Operation::PlayAutoloop(wire::PlayAutoloop {
             autoloop_id: "atmospheric/dawn".into(),
-            transition: Some(wire::play_autoloop::Transition {
+            transition: Some(wire::Transition {
                 crossfade_beats: Some(f64::NAN),
             }),
             palette: "techno".into(),
@@ -501,7 +501,7 @@ fn standalone_controls_and_recorded_commands_produce_identical_dmx() {
             0.75,
             Operation::PlayAutoloop(wire::PlayAutoloop {
                 autoloop_id: "drop/kick".into(),
-                transition: Some(wire::play_autoloop::Transition {
+                transition: Some(wire::Transition {
                     crossfade_beats: Some(2.0),
                 }),
                 palette: "house".into(),
@@ -698,7 +698,7 @@ fn an_omitted_transition_fades_by_default_taking_target_attributes_at_once_and_a
     let cut = Operation::PlayAutoloop(wire::PlayAutoloop {
         command_id: 1,
         autoloop_id: ATTRIBUTE_LOOK.into(),
-        transition: Some(wire::play_autoloop::Transition::default()),
+        transition: Some(wire::Transition::default()),
         palette: "techno".into(),
     });
     let mut cutting = engine;
