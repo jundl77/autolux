@@ -17,6 +17,7 @@ from autolux.lib.engine.effect_definitions import (
     DEFAULT_INTENSITY,
     AutoloopMetaTable,
     AutoloopTable,
+    OverlayMetaTable,
     ShowSettings,
     intensity_level,
 )
@@ -284,6 +285,7 @@ class AutoluxController:
         show_config_path: Path = SHOW_CONFIG_PATH,
         autoloops: AutoloopTable = DEFAULT_AUTOLOOPS,
         autoloop_meta: AutoloopMetaTable = DEFAULT_AUTOLOOP_META,
+        overlay_meta: OverlayMetaTable | None = None,
         selection_seed: int = 0,
         static_rig: StaticRig = StaticRig(),  # noqa: B008
     ):
@@ -350,6 +352,7 @@ class AutoluxController:
             settings=lambda: self.control.settings,
             autoloops=autoloops,
             autoloop_meta=autoloop_meta,
+            overlay_meta=overlay_meta,
             seed=selection_seed,
             specials=discover_specials(),
             venue=read_venue(),
