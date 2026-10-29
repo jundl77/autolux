@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import dataclasses
 import logging
+import math
 from collections import deque
 from collections.abc import Callable
 from typing import TYPE_CHECKING
@@ -18,6 +19,8 @@ from autolux.lib.engine.autoloop_policy import (
     arrival_of_peak,
     loudness_trend,
 )
+from autolux.lib.engine.cue import Cue
+from autolux.lib.engine.cue_director import GAP_REFERENCE_BEATS, SectionRequest
 from autolux.lib.engine.delayed_command_queue import DelayedCommandQueue
 from autolux.lib.engine.effect_controller import OPERATOR_FADE_SECONDS, EffectController
 from autolux.lib.engine.effect_definitions import (
@@ -70,6 +73,37 @@ MEASUREMENT_ENDING_INTENTS = (LightIntent.BUILDUP, LightIntent.DROP)
 # Autolux polls; a gap this close to a reported resync is the bridge, not a track change.
 RESYNC_GUARD_SECONDS = 3.0
 TRACK_LEVEL_BEATS = 2048
+# The decoder commits about two bars behind the analysis head, so a section's start beat is
+# always among the last 64 analysed beats.
+BEAT_RING_SIZE = 64
+
+
+@dataclasses.dataclass(frozen=True)
+class AnalysedBeat:
+    audio_sec: float
+    beat_index: int
+    phase: int | None
+
+
+@dataclasses.dataclass(eq=False)
+class PlannedSection:
+    """A committed section waiting for its room beat."""
+
+    fire_at: float
+    intent: LightIntent
+    section_label: str | None
+    start_sec: float
+    song_sec: float | None
+    arrival: float | None
+    # The analysed downbeat the section starts on; None until that beat is analysed, and for
+    # good when no analysed beat falls at the start (the section then switches at room time).
+    start_beat_index: int | None = None
+    unplaceable: bool = False
+    # The director's cue for it once placed; Starfire holds it unless Static holds the look.
+    cue: Cue | None = None
+    # The room beat the room side switches on: the start, or for a start the room has already
+    # heard, the next downbeat (where Starfire starts the late cue).
+    switch_beat_index: int | None = None
 
 
 class LightEngine(IMusicAnalyserHandler):
@@ -110,9 +144,17 @@ class LightEngine(IMusicAnalyserHandler):
         # The last positive detector tempo; a zero-tempo warm-up keeps it.
         self._last_bpm: float | None = None
         self._beat_index_never_reset: int = 0
+        self._beat_ring: deque[AnalysedBeat] = deque(maxlen=BEAT_RING_SIZE)
+        self._room_beat_index: int = 0
+        # The first beat Starfire was sent: its grid's bar lines count from it.
+        self._grid_origin: int | None = None
         self._room_beat_phase: int | None = None
         self._room_beat_at: float = float('-inf')
         self._held_intent: LightIntent | None = None
+        # The committed section the held intent and the room's current one came from; None for
+        # a look no section planned (the baseline, the floor without a queue).
+        self._held_plan: PlannedSection | None = None
+        self._current_plan: PlannedSection | None = None
         self._intent_commits: int = 0
         self._audio_sec: float = 0.0
         self._last_logged_latency_seconds: float | None = None
@@ -161,6 +203,9 @@ class LightEngine(IMusicAnalyserHandler):
             effect_controller.special_capabilities,
             clock,
         )
+        # The next plan starts a track: set on the source clock, ahead of the room's track cue.
+        self._plan_new_track = True
+        effect_controller.palette_listener = lambda: self._revise_cues(palette=True)
         self._log_chain_latency()
 
     def set_analyser(self, analyser: MusicAnalyser):
@@ -172,7 +217,7 @@ class LightEngine(IMusicAnalyserHandler):
 
     @property
     def decided_intent(self) -> LightIntent | None:
-        return self._pending_intents[-1][1] if self._pending_intents else self._current_intent
+        return self._pending_intents[-1].intent if self._pending_intents else self._current_intent
 
     @property
     def paused(self) -> bool:
@@ -215,6 +260,7 @@ class LightEngine(IMusicAnalyserHandler):
         if self._holding() or self._current_intent is None or not self._room_playing:
             return
         self._held_intent = self._current_intent
+        self._held_plan = self._current_plan
         if self._room_beat_phase is None:
             await self._switch_held_intent()
 
@@ -230,6 +276,8 @@ class LightEngine(IMusicAnalyserHandler):
         LOGGER.info('[engine] static mode')
         self._static_mode = True
         self._held_intent = None
+        # Starfire would start the planned sections on its own clock; the held look plays on.
+        self.lighting_client.clear_cues()
         self.effect_controller.release_special(instantaneous=True)
         self._send_brightness(OPERATOR_FADE_SECONDS)
 
@@ -240,6 +288,8 @@ class LightEngine(IMusicAnalyserHandler):
         self.static_looks.clear()
         self._static_mode = False
         self._send_brightness(OPERATOR_FADE_SECONDS)
+        # The current section re-cues late, so its rotation stays on the true start.
+        self._resend_cues(current=True)
         await self._rejoin_current_intent()
 
     async def sync_static(self) -> None:
@@ -259,6 +309,9 @@ class LightEngine(IMusicAnalyserHandler):
             raise ValueError('no section is playing yet')
         context = self._selection_context(intent, self._entered_label, self._clock.monotonic())
         self.effect_controller.skip_autoloop(context)
+        # The selection ended every cue; the operator's loop holds until the next section.
+        self._current_plan = None
+        self._resend_cues(current=False)
 
     def set_master_level(self, level: float) -> None:
         if type(level) not in (int, float) or not 0.0 <= level <= 1.0:
@@ -297,14 +350,16 @@ class LightEngine(IMusicAnalyserHandler):
         if live_crossfade_beats(self._settings()) != self._sent_crossfade_beats:
             self._send_crossfade()
             LOGGER.info('[engine] crossfade %g beats', self._sent_crossfade_beats)
-        if self._holding() or self._showing_standby or self._entered_intent is None:
-            return
-        context = self._selection_context(
-            self._entered_intent, self._entered_label, self._clock.monotonic()
-        )
-        self.effect_controller.apply_intensity(
-            dataclasses.replace(context, new_track=False), self._last_bpm
-        )
+        cued = self.effect_controller.cue_for(self._current_plan) is not None
+        if not (self._holding() or self._showing_standby or self._entered_intent is None or cued):
+            context = self._selection_context(
+                self._entered_intent, self._entered_label, self._clock.monotonic()
+            )
+            self.effect_controller.apply_intensity(
+                dataclasses.replace(context, new_track=False), self._last_bpm
+            )
+        # After any swap: its selection would end the cues sent before it.
+        self._revise_cues(palette=False)
 
     def _send_brightness(self, fade_seconds: float = BRIGHTNESS_FADE_SECONDS) -> None:
         quiet = self._room_quiet and not self._static_mode
@@ -391,8 +446,7 @@ class LightEngine(IMusicAnalyserHandler):
             '[engine] digital silence — standby; the delayed audio and commands are dropped'
         )
         self._standby = True
-        if self.command_queue:
-            self.command_queue.clear()
+        self._clear_command_queue()
         self.lighting_client.discard_delayed_audio()
         if self._silence_monitor is not None:
             self._silence_monitor()
@@ -430,6 +484,8 @@ class LightEngine(IMusicAnalyserHandler):
             )
             self._after_silence = True
 
+        if not self._resync_near(detected_at):
+            self._plan_new_track = True
         if self.command_queue:
             self.command_queue.schedule('track_cue', cue)
         elif not self._resync_near(detected_at):
@@ -443,6 +499,7 @@ class LightEngine(IMusicAnalyserHandler):
             )
             self._after_silence = True
 
+        self._plan_new_track = True
         if self.command_queue:
 
             async def command():
@@ -476,8 +533,10 @@ class LightEngine(IMusicAnalyserHandler):
         self._room_playing = False
         self._startup_baseline_pending = False
         self._current_intent = None
+        self._current_plan = None
         self._section_class_at_playback = None
         self._held_intent = None
+        self._held_plan = None
         self._room_beat_phase = None
         self._room_levels.clear()
         if self._entered_intent == LightIntent.DROP:
@@ -499,6 +558,8 @@ class LightEngine(IMusicAnalyserHandler):
         self._forget_room_look()
         self._showing_standby = False
         self.lighting_client.stop()
+        # Stop ended every cue, the next track's first ones too when it started within the delay.
+        self._resend_cues(current=False)
         self.static_looks.clear_highlight()
         if self._static_mode:
             self.static_looks.resend()
@@ -509,7 +570,7 @@ class LightEngine(IMusicAnalyserHandler):
         now = self._clock.monotonic()
         self._startup_baseline_pending = False
         if self._current_intent is not None or any(
-            item[0] <= now for item in self._pending_intents
+            item.fire_at <= now for item in self._pending_intents
         ):
             return
         # Do not supersede a committed section that belongs to later room audio.
@@ -519,9 +580,15 @@ class LightEngine(IMusicAnalyserHandler):
         await self._apply_intent(None, LightIntent.ATMOSPHERIC, song_sec, None)
 
     def _reset_source_analysis(self) -> None:
+        # The new source's beats must never place the old source's sections.
+        for planned in self._pending_intents:
+            if planned.start_beat_index is None:
+                planned.unplaceable = True
         self._floor_armed = True
         self._audio_sec = 0.0
         self._beat_levels.clear()
+        # Its audio times are on the old source clock.
+        self._beat_ring.clear()
         self._track_started_audio_sec = 0.0
         if self.section_chain is not None:
             self.section_chain.reset()
@@ -591,13 +658,20 @@ class LightEngine(IMusicAnalyserHandler):
         measured = MeasuredBeat(
             bpm, normalized_rms_level, spectrum.centroid_hz, spectrum.bass_over_treble_db
         )
+        features = self._beat_features()
+        self._beat_ring.append(AnalysedBeat(self._audio_sec, beat_index, phase))
+        self._place_waiting_sections()
 
         async def publish():
             self.lighting_client.set_normalized_rms_level(normalized_rms_level)
             self._room_levels.append(normalized_rms_level)
             if published_bpm > 0:
-                self.lighting_client.beat(beat_index, phase, BEATS_PER_BAR, published_bpm)
-            await self._on_room_beat(phase)
+                if self._grid_origin is None:
+                    self._grid_origin = beat_index
+                self.lighting_client.beat(
+                    beat_index, phase, BEATS_PER_BAR, published_bpm, features=features
+                )
+            await self._on_room_beat(phase, beat_index)
             if bpm > 0:
                 self._measure_track_mood(measured, phase)
 
@@ -606,11 +680,224 @@ class LightEngine(IMusicAnalyserHandler):
         else:
             await publish()
 
-    async def _on_room_beat(self, phase: int | None) -> None:
+    def _beat_features(self) -> dict[str, float] | None:
+        """An unmeasurable beat sends none, so the beat itself still goes out."""
+        measured = self.analyser.get_beat_features()
+        if measured is None:
+            return None
+        features = dataclasses.asdict(measured)
+        if not all(math.isfinite(value) and 0.0 <= value <= 1.0 for value in features.values()):
+            return None
+        return features
+
+    async def _on_room_beat(self, phase: int | None, beat_index: int | None = None) -> None:
         self._room_beat_phase = phase
         self._room_beat_at = self._clock.monotonic()
+        if beat_index is not None:
+            self._room_beat_index = beat_index
+            # One switch clock: the room side changes on the beat Starfire starts the cue on.
+            await self._apply_due(
+                [
+                    planned
+                    for planned in self._pending_intents
+                    if planned.switch_beat_index is not None
+                    and planned.switch_beat_index <= beat_index
+                ]
+            )
         if phase == 0:
             await self._switch_held_intent()
+
+    async def _apply_due(self, due: list[PlannedSection]) -> None:
+        """Several due on one beat (after a gap): the latest wins, as in Starfire."""
+        if not due:
+            return
+        for passed in due[:-1]:
+            self._pending_intents.remove(passed)
+            self.effect_controller.drop_cue(passed)
+        planned = due[-1]
+        await self._apply_intent(
+            planned, planned.intent, planned.song_sec, planned.section_label, planned.arrival
+        )
+
+    def _start_reach(self, phased: bool) -> float:
+        """Half a bar either side for a downbeat, half a beat for a beat without a phase."""
+        beat_sec = 60.0 / self._last_bpm if self._last_bpm else 0.0
+        return (BEATS_PER_BAR if phased else 1) * beat_sec / 2
+
+    def _start_beat_index(self, start_sec: float) -> int | None:
+        """The analysed downbeat nearest a section's start; without a decoder phase, the beat
+        at start_sec. A boundary decided a little late never pushes the section a bar."""
+        candidates = [
+            beat
+            for beat in self._beat_ring
+            if beat.phase in (0, None)
+            and abs(beat.audio_sec - start_sec) <= self._start_reach(beat.phase == 0)
+        ]
+        if not candidates:
+            return None
+        return min(candidates, key=lambda beat: abs(beat.audio_sec - start_sec)).beat_index
+
+    def _place(self, planned: PlannedSection) -> None:
+        if planned.start_beat_index is not None or planned.unplaceable:
+            return
+        planned.start_beat_index = self._start_beat_index(planned.start_sec)
+        if planned.start_beat_index is not None:
+            # About 9 s before the room hears it: Starfire starts it on its own clock.
+            self._send_cue(planned)
+            self._plan_switch(planned)
+        elif self._beat_ring and self._beat_ring[
+            -1
+        ].audio_sec > planned.start_sec + self._start_reach(True):
+            planned.unplaceable = True
+
+    def _plan_switch(self, planned: PlannedSection) -> None:
+        start = planned.start_beat_index
+        if start is None or planned.switch_beat_index is not None:
+            return
+        if start > self._room_beat_index:
+            planned.switch_beat_index = start
+            return
+        for beat in self._beat_ring:
+            if beat.beat_index > self._room_beat_index and self._bar_line(beat):
+                planned.switch_beat_index = beat.beat_index
+                return
+
+    def _bar_line(self, beat: AnalysedBeat) -> bool:
+        """Where Starfire starts a late cue: a downbeat, or without a decoder phase a bar line
+        of its grid, which counts bars from the first beat it was sent."""
+        if beat.phase is not None:
+            return beat.phase == 0
+        if self._grid_origin is None:
+            return True
+        return (beat.beat_index - self._grid_origin) % BEATS_PER_BAR == 0
+
+    def _place_waiting_sections(self) -> None:
+        for planned in self._pending_intents:
+            self._place(planned)
+            # A late start waits for the next analysed downbeat.
+            self._plan_switch(planned)
+
+    def _send_cue(self, planned: PlannedSection) -> None:
+        planned.cue = self._plan_cue(planned)
+        # While Static holds the look the plan waits; leaving Static sends it.
+        if planned.cue is not None and not self._static_mode:
+            self.lighting_client.cue_section(planned.cue)
+
+    def _withdraw_superseded_cues(self) -> None:
+        """Starfire drops a pending cue only for a cue starting at or before it; a replacement
+        that is not cued yet clears them all, and the planned sections go out again in start
+        order, the current one late."""
+        self.lighting_client.clear_cues()
+        self._resend_cues(current=True)
+
+    def _clear_command_queue(self) -> None:
+        """Dropped commands take their sections along: an old track's pending drop must never
+        start on the new track's beats."""
+        if self.command_queue:
+            self.command_queue.clear()
+        self.lighting_client.clear_cues()
+        self._pending_intents.clear()
+        self._reset_plan_state()
+
+    # ---- W5 plan state ----
+    def _plan_cue(self, planned: PlannedSection) -> Cue | None:
+        """The director's plan for a committed section, against the planned previous one."""
+        bpm = self._last_bpm
+        lead_sec = max(0.0, planned.fire_at - self._clock.monotonic())
+        request = SectionRequest(
+            start_beat_index=planned.start_beat_index,
+            intent=planned.intent,
+            context=self._plan_context(planned),
+            room_sec=planned.fire_at,
+            bpm=bpm,
+            levels_before=self._levels_before(planned.start_sec),
+            lead_beats=lead_sec * bpm / 60.0 if bpm else 0.0,
+        )
+        self._plan_new_track = False
+        return self.effect_controller.plan_cue(planned, request)
+
+    def _reset_plan_state(self) -> None:
+        self.effect_controller.reset_cues()
+        self._plan_new_track = True
+        self._held_plan = self._current_plan = None
+
+    def _plan_context(self, planned: PlannedSection) -> SelectionContext:
+        """The room's history carried forward through the sections planned before this one:
+        the room is still on an earlier section when the decoder commits a later one."""
+        earlier = self._pending_intents[: self._pending_intents.index(planned)]
+        previous, label = self._entered_intent, self._entered_label
+        drop_ended_at = self._last_drop_at
+        build_started_at = self._build_started_at if previous in BUILD_INTENTS else None
+        for section in [*earlier, planned]:
+            if previous == LightIntent.DROP and section.intent != LightIntent.DROP:
+                drop_ended_at = section.fire_at
+            if section is planned:
+                break
+            if section.intent not in BUILD_INTENTS:
+                build_started_at = None
+            elif previous not in BUILD_INTENTS:
+                build_started_at = section.fire_at
+            previous, label = section.intent, section.section_label
+        at, intent = planned.fire_at, planned.intent
+        new_track = self._plan_new_track or (
+            not self._media_session_live()
+            and intent == LightIntent.ATMOSPHERIC
+            and planned.section_label in INTRO_LABELS
+            and (previous == LightIntent.DROP or label in OUTRO_LABELS)
+        )
+        building = intent in (LightIntent.BUILDUP, LightIntent.DROP) and previous in BUILD_INTENTS
+        return SelectionContext(
+            intent,
+            seconds_since_drop=None if drop_ended_at is None else at - drop_ended_at,
+            build_bars=(at - build_started_at) / self._bar_seconds()
+            if building and build_started_at is not None
+            else 0.0,
+            loudness=loudness_trend(self._levels_before(planned.start_sec)),
+            new_track=new_track,
+            arrival_of_peak=planned.arrival,
+        )
+
+    def _levels_before(self, start_sec: float) -> tuple[float, ...]:
+        opens = start_sec - self._start_reach(False)
+        levels = [level for at, level in self._beat_levels if at < opens]
+        return tuple(levels[-max(GAP_REFERENCE_BEATS, LOUDNESS_TREND_BEATS) :])
+
+    def _planned_sections(self, *, current: bool) -> list[PlannedSection]:
+        """Sections with a plan Starfire should hold: the current one, then every planned one
+        not started, in start order (a re-sent cue drops every later pending one)."""
+        ahead = [p for p in self._pending_intents if p.start_beat_index is not None]
+        if current and self._current_plan is not None:
+            return [self._current_plan, *ahead]
+        return ahead
+
+    def _sendable(self, planned: PlannedSection, cue: Cue) -> Cue:
+        """A section the room is in goes out with its recurring rows only: Starfire would
+        anchor its one-shot rows on the bar line it activates on and fire the entry again."""
+        if planned is not self._current_plan:
+            return cue
+        again = tuple(row for row in cue.overlays if row.every_bars > 0)
+        return dataclasses.replace(cue, overlays=again)
+
+    def _resend_cues(self, *, current: bool) -> None:
+        if self._static_mode:
+            return
+        for planned in self._planned_sections(current=current):
+            cue = self.effect_controller.cue_for(planned)
+            if cue is not None:
+                self.lighting_client.cue_section(self._sendable(planned, cue))
+
+    def _revise_cues(self, *, palette: bool) -> None:
+        """A level or palette change: each stored cue again with its start and seed."""
+        for planned in self._planned_sections(current=True):
+            started = planned is self._current_plan
+            cue = self.effect_controller.revise_cue(planned, started=started, palette=palette)
+            if cue is None:
+                continue
+            planned.cue = cue
+            if not self._static_mode:
+                self.lighting_client.cue_section(self._sendable(planned, cue))
+
+    # ---- end W5 plan state ----
 
     def _measure_track_mood(self, beat: MeasuredBeat, phase: int | None) -> None:
         if self._track_beats is not None:
@@ -699,6 +986,7 @@ class LightEngine(IMusicAnalyserHandler):
 
     async def _switch_held_intent(self) -> None:
         intent, self._held_intent = self._held_intent, None
+        planned, self._held_plan = self._held_plan, None
         if intent is None or self._holding_the_look():
             return
         label = self._section_class_at_playback
@@ -710,12 +998,20 @@ class LightEngine(IMusicAnalyserHandler):
         elif self._section_closes_track_mood(intent):
             self._finish_track_mood()
         bpm = self._last_bpm
-        if await self.effect_controller.change_effect(intent, bpm, context=context):
+        changed = await self.effect_controller.change_effect(
+            intent, bpm, context=context, moment=planned
+        )
+        if changed:
             self._note_new_look(intent, now)
         self._entered_label = label
+        # A selection (this one, or standby's before it) ended every cue sent before it.
+        selected = changed and self.effect_controller.cue_for(planned) is None
         if self._showing_standby:
             self._showing_standby = False
             self._send_brightness()
+            selected = True
+        if selected:
+            self._resend_cues(current=False)
 
     def _selection_context(
         self, intent: LightIntent, label: str | None, now: float
@@ -848,15 +1144,20 @@ class LightEngine(IMusicAnalyserHandler):
 
         if self.command_queue:
             self.command_queue.drop_pending('intent', fire_at)
-        self._pending_intents = [item for item in self._pending_intents if item[0] <= fire_at]
+        superseded = [item for item in self._pending_intents if item.fire_at > fire_at]
+        for item in superseded:
+            self.effect_controller.drop_cue(item)
+        superseded_cues = any(item.cue is not None for item in superseded)
+        self._pending_intents = [item for item in self._pending_intents if item.fire_at <= fire_at]
         source_start = (
             self._room_start_monotonic_seconds
             if self._room_start_monotonic_seconds is not None
             else now
         )
-        source_pending = [item for item in self._pending_intents if item[0] >= source_start]
+        source_pending = [item for item in self._pending_intents if item.fire_at >= source_start]
         if source_pending:
-            _, decided_intent, decided_section_label = source_pending[-1]
+            decided_intent = source_pending[-1].intent
+            decided_section_label = source_pending[-1].section_label
         elif source_start <= now:
             decided_intent, decided_section_label = (
                 self._current_intent,
@@ -880,13 +1181,23 @@ class LightEngine(IMusicAnalyserHandler):
         if not self.command_queue:
             await self._apply_intent(None, intent, song_sec, section_label, arrival)
             return
-        entry = (fire_at, intent, section_label)
-        self._pending_intents.append(entry)
+        start_sec = self._audio_sec - age_sec
+        planned = PlannedSection(fire_at, intent, section_label, start_sec, song_sec, arrival)
+        self._pending_intents.append(planned)
+        self._place(planned)
+        if superseded_cues and planned.cue is None:
+            self._withdraw_superseded_cues()
         await self.command_queue.enqueue(
-            'intent',
-            lambda: self._apply_intent(entry, intent, song_sec, section_label, arrival),
-            delay_sec=fire_at - now,
+            'intent', lambda: self._apply_without_beats(planned), delay_sec=fire_at - now
         )
+
+    async def _apply_without_beats(self, planned: PlannedSection) -> None:
+        """Room time decides only for a section no analysed beat placed."""
+        if planned.switch_beat_index is None:
+            planned.unplaceable = True
+            await self._apply_intent(
+                planned, planned.intent, planned.song_sec, planned.section_label, planned.arrival
+            )
 
     def _note_lateness(self, late_sec: float) -> None:
         if late_sec > 0.0:
@@ -927,6 +1238,7 @@ class LightEngine(IMusicAnalyserHandler):
         if self.event_buffer:
             self.event_buffer.set_intent(intent.value, song_sec=song_sec)
         self._current_intent = intent
+        self._current_plan = entry
         self._current_arrival_of_peak = arrival
         self.follow_music.on_intent(intent)
         if intent == LightIntent.DROP:
@@ -936,6 +1248,7 @@ class LightEngine(IMusicAnalyserHandler):
         if self._holding_the_look():
             return
         self._held_intent = intent
+        self._held_plan = entry
         if self._showing_standby or self._room_beat_phase in (None, 0):
             await self._switch_held_intent()
 

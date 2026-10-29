@@ -39,6 +39,13 @@ WARM_BRIGHT_LAID_BACK = Mood(temperature=1.0, weight=1.0, drive=-1.0)
 HARD_WARM_BRIGHT = Mood(temperature=1.0, weight=1.0, drive=1.0)
 COLD_DARK_HARD_PALETTES = {'uv', 'mono_cold', 'ice'}
 SUNSET_LIKE = {'sunset', 'house', 'mono_warm', 'ember'}
+MONO = '_mono'
+
+
+def unmono(palette: str) -> str:
+    return palette.removesuffix(MONO)
+
+
 TECHNO_LIKE = {'techno', 'acid', 'house'}
 CLEAR_LUMINANCE_GAP = 0.1
 
@@ -246,10 +253,14 @@ def test_each_drop_variant_pushes_the_accent_and_keeps_everything_else(base):
 def test_the_login_table_starts_with_the_default_and_groups_each_palette_with_its_variants():
     table = palette_table()
     assert table[0].name == DEFAULT_PALETTE == 'techno'
-    assert [palette.name for palette in table[1::3]] == [p.name for p in BREAKDOWN_PALETTES]
-    assert [palette.name for palette in table[2::3]] == [p.name for p in DROP_PALETTES]
-    assert [palette.name for palette in table[2::3]] == [f'{p.name}_drop' for p in PALETTES]
-    assert len({palette.name for palette in table}) == 3 * len(PALETTES) == 27
+    assert [palette.name for palette in table[1::5]] == [p.name for p in BREAKDOWN_PALETTES]
+    assert [palette.name for palette in table[2::5]] == [p.name for p in DROP_PALETTES]
+    assert [palette.name for palette in table[2::5]] == [f'{p.name}_drop' for p in PALETTES]
+    assert [palette.name for palette in table[3::5]] == [f'{p.name}_mono' for p in PALETTES]
+    assert [palette.name for palette in table[4::5]] == [
+        f'{p.name}_breakdown_mono' for p in PALETTES
+    ]
+    assert len({palette.name for palette in table}) == 5 * len(PALETTES) == 45
 
 
 @pytest.mark.parametrize(
@@ -314,9 +325,10 @@ async def test_a_measured_track_sends_its_palette_once_and_the_next_look_keeps_i
     await controller.change_effect(
         LightIntent.ATMOSPHERIC, context=SelectionContext(LightIntent.ATMOSPHERIC, new_track=True)
     )
-    assert palette_kinds(lighting) == [('select', DEFAULT_PALETTE)]
+    # Mono until the track's first drop.
+    assert palette_kinds(lighting) == [('select', DEFAULT_PALETTE + MONO)]
     chosen = controller.choose_track_palette(WARM_BRIGHT_LAID_BACK)
-    assert palette_kinds(lighting)[1:] == [('set_palette', chosen)]
+    assert palette_kinds(lighting)[1:] == [('set_palette', chosen + MONO)]
     await controller.change_effect(LightIntent.DROP)
     assert palette_kinds(lighting)[-1] == ('select', f'{chosen}_drop')
     assert [kind for kind, _ in palette_kinds(lighting)].count('set_palette') == 1
@@ -332,9 +344,9 @@ async def test_a_pinned_palette_survives_a_measurement_and_auto_returns_to_the_c
     controller.pin_palette('sunset')
     sent = len(lighting.events)
     chosen = controller.choose_track_palette(HARD_COLD_DARK)
-    assert len(lighting.events) == sent and lighting.palette == 'sunset_breakdown'
+    assert len(lighting.events) == sent and lighting.palette == 'sunset_breakdown_mono'
     controller.pin_palette(None)
-    assert lighting.palette == f'{chosen}_breakdown'
+    assert lighting.palette == f'{chosen}_breakdown_mono'
 
 
 async def test_a_choice_made_for_the_next_look_is_not_sent_early():
@@ -348,7 +360,7 @@ async def test_a_choice_made_for_the_next_look_is_not_sent_early():
     chosen = controller.choose_track_palette(WARM_BRIGHT_LAID_BACK, send_now=False)
     assert len(lighting.events) == sent
     await controller.change_effect(LightIntent.ATMOSPHERIC)
-    assert palette_kinds(lighting)[-1] == ('select', chosen)
+    assert palette_kinds(lighting)[-1] == ('select', chosen + MONO)
 
 
 async def engine_showing_an_intro():
@@ -373,11 +385,11 @@ async def test_the_opening_is_measured_until_the_first_buildup_and_committed_wit
     light, lighting = await engine_showing_an_intro()
     for index in range(16):
         light._measure_track_mood(WARM_BRIGHT_LAID_BACK_BEAT, index % 4)
-    assert palette_kinds(lighting) == [('select', DEFAULT_PALETTE)]
+    assert palette_kinds(lighting) == [('select', DEFAULT_PALETTE + MONO)]
     light._held_intent = LightIntent.BUILDUP
     await light._switch_held_intent()
     [_, (kind, palette)] = palette_kinds(lighting)
-    assert kind == 'select' and palette in SUNSET_LIKE
+    assert kind == 'select' and palette.endswith(MONO) and unmono(palette) in SUNSET_LIKE
     assert not light._track_mood.measuring
 
 
@@ -476,7 +488,7 @@ async def test_a_full_window_commits_its_palette_on_the_next_downbeat():
     assert sent_at_phase == []
     light._measure_track_mood(WARM_BRIGHT_LAID_BACK_BEAT, 0)
     [(kind, palette)] = palette_kinds(lighting)[1:]
-    assert kind == 'set_palette' and palette in SUNSET_LIKE
+    assert kind == 'set_palette' and unmono(palette) in SUNSET_LIKE
 
 
 async def test_a_partial_window_is_discarded_on_a_new_track_and_the_palette_holds():
@@ -486,7 +498,7 @@ async def test_a_partial_window_is_discarded_on_a_new_track_and_the_palette_hold
     light._after_silence = True
     light._held_intent = LightIntent.ATMOSPHERIC
     await light._switch_held_intent()
-    assert {palette for _, palette in palette_kinds(lighting)} == {DEFAULT_PALETTE}
+    assert {palette for _, palette in palette_kinds(lighting)} == {DEFAULT_PALETTE + MONO}
     assert light.effect_controller._palette_policy.track_palette == DEFAULT_PALETTE
     assert light._track_mood.measuring
 

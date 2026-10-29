@@ -160,6 +160,17 @@ impl MusicalClock {
         Ok(())
     }
 
+    /// The newest received beat as (beat index, grid beat): grid = index + a session offset.
+    pub fn last_beat(&self) -> Option<(u64, u64)> {
+        self.last_received
+            .map(|beat| (beat.beat_index, beat.grid_beat))
+    }
+
+    /// The newest beat's tempo, held while paused; 0 before the first beat.
+    pub fn tempo_bpm(&self) -> f64 {
+        self.tempo_bpm
+    }
+
     pub fn beats_per_second(&self) -> f64 {
         if self.paused {
             0.0

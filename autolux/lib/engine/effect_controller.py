@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import dataclasses
 import logging
+import math
 import random
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Hashable, Sequence
 from typing import TYPE_CHECKING
 
-from autolux.lib.clients.starfire_client import StarfireClient, special_target
+from autolux.lib.clients.starfire_client import StarfireClient
 from autolux.lib.clock import SYSTEM_CLOCK, Clock
 from autolux.lib.engine.autoloop_policy import (
     MAXIMAL_ARRIVAL_OF_PEAK,
@@ -17,26 +18,26 @@ from autolux.lib.engine.autoloop_policy import (
     max_energy_for_intensity,
     soft_drop,
 )
+from autolux.lib.engine.cue import Cue
+from autolux.lib.engine.cue_director import CueDirector, SectionPlan, SectionRequest
 from autolux.lib.engine.effect_definitions import (
     DEFAULT_AUTOLOOP_META,
     DEFAULT_AUTOLOOPS,
     DROP_STROBE_COOLDOWN_SCALE,
+    MAX_STROBE_COOLDOWN_SECONDS,
     STANDBY_AUTOLOOP,
     STANDBY_CROSSFADE_SECONDS,
-    STROBE_BURST_BEATS,
     STROBE_GATE_INTENSITY,
-    WILD,
     AutoloopMetaTable,
     AutoloopTable,
     LightIntent,
+    OverlayMetaTable,
     ShowSettings,
     intensity_level,
     transition_for,
 )
-from autolux.lib.engine.palette_policy import PalettePolicy, palette_variant
+from autolux.lib.engine.palette_policy import PalettePolicy, section_palette
 from autolux.lib.engine.special_policy import (
-    DEFAULT_SPECIALS,
-    DROP_STROBE,
     Special,
     SpecialCapabilities,
     SpecialPolicy,
@@ -49,20 +50,9 @@ if TYPE_CHECKING:
 
 LOGGER = logging.getLogger(__name__)
 
-DROP_ACCENT_PRIORITY = 100
-DROP_ACCENT_ID = 'drop_arrival'
-SPECIAL_PRIORITY = DROP_ACCENT_PRIORITY
+SPECIAL_PRIORITY = 100
 SPECIAL_ID = 'special'
 OPERATOR_FADE_SECONDS = 0.1
-
-
-def strobe_burst_seconds(bpm: float | None, settings: ShowSettings) -> float:
-    duration = settings.strobe_max_burst_seconds
-    if intensity_level(settings.intensity) != WILD:
-        duration = min(settings.strobe_burst_seconds, duration)
-    if bpm and bpm > 0:
-        duration = min(duration, STROBE_BURST_BEATS * 60.0 / bpm)
-    return duration * settings.intensity
 
 
 def drop_strobe_cooldown_seconds(settings: ShowSettings) -> float:
@@ -77,24 +67,6 @@ def operator_transition(bpm: float | None) -> dict:
     return {'kind': 'cut'}
 
 
-def _strobe_override(
-    override_id: str,
-    priority: int,
-    duration_seconds: float,
-    settings: ShowSettings,
-    special: Special = DROP_STROBE,
-) -> dict:
-    return {
-        'id': override_id,
-        'target': special_target(special.group),
-        'values': {
-            'strobe_hz': min(special.strobe_hz, settings.strobe_max_rate_hz) * settings.intensity
-        },
-        'priority': priority,
-        'lifetime': {'kind': 'seconds', 'duration_seconds': duration_seconds},
-    }
-
-
 class EffectController:
     def __init__(
         self,
@@ -106,16 +78,26 @@ class EffectController:
         autoloop_meta: AutoloopMetaTable = DEFAULT_AUTOLOOP_META,
         seed: int = 0,
         palettes: tuple[Palette, ...] = PALETTES,
-        specials: Sequence[Special] = DEFAULT_SPECIALS,
+        specials: Sequence[Special] = (),
         venue: Venue | None = None,
+        overlay_meta: OverlayMetaTable | None = None,
     ):
         self.lighting_client = lighting_client
         self.event_buffer = event_buffer
         self.clock = clock
         self._settings = settings
-        self._last_intense_at: float | None = None
+        # Room time of each intense moment: a fired special, or a cue's strobing entry booked
+        # at its start. A cue and the special entering with it share their section's key.
+        self._intense_at: dict[Hashable, float] = {}
         self._policy = AutoloopPolicy(autoloops, autoloop_meta, random.Random(seed))
+        self._director = CueDirector(self._policy, overlay_meta or {}, seed)
         self._entered: tuple[LightIntent, AutoloopChoice] | None = None
+        # The section key of the entered cue; None while the look came from a selection.
+        self._entered_moment: Hashable = None
+        # The room's track has played a drop: uncued looks leave mono from then on.
+        self._track_dropped = False
+        # Called after the track palette or the pin changes, so planned cues follow it.
+        self.palette_listener: Callable[[], None] | None = None
         self._palette_policy = PalettePolicy(palettes, random.Random(f'{seed}/palette'))
         self._pinned_palette: str | None = None
         self.specials = tuple(specials)
@@ -148,6 +130,8 @@ class EffectController:
             self.lighting_client.set_palette(palette)
         self._publish_palette()
         LOGGER.info('[lighting] palette %s', f'pinned to {name}' if name else 'follows the policy')
+        if self.palette_listener is not None:
+            self.palette_listener()
 
     def choose_track_palette(self, mood: Mood, *, send_now: bool = True) -> str:
         chosen = self._palette_policy.choose_for_track(mood)
@@ -160,19 +144,111 @@ class EffectController:
         if send_now and palette is not None and palette != self.lighting_client.palette:
             self.lighting_client.set_palette(palette)
             self._publish_palette()
+        if self.palette_listener is not None:
+            self.palette_listener()
         return chosen
 
     def _palette_for_current_look(self) -> str | None:
-        intent = LightIntent.ATMOSPHERIC if self._entered is None else self._entered[1].look
-        if self._pinned_palette is not None:
-            return palette_variant(self._pinned_palette, intent)
+        plan = self._entered_plan()
+        if plan is not None:
+            return section_palette(
+                self._palette_base(),
+                plan.look,
+                plan.request.intent,
+                after_first_drop=plan.after_first_drop,
+            )
         if self._entered is None:
-            return None
-        return self._palette_policy.variant_for(intent)
+            if self._pinned_palette is None:
+                return None
+            return self._palette_for(LightIntent.ATMOSPHERIC, LightIntent.ATMOSPHERIC)
+        intent, choice = self._entered
+        return self._palette_for(choice.look, intent)
 
-    def _palette_for(self, look: LightIntent) -> str:
-        base = self._pinned_palette or self._palette_policy.track_palette
-        return palette_variant(base, look)
+    def _palette_base(self) -> str:
+        return self._pinned_palette or self._palette_policy.track_palette
+
+    def _palette_for(self, look: LightIntent, intent: LightIntent) -> str:
+        """An uncued section's palette, under the cues' mono discipline."""
+        return section_palette(
+            self._palette_base(), look, intent, after_first_drop=self._track_dropped
+        )
+
+    def _entered_plan(self) -> SectionPlan | None:
+        if self._entered_moment is None:
+            return None
+        return self._director.plan_for(self._entered_moment)
+
+    def plan_cue(self, moment: Hashable, request: SectionRequest) -> Cue:
+        """The director's cue for a committed section, keyed by `moment`; its entry's venue
+        events are booked at the section's room time."""
+        plan = self._director.plan(moment, request, self._settings(), self._palette_base(), self)
+        self._book(moment, plan)
+        LOGGER.info(
+            '[lighting] cue | intent=%s start=%d | looks=%s | palette=%s | overlays=%s',
+            request.intent.name,
+            request.start_beat_index,
+            ','.join(f'{look.bank}/{look.autoloop}' for look in plan.cue.rotation),
+            plan.cue.palette,
+            ','.join(f'{row.bank}/{row.autoloop}' for row in plan.cue.overlays) or '-',
+        )
+        return plan.cue
+
+    def revise_cue(self, moment: Hashable, *, started: bool, palette: bool = False) -> Cue | None:
+        """The stored cue at the current level (or palette), same start and seed."""
+        plan = self._director.revise(
+            moment,
+            self._settings(),
+            self,
+            started=started,
+            palette=self._palette_base() if palette else None,
+        )
+        if plan is None:
+            return None
+        if not started:
+            self._book(moment, plan)
+        return plan.cue
+
+    def cue_for(self, moment: Hashable) -> Cue | None:
+        plan = self._director.plan_for(moment)
+        return None if plan is None else plan.cue
+
+    def drop_cue(self, moment: Hashable) -> None:
+        """A superseded section: its loops stay spent, its venue events are released."""
+        if self._director.drop(moment) is not None:
+            self._release_booking(moment)
+
+    def reset_cues(self) -> None:
+        """Forget every plan; booked events still ahead of the room never happen."""
+        now = self.clock.monotonic()
+        self._director.reset()
+        for moment, at in list(self._intense_at.items()):
+            if at > now:
+                self._release_booking(moment)
+        self._special_policy.forget_accents_after(now)
+
+    def _book(self, moment: Hashable, plan: SectionPlan) -> None:
+        at = plan.request.room_sec
+        kept = {
+            key: when
+            for key, when in self._intense_at.items()
+            if key != moment and abs(at - when) < MAX_STROBE_COOLDOWN_SECONDS
+        }
+        # Replaced, never mutated, so the dashboard thread reads a whole snapshot.
+        self._intense_at = {**kept, moment: at} if plan.events.intense else kept
+        if plan.events.accent:
+            self._special_policy.plan_accent(moment, at)
+        else:
+            self._special_policy.forget_accent(moment)
+
+    def _release_booking(self, moment: Hashable) -> None:
+        self._intense_at = {key: at for key, at in self._intense_at.items() if key != moment}
+        self._special_policy.forget_accent(moment)
+
+    def intense_blocked(self, at: float, moment: Hashable) -> str | None:
+        return self._intense_blocked(self._settings(), at, moment)
+
+    def accent_crowded(self, at: float, moment: Hashable) -> bool:
+        return self._special_policy.accent_crowded(at, moment)
 
     def _publish_palette(self) -> None:
         if self.event_buffer is not None:
@@ -194,12 +270,23 @@ class EffectController:
         intent: LightIntent,
         bpm: float | None = None,
         context: SelectionContext | None = None,
+        moment: Hashable = None,
     ) -> bool:
+        """Enter a section; `moment` keys its planned cue, which Starfire already started on the
+        planned beat, so a cue'd section sends no selection."""
         context = context or SelectionContext(intent)
+        plan = None if moment is None else self._director.plan_for(moment)
+        if plan is not None:
+            return self._enter_cue(intent, bpm, context, moment, plan)
+        self._entered_moment = None
+        if context.new_track:
+            self._track_dropped = False
         choice, fresh = self._entry_choice(context)
         bank, autoloop = choice.bank, choice.autoloop
         transition = transition_for(choice.look)
-        palette = self._palette_for(choice.look)
+        palette = self._palette_for(choice.look, intent)
+        if intent is LightIntent.DROP:
+            self._track_dropped = True
         if not self.lighting_client.select_autoloop(
             bank, autoloop, palette=palette, transition=transition
         ):
@@ -213,6 +300,33 @@ class EffectController:
 
         if fresh:
             self._enter_special(intent, bpm, context.arrival_of_peak)
+        else:
+            self._restore_special()
+        return True
+
+    def _enter_cue(
+        self,
+        intent: LightIntent,
+        bpm: float | None,
+        context: SelectionContext,
+        moment: Hashable,
+        plan: SectionPlan,
+    ) -> bool:
+        fresh = moment is not self._entered_moment
+        if context.new_track:
+            self._track_dropped = False
+        self._track_dropped = self._track_dropped or intent is LightIntent.DROP
+        choice = plan.choices[0]
+        self._entered = intent, choice
+        self._entered_moment = moment
+        # The cue set the look and palette on Starfire's clock, so the client's record of the last
+        # selection is stale: the next selection must always go out.
+        self.lighting_client.selected_autoloop = None
+        self.lighting_client.palette = plan.cue.palette
+        self._publish_palette()
+        self._announce('[lighting] cue |', intent, choice, plan.cue.palette)
+        if fresh:
+            self._enter_special(intent, bpm, context.arrival_of_peak, moment)
         else:
             self._restore_special()
         return True
@@ -242,7 +356,7 @@ class EffectController:
             return
         cause = f'intensity {intensity_level(intensity)}' if remapped else 'intensity cap'
         choice = dataclasses.replace(choice, reason=f'{cause}; {choice.reason}')
-        palette = self._palette_for(choice.look) if remapped else None
+        palette = self._palette_for(choice.look, context.intent) if remapped else None
         self.lighting_client.select_autoloop(
             choice.bank, choice.autoloop, palette=palette, transition=operator_transition(bpm)
         )
@@ -255,13 +369,15 @@ class EffectController:
         )
 
     def skip_autoloop(self, context: SelectionContext) -> AutoloopChoice:
-        choice = self._policy.choose(
-            context,
-            exclude=self.lighting_client.selected_autoloop,
-            intensity=self._settings().intensity,
-        )
+        """The operator's next loop; its selection ends every cue, so the section plays on
+        uncued."""
+        playing = self.lighting_client.selected_autoloop
+        if playing is None and self._entered is not None:
+            playing = self._entered[1].bank, self._entered[1].autoloop
+        choice = self._policy.choose(context, exclude=playing, intensity=self._settings().intensity)
         self.lighting_client.select_autoloop(choice.bank, choice.autoloop)
         self._policy.record(context, choice)
+        self._entered_moment = None
         self._entered = context.intent, choice
         self._announce(
             '[lighting] next autoloop |', context.intent, choice, self.lighting_client.palette
@@ -303,7 +419,6 @@ class EffectController:
         )
 
     def enter_standby(self, bpm: float | None) -> None:
-        self.lighting_client.clear_override(DROP_ACCENT_ID)
         self.forget_special(instantaneous=True)
         bank, autoloop = STANDBY_AUTOLOOP
         transition = (
@@ -320,28 +435,39 @@ class EffectController:
     def special_cooldowns(self) -> list[dict]:
         now = self.clock.monotonic()
         total = drop_strobe_cooldown_seconds(self._settings())
-        last = self._last_intense_at
+        last = max((at for at in dict(self._intense_at).values() if at <= now), default=None)
         remaining = 0.0 if last is None else max(0.0, total - (now - last))
         return self._special_policy.cooldowns(now, total, remaining, self._capabilities)
 
-    def _intense_blocked(self, settings: ShowSettings, now: float) -> str | None:
+    def _intense_blocked(
+        self, settings: ShowSettings, at: float, moment: Hashable = None
+    ) -> str | None:
+        """Why an intense event at room time `at` may not happen; either side counts, since
+        cues are booked ahead of the specials that fire in the room's now."""
         if settings.intensity <= STROBE_GATE_INTENSITY:
             return f'intensity {settings.intensity:.2f} at or below {STROBE_GATE_INTENSITY:.2f}'
         cooldown = drop_strobe_cooldown_seconds(settings)
-        last = self._last_intense_at
-        if last is not None and now - last < cooldown:
-            return f'cooldown {cooldown - (now - last):.0f}s of {cooldown:.0f}s left'
+        nearest = min(
+            (abs(at - when) for key, when in self._intense_at.items() if key != moment),
+            default=math.inf,
+        )
+        if nearest < cooldown:
+            return f'cooldown {cooldown - nearest:.0f}s of {cooldown:.0f}s left'
         return None
 
     def _enter_special(
-        self, intent: LightIntent, bpm: float | None, arrival_of_peak: float | None = None
+        self,
+        intent: LightIntent,
+        bpm: float | None,
+        arrival_of_peak: float | None = None,
+        moment: Hashable = None,
     ) -> None:
         settings = self._settings()
         now = self.clock.monotonic()
         choice = self._special_policy.choose(
             intent,
             self.special_capabilities(),
-            self._intense_blocked(settings, now),
+            self._intense_blocked(settings, now, moment),
             soft_drop=(
                 f'drop arrival {arrival_of_peak:.2f} below {MAXIMAL_ARRIVAL_OF_PEAK:.2f} '
                 'of the track peak'
@@ -349,21 +475,21 @@ class EffectController:
                 else None
             ),
             now=now,
+            moment=moment,
         )
         if not settings.fx_auto:
-            # FX off drops the special but keeps the drop strobe, the show's own accent.
+            # FX off drops the special; the cue's entry is the show's own accent.
             choice = dataclasses.replace(choice, special=None)
         if choice.suppressed:
             LOGGER.info('[lighting] intense special suppressed | %s', choice.suppressed)
         if choice.intense:
-            self._last_intense_at = now
+            key = object() if moment is None else moment
+            self._intense_at = {**self._intense_at, key: now}
         if choice.special is None:
             self.forget_special()
         else:
-            self._special_policy.record(choice.special, now, self._capabilities)
+            self._special_policy.record(choice.special, now, self._capabilities, moment)
             self._fire_special(choice.special)
-        for strobe in choice.strobes:
-            self._strobe(strobe, bpm, settings)
 
     def _fire_special(self, special: Special) -> None:
         self.lighting_client.set_special(
@@ -411,16 +537,3 @@ class EffectController:
             self._special = None
         if self._special is not None and not self._special_on:
             self._fire_special(self._special)
-
-    def _strobe(self, special: Special, bpm: float | None, settings: ShowSettings) -> None:
-        duration = strobe_burst_seconds(bpm, settings)
-        self.lighting_client.set_override(
-            _strobe_override(DROP_ACCENT_ID, DROP_ACCENT_PRIORITY, duration, settings, special)
-        )
-        if self.event_buffer:
-            self.event_buffer.add_effect(DROP_ACCENT_ID, 'ACCENT', duration_seconds=duration)
-            if not self._special_on:
-                self.event_buffer.set_special(
-                    special.name, special.group, duration_seconds=duration
-                )
-        LOGGER.info('[lighting] drop accent | duration=%.1fs', duration)

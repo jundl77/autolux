@@ -2,6 +2,7 @@
 
 import logging
 from collections import deque
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -15,6 +16,7 @@ from autolux.lib.engine.effect_definitions import (
     PREFERRED_AUTOLOOPS,
     QUIET_BRIGHTNESS,
     LightIntent,
+    ShowSettings,
     intent_for_class,
 )
 from autolux.lib.engine.event_buffer import SILENCE_TRIGGER, STOP_PERSISTENCE_SEC
@@ -30,6 +32,7 @@ class FakeAnalyser:
         self.since_beat = 0.0
         self.bpm = 128.0
         self.rms = 0.1
+        self.features = None
 
     def is_song_playing(self):
         return self.playing
@@ -50,6 +53,9 @@ class FakeAnalyser:
         from autolux.lib.analyser.music_analyser import SpectralBalance
 
         return SpectralBalance(centroid_hz=2000.0, bass_over_treble_db=15.0)
+
+    def get_beat_features(self):
+        return self.features
 
     def get_song_current_duration(self):
         import datetime
@@ -142,6 +148,7 @@ def engine(
     queue=True,
     events=False,
     playing=True,
+    **effects,
 ):
     clock = clock or VirtualClock()
     lighting = RecordingStarfireClient(clock=clock)
@@ -156,7 +163,7 @@ def engine(
         buffer.start()
     light = LightEngine(
         lighting,
-        EffectController(lighting, event_buffer=buffer),
+        EffectController(lighting, event_buffer=buffer, **effects),
         command_queue,
         event_buffer=buffer,
         playback_delay_sec=playback_delay_sec,
@@ -256,15 +263,13 @@ async def test_a_decision_commits_the_intent_its_class_maps_to(label, intent):
 
 
 @pytest.mark.parametrize('section_label', ['intro', 'drop'])
-async def test_repeated_class_holds_the_loop_without_retriggering_its_strobe(section_label):
+async def test_repeated_class_holds_the_loop_without_retriggering_its_entry(section_label):
     decoder = FakeDecoder()
     light, queue, clock, lighting = engine(decoder=decoder)
     await elapse(light, clock, 20.0)
     await bars(light, decoder, clock, section_label, section_label, section_label)
     await settle(light, clock, queue)
-    assert len(selections(lighting)) == 1
-    strobes = [event for event in lighting.events if event['command']['kind'] == 'set_override']
-    assert len(strobes) == (1 if section_label == 'drop' else 0)
+    assert len(selections(lighting) + cue_events(lighting)) == 1
     assert light.intent_commits == 1
 
 
@@ -383,7 +388,7 @@ async def test_startup_silence_keeps_inference_running_without_selecting_an_auto
     assert light.intent_commits == 0
 
 
-async def test_an_aged_decision_waits_for_the_first_audible_music_before_drop_and_accent():
+async def test_an_aged_decision_waits_for_the_first_audible_music_before_the_drop():
     decoder = FakeDecoder()
     light, queue, clock, lighting = engine(decoder=decoder, playing=False)
     await elapse(light, clock, 30.0)
@@ -394,12 +399,10 @@ async def test_an_aged_decision_waits_for_the_first_audible_music_before_drop_an
     clock.advance(13.9)
     await queue.drain()
     assert selections(lighting) == []
-    assert not any(event['command']['kind'] == 'set_override' for event in lighting.events)
 
     clock.advance(0.1)
     await queue.drain()
     assert len(selections(lighting)) == 1
-    assert len([e for e in lighting.events if e['command']['kind'] == 'set_override']) == 1
     assert light.current_intent is LightIntent.DROP
 
 
@@ -450,12 +453,10 @@ async def test_startup_baseline_preserves_a_committed_section_due_after_room_sta
     await queue.drain()
     assert light.current_intent is LightIntent.ATMOSPHERIC
     assert len(queued_intents(queue)) == 1
-    assert not any(event['command']['kind'] == 'set_override' for event in lighting.events)
 
     clock.advance(2.0)
     await queue.drain()
     assert [event['command']['bank'] for event in selections(lighting)] == ['atmospheric', 'drop']
-    assert len([e for e in lighting.events if e['command']['kind'] == 'set_override']) == 1
 
 
 async def test_first_decoded_intro_preserves_room_start_coverage_in_the_report():
@@ -1107,7 +1108,14 @@ async def test_a_later_song_survives_the_previous_songs_delayed_stop():
     clock.advance(second_start - clock.monotonic())
     await queue.drain()
     assert light.current_intent is LightIntent.DROP
-    assert [event['command']['bank'] for event in selections(lighting)] == ['atmospheric', 'drop']
+    assert [event['command']['bank'] for event in selections(lighting)] == ['atmospheric']
+    kinds = [
+        e['command'].get('value', {}).get('intent', e['command']['kind']) for e in lighting.events
+    ]
+    stop = kinds.index('stop')
+    assert 'drop' in kinds[:stop] and 'drop' in kinds[stop:], (
+        "the old song's stop ended the new song's cue, so it is sent again"
+    )
 
 
 async def test_same_intent_is_sent_again_after_a_confirmed_stop_before_the_next_song():
@@ -1125,7 +1133,12 @@ async def test_same_intent_is_sent_again_after_a_confirmed_stop_before_the_next_
     clock.advance(2.1)
     await queue.drain()
     assert light.current_intent is LightIntent.DROP
-    assert len(selections(lighting)) == 2
+    [stop] = [e for e in lighting.events if e['command']['kind'] == 'stop']
+    assert [
+        e
+        for e in selections(lighting) + cue_events(lighting)
+        if e['at_seconds'] >= stop['at_seconds']
+    ]
 
 
 @pytest.mark.parametrize('queued', [False, True])
@@ -1260,18 +1273,18 @@ async def test_an_intent_change_waits_for_the_rooms_next_downbeat_and_the_newest
     await beat_at_phase(light, decoder, 3, decision='drop')
     await elapse(light, clock, 0.5)
     await beat_at_phase(light, decoder, 0)
-    downbeat_reaches_room = clock.monotonic() + 14.0
 
     clock.advance(13.9)
     await queue.drain()
     assert selections(lighting) == [], 'switched before the downbeat reached the room'
-    assert light.current_intent is LightIntent.DROP
+    assert light.current_intent is not LightIntent.DROP, 'one switch clock: the room beat'
 
     clock.advance(0.2)
     await queue.drain()
-    [selected] = selections(lighting)
-    assert selected['command']['autoloop'] == PREFERRED_AUTOLOOPS[LightIntent.DROP]
-    assert selected['at_seconds'] == pytest.approx(downbeat_reaches_room, abs=0.15)
+    assert light.current_intent is LightIntent.DROP
+    assert selections(lighting) == [], 'Starfire started the cue on that downbeat'
+    drop = cue_events(lighting)[-1]['command']['value']
+    assert drop['rotation'][0]['autoloop'] == PREFERRED_AUTOLOOPS[LightIntent.DROP]
 
 
 async def test_a_held_intent_is_released_when_the_rooms_beats_stop():
@@ -1541,7 +1554,7 @@ async def test_two_seconds_of_digital_silence_park_the_rig_and_silence_the_room_
         'kind': 'crossfade',
         'duration_beats': pytest.approx(2.0, rel=0.01),
     }
-    assert {'kind': 'clear_override', 'id': 'drop_arrival'} in standby
+    assert {'kind': 'clear_cues'} in standby
 
     parked = len(show.lighting.events)
     chain_samples = show.chain.samples
@@ -1669,9 +1682,9 @@ class SelectionSpy(EffectController):
         super().__init__(lighting)
         self.contexts = []
 
-    async def change_effect(self, intent, bpm=None, context=None):
+    async def change_effect(self, intent, bpm=None, context=None, moment=None):
         self.contexts.append(context)
-        return await super().change_effect(intent, bpm, context)
+        return await super().change_effect(intent, bpm, context, moment)
 
 
 async def test_the_engine_tells_selection_about_builds_drops_loudness_and_new_tracks():
@@ -1889,29 +1902,34 @@ async def test_policy_palettes_reach_the_room_with_their_section_and_operator_pi
     assert sent(lighting, 'select', 'set_palette') == []
     clock.advance(0.2)
     await queue.drain()
-    [(selected_at, track_palette)] = palette_commands(lighting)
+    [(selected_at, sent_palette)] = palette_commands(lighting)
     assert selected_at == pytest.approx(decided_at + 14.0, abs=0.2)
-    assert track_palette in PALETTE_NAMES
-    assert light.event_buffer.snapshot()['palette'] == {'name': track_palette, 'pinned': False}
+    # Mono until the track's first drop.
+    track_palette = sent_palette.removesuffix('_mono')
+    assert sent_palette == f'{track_palette}_mono' and track_palette in PALETTE_NAMES
+    assert light.event_buffer.snapshot()['palette'] == {'name': sent_palette, 'pinned': False}
 
     pinned = next(name for name in PALETTE_NAMES if name != track_palette)
     pinned_at = clock.monotonic()
     control.commands.put_nowait({'action': 'palette', 'name': pinned})
     await control.apply_pending(light)
-    assert palette_commands(lighting)[-1] == (pinned_at, pinned)
-    assert light.event_buffer.snapshot()['palette'] == {'name': pinned, 'pinned': True}
+    assert palette_commands(lighting)[-1] == (pinned_at, f'{pinned}_mono')
+    assert light.event_buffer.snapshot()['palette'] == {'name': f'{pinned}_mono', 'pinned': True}
 
     await light._commit_intent(LightIntent.BREAKDOWN, 0.0, section_label='breakdown')
     clock.advance(14.1)
     await queue.drain()
     breakdown = [command for _, command in sent(lighting, 'select')][-1]
-    assert (breakdown['bank'], breakdown['palette']) == ('breakdown', f'{pinned}_breakdown')
+    assert (breakdown['bank'], breakdown['palette']) == ('breakdown', f'{pinned}_breakdown_mono')
 
     control.commands.put_nowait({'action': 'palette', 'name': 'auto'})
     await control.apply_pending(light)
-    assert palette_commands(lighting)[-1] == (clock.monotonic(), f'{track_palette}_breakdown')
+    assert palette_commands(lighting)[-1] == (
+        clock.monotonic(),
+        f'{track_palette}_breakdown_mono',
+    )
     assert light.event_buffer.snapshot()['palette'] == {
-        'name': f'{track_palette}_breakdown',
+        'name': f'{track_palette}_breakdown_mono',
         'pinned': False,
     }
 
@@ -1971,3 +1989,364 @@ async def test_a_fader_drag_updates_live_but_writes_the_show_file_once_it_settle
     assert [settings.intensity for settings in writes] == [levels[-1]]
     assert caplog.text.count('show settings') == 1
     assert main.load_show_settings(tmp_path / 'show.json').intensity == levels[-1]
+
+
+def cue_events(lighting, kind='cue_section'):
+    return [e for e in lighting.events if e['command']['kind'] == kind]
+
+
+def planned_cue(planned):
+    """A fixed cue in place of the director's, for tests of the cue transport alone."""
+    from autolux.lib.engine.cue import BaseLook, Cue
+
+    return Cue(planned.start_beat_index, planned.intent, (BaseLook('drop', 'kick', 16),), 'techno')
+
+
+async def test_the_cue_is_sent_at_commit_time_on_the_sections_analysed_downbeat():
+    decoder = FakeDecoder()
+    light, _, clock, lighting = engine(decoder=decoder)
+    await elapse(light, clock, 20.0)
+    for phase in (3, 0, 1):
+        if phase == 0:
+            start_sec = light.audio_sec
+        await beat_at_phase(light, decoder, phase)
+        await elapse(light, clock, 0.5)
+    decoder._script.append([BarDecision(0, 'drop', start_sec)])
+    committed_at = clock.monotonic()
+    await light.on_beat(1, 128.0, False)
+
+    [cue] = cue_events(lighting)
+    assert cue['at_seconds'] == committed_at, 'sent at once, ahead of the room'
+    assert cue['command']['value']['start_beat_index'] == 2
+    assert cue['command']['value']['intent'] == 'drop'
+    assert sent_beats(lighting) == [], 'the start beat itself is still on its way to the room'
+
+
+async def test_a_section_starting_on_a_beat_not_yet_analysed_is_cued_when_that_beat_arrives():
+    decoder = FakeDecoder()
+    light, _, clock, lighting = engine(decoder=decoder)
+    await elapse(light, clock, 20.0)
+    await beat_at_phase(light, decoder, 2)
+    await elapse(light, clock, 0.5)
+    await beat_at_phase(light, decoder, 3, decision='buildup')
+    assert cue_events(lighting) == []
+    await elapse(light, clock, 0.5)
+    await beat_at_phase(light, decoder, 0)
+    [cue] = cue_events(lighting)
+    assert cue['command']['value']['start_beat_index'] == 3
+
+
+def test_the_start_beat_is_the_first_downbeat_at_the_section_start_and_never_a_guess():
+    from autolux.lib.engine.light_engine import AnalysedBeat
+
+    light, _, _, _ = engine()
+    light._last_bpm = 120.0
+    light._beat_ring.extend(
+        AnalysedBeat(sec, index, phase)
+        for sec, index, phase in [(10.0, 1, 3), (10.5, 2, 0), (11.0, 3, 1), (12.5, 6, 0)]
+    )
+    assert light._start_beat_index(10.6) == 2
+    assert light._start_beat_index(11.1) == 2, 'a boundary decided late keeps its bar'
+    assert light._start_beat_index(12.0) == 6, 'the nearest downbeat'
+    assert light._start_beat_index(14.0) is None, 'half a bar either side at most'
+    light._beat_ring.clear()
+    light._beat_ring.extend([AnalysedBeat(10.0, 1, None), AnalysedBeat(10.5, 2, None)])
+    assert light._start_beat_index(10.4) == 2, 'without a phase, the beat at the start'
+
+
+async def test_clearing_the_command_queue_clears_every_cue_at_once():
+    decoder = FakeDecoder()
+    light, queue, clock, lighting = engine(decoder=decoder)
+    await elapse(light, clock, 20.0)
+    await beat_at_phase(light, decoder, 3, decision='drop')
+    await elapse(light, clock, 0.5)
+    await beat_at_phase(light, decoder, 0)
+    [planned] = light._pending_intents
+    assert light.effect_controller.cue_for(planned) is not None
+    light.on_digital_silence()
+    [cleared] = cue_events(lighting, 'clear_cues')
+    assert cleared['at_seconds'] == clock.monotonic()
+    assert light._pending_intents == [] and queue.pending == 0
+    assert light.effect_controller.cue_for(planned) is None, 'the plan went with the queue'
+
+
+async def test_published_beats_carry_the_analysers_features_as_levels():
+    from autolux.lib.analyser.music_analyser import BeatFeatures
+
+    decoder = FakeDecoder()
+    light, _, _, lighting = engine(decoder=decoder, queue=False)
+    await beat_at_phase(light, decoder, 0)
+    light.analyser.features = BeatFeatures(onset=0.7, bass=1.0, mid=0.5, high=0.0)
+    await beat_at_phase(light, decoder, 1)
+    light.analyser.features = BeatFeatures(onset=float('nan'), bass=1.0, mid=0.5, high=0.0)
+    await beat_at_phase(light, decoder, 2)
+    first, second, unmeasurable = sent_beats(lighting)
+    assert 'features' not in first
+    assert second['features'] == {'onset': 0.7, 'bass': 1.0, 'mid': 0.5, 'high': 0.0}
+    assert 'features' not in unmeasurable, 'the beat still goes out'
+
+
+async def test_the_room_switches_in_the_beat_publish_of_the_planned_start_beat():
+    decoder = FakeDecoder()
+    light, queue, clock, lighting = engine(decoder=decoder)
+    switched = []
+    change_effect = light.effect_controller.change_effect
+
+    async def spy(intent, *args, **kwargs):
+        switched.append((intent, clock.monotonic()))
+        return await change_effect(intent, *args, **kwargs)
+
+    light.effect_controller.change_effect = spy
+    await elapse(light, clock, 20.0)
+    await beat_at_phase(light, decoder, 3, decision='drop')
+    await elapse(light, clock, 0.5)
+    await beat_at_phase(light, decoder, 0)
+    [planned] = light._pending_intents
+    assert planned.switch_beat_index == planned.start_beat_index == 2
+    clock.advance(14.0 - 0.5 - 0.01)
+    await queue.drain()
+    assert light.current_intent is not LightIntent.DROP
+    clock.advance(0.5 + 0.02)
+    await queue.drain()
+    [published] = [e for e in lighting.events if e['command'].get('beat_index') == 2]
+    assert switched == [(LightIntent.DROP, published['at_seconds'])]
+    assert selections(lighting) == [], 'a cued section sends no selection'
+    assert light._entered_intent is LightIntent.DROP
+    assert light.current_intent is LightIntent.DROP
+
+
+async def test_a_late_section_switches_on_the_next_room_downbeat_as_starfire_does():
+    decoder = FakeDecoder()
+    light, queue, clock, _ = engine(decoder=decoder, playback_delay_sec=1.0)
+    await elapse(light, clock, 20.0)
+    for phase in (0, 1, 2):
+        await beat_at_phase(light, decoder, phase)
+        await elapse(light, clock, 0.5)
+        await queue.drain()
+    clock.advance(1.0)
+    await queue.drain()
+    # The room has heard the downbeat (index 1) the section starts on.
+    decoder._script.append([BarDecision(0, 'drop', light.audio_sec - 1.5)])
+    await beat_at_phase(light, decoder, 3)
+    [planned] = light._pending_intents
+    assert (planned.start_beat_index, planned.switch_beat_index) == (1, None)
+    await elapse(light, clock, 0.5)
+    await beat_at_phase(light, decoder, 0)
+    assert planned.switch_beat_index == 5
+    clock.advance(1.1)
+    await queue.drain()
+    assert light.current_intent is LightIntent.DROP
+
+
+async def planned_drop(light, decoder, clock):
+    await elapse(light, clock, 20.0)
+    await beat_at_phase(light, decoder, 3, decision='drop')
+    await elapse(light, clock, 0.5)
+    await beat_at_phase(light, decoder, 0)
+    [planned] = light._pending_intents
+    return planned
+
+
+async def test_a_level_change_re_sends_the_planned_cue_with_its_start_and_seed():
+    decoder = FakeDecoder()
+    control = SimpleNamespace(settings=ShowSettings(intensity=0.7))
+    light, _, clock, lighting = engine(decoder=decoder)
+    light._settings = light.effect_controller._settings = lambda: control.settings
+    planned = await planned_drop(light, decoder, clock)
+    [first] = cue_events(lighting)
+    control.settings = ShowSettings(intensity=1.0)
+    light.intensity_changed()
+    first, again = (e['command']['value'] for e in cue_events(lighting))
+    assert (again['start_beat_index'], again['seed'], again['rotation']) == (
+        first['start_beat_index'],
+        first['seed'],
+        first['rotation'],
+    )
+    assert light.effect_controller.cue_for(planned).command()['value'] == again
+
+
+async def test_static_holds_the_look_without_cues_and_leaving_it_sends_them_again():
+    decoder = FakeDecoder()
+    light, queue, clock, lighting = engine(decoder=decoder)
+    light.enter_static()
+    planned = await planned_drop(light, decoder, clock)
+    assert cue_events(lighting) == [], 'no cue while Static holds the look'
+    assert cue_events(lighting, 'clear_cues')
+    await light.leave_static()
+    [sent] = cue_events(lighting)
+    assert sent['command'] == light.effect_controller.cue_for(planned).command()
+    light.enter_static()
+    clock.advance(14.5)
+    await queue.drain()
+    assert light.current_intent is LightIntent.DROP and selections(lighting) == []
+    before = len(cue_events(lighting))
+    await light.leave_static()
+    [current] = cue_events(lighting)[before:]
+    assert current['command']['value']['start_beat_index'] == planned.start_beat_index, (
+        'the current section re-cues on its own start, late'
+    )
+
+
+async def test_a_superseded_section_takes_its_plan_along():
+    decoder = FakeDecoder()
+    light, _, clock, _ = engine(decoder=decoder)
+    planned = await planned_drop(light, decoder, clock)
+    decoder._script.append([BarDecision(0, 'breakdown', light.audio_sec - 2.0)])
+    await light.on_beat(1, 128.0, False)
+    assert planned not in light._pending_intents
+    assert light.effect_controller.cue_for(planned) is None
+
+
+async def test_a_replacement_not_cued_yet_withdraws_the_superseded_cue():
+    decoder = FakeDecoder()
+    light, _, clock, lighting = engine(decoder=decoder)
+    # The director declines to cue the drop.
+    light._plan_cue = lambda planned: (
+        planned_cue(planned) if planned.intent is LightIntent.BUILDUP else None
+    )
+    await elapse(light, clock, 20.0)
+    await beat_at_phase(light, decoder, 0, decision='buildup')
+    [_] = cue_events(lighting)
+    await elapse(light, clock, 0.5)
+    # An older decision supersedes the buildup before it starts.
+    decoder._script.append([BarDecision(0, 'drop', light.audio_sec - 0.6)])
+    await light.on_beat(1, 128.0, False)
+    [planned] = light._pending_intents
+    assert planned.intent is LightIntent.DROP and planned.cue is None
+    assert len(cue_events(lighting, 'clear_cues')) == 1, 'Starfire must not start the stale cue'
+
+
+async def test_a_new_source_never_places_the_old_sources_sections():
+    decoder = FakeDecoder()
+    light, _, clock, _ = engine(decoder=decoder)
+    light._plan_cue = planned_cue
+    await elapse(light, clock, 20.0)
+    await beat_at_phase(light, decoder, 2, decision='buildup')
+    [planned] = light._pending_intents
+    assert planned.start_beat_index is None
+    light.on_sound_start()
+    await beat_at_phase(light, decoder, 0)
+    assert planned.start_beat_index is None and planned.unplaceable
+
+
+@pytest.mark.parametrize('standby', [False, True])
+async def test_a_selection_or_leaving_standby_sends_the_planned_cues_again(standby):
+    decoder = FakeDecoder()
+    light, _, clock, lighting = engine(decoder=decoder)
+    planned = await planned_drop(light, decoder, clock)
+    light._showing_standby = standby
+    # A room-side switch with no plan behind it selects a loop, which ends every cue.
+    light._held_intent = LightIntent.ATMOSPHERIC
+    await light._switch_held_intent()
+    *_, select, again = lighting.events
+    assert select['command']['kind'] == 'select'
+    assert again['command'] == light.effect_controller.cue_for(planned).command()
+
+
+async def test_a_skip_holds_the_operators_loop_and_keeps_the_later_cues():
+    from autolux.lib.engine.effect_definitions import (
+        DEFAULT_AUTOLOOP_META,
+        DEFAULT_AUTOLOOPS,
+        AutoloopMeta,
+    )
+
+    decoder = FakeDecoder()
+    drops = (*DEFAULT_AUTOLOOPS[LightIntent.DROP], ('drop', 'other'))
+    light, queue, clock, lighting = engine(
+        decoder=decoder,
+        autoloops={**DEFAULT_AUTOLOOPS, LightIntent.DROP: drops},
+        autoloop_meta={
+            **DEFAULT_AUTOLOOP_META,
+            ('drop', 'other'): AutoloopMeta(3, 'sweep', 'beam'),
+        },
+    )
+    planned = await planned_drop(light, decoder, clock)
+    clock.advance(14.5)
+    await queue.drain()
+    assert light.current_intent is LightIntent.DROP
+    decoder._script.append([BarDecision(0, 'breakdown', light.audio_sec)])
+    await light.on_beat(1, 128.0, False)
+    [later] = light._pending_intents
+    light.next_autoloop()
+    *_, select, again = lighting.events
+    assert select['command']['kind'] == 'select'
+    assert again['command'] == light.effect_controller.cue_for(later).command()
+    before = len(cue_events(lighting))
+    light.intensity_changed()
+    assert [e['command']['value']['intent'] for e in cue_events(lighting)[before:]] == [
+        'breakdown'
+    ], 'the skipped section is no longer cued'
+    assert light.effect_controller.cue_for(planned) is not None, 'its plan stays for the track'
+
+
+async def wild_drop_in_the_room():
+    from autolux.tests.test_cue_director import OVERLAYS
+
+    decoder = FakeDecoder()
+    wild = ShowSettings(intensity=1.0)
+    light, queue, clock, lighting = engine(decoder=decoder, overlay_meta=OVERLAYS)
+    light._settings = light.effect_controller._settings = lambda: wild
+    planned = await planned_drop(light, decoder, clock)
+    clock.advance(14.5)
+    await queue.drain()
+    assert light._current_plan is planned
+    return light, lighting, planned
+
+
+def sent_hits(lighting):
+    return [
+        row
+        for event in cue_events(lighting)
+        for row in event['command']['value']['overlays']
+        if row['bank'] == 'hit'
+    ]
+
+
+@pytest.mark.parametrize('cause', ['supersession', 'static'])
+async def test_a_running_drop_sent_again_never_fires_its_entry_twice(cause):
+    light, lighting, planned = await wild_drop_in_the_room()
+    [hit] = sent_hits(lighting)
+    assert hit['autoloop'] == 'strobe'
+    booked = dict(light.effect_controller._intense_at)
+    before = len(cue_events(lighting))
+    if cause == 'static':
+        light.enter_static()
+        await light.leave_static()
+    else:
+        light._withdraw_superseded_cues()
+    [again] = (e['command']['value'] for e in cue_events(lighting)[before:])
+    assert again['start_beat_index'] == planned.start_beat_index
+    assert again['overlays'] and all(row['every_bars'] > 0 for row in again['overlays'])
+    assert sent_hits(lighting) == [hit], 'Starfire would anchor the hit on its next bar line'
+    assert light.effect_controller._intense_at == booked
+
+
+async def test_the_plan_knows_its_lead_over_the_room():
+    decoder = FakeDecoder()
+    light, _, clock, _ = engine(decoder=decoder)
+    planned = await planned_drop(light, decoder, clock)
+    request = light.effect_controller._director.plan_for(planned).request
+    lead_sec = planned.fire_at - clock.monotonic()
+    assert request.lead_beats == pytest.approx(lead_sec * request.bpm / 60.0)
+    assert 0 < request.lead_beats < 14.0 * request.bpm / 60.0
+
+
+async def test_a_late_section_without_a_phase_switches_on_starfires_next_bar_line():
+    decoder = FakeDecoder()
+    light, queue, clock, _ = engine(decoder=decoder, playback_delay_sec=1.0)
+    await elapse(light, clock, 20.0)
+    for _ in range(3):
+        await beat_at_phase(light, decoder, None)
+        await elapse(light, clock, 0.5)
+        await queue.drain()
+    clock.advance(1.0)
+    await queue.drain()
+    assert light._grid_origin == 1
+    # The room has heard beat 1, where the section starts; Starfire's bars count from beat 1.
+    decoder._script.append([BarDecision(0, 'drop', light.audio_sec - 1.5)])
+    await beat_at_phase(light, decoder, None)
+    [planned] = light._pending_intents
+    assert (planned.start_beat_index, planned.switch_beat_index) == (1, None), 'not beat 4'
+    await elapse(light, clock, 0.5)
+    await beat_at_phase(light, decoder, None)
+    assert planned.switch_beat_index == 5

@@ -44,12 +44,63 @@ _SPECTRUM_HZ = np.fft.rfftfreq(FRAME_SIZE, 1.0 / SAMPLE_RATE)
 _BASS_BINS = _SPECTRUM_HZ < BASS_CEILING_HZ
 _TREBLE_BINS = _SPECTRUM_HZ >= TREBLE_FLOOR_HZ
 _SILENT_POWER = 1e-12
+# Starfire's BeatFeatures bands; the onset reads the kick band only, so pads never read as kicks.
+BEAT_BANDS_HZ = {'bass': (20.0, 150.0), 'mid': (150.0, 2500.0), 'high': (2500.0, 16000.0)}
+_BEAT_BAND_BINS = {
+    name: (_SPECTRUM_HZ >= low) & (_SPECTRUM_HZ < high)
+    for name, (low, high) in BEAT_BANDS_HZ.items()
+}
+_KICK_BINS = _SPECTRUM_HZ <= 150.0
+# A beat is reported up to about 50 ms after its transient, so the flux peak is looked for
+# across the last 100 ms of buffers.
+ONSET_WINDOW_SECONDS = 0.1
+# Levels are relative to the track's own loudest beats (a peak that halves over 256 beats), so
+# capture gain and mastering do not matter and a drop keeps its dynamics after a breakdown.
+REFERENCE_HALF_LIFE_BEATS = 256
+_REFERENCE_DECAY = 0.5 ** (1.0 / REFERENCE_HALF_LIFE_BEATS)
+# A band at its track peak is 1, this far below it 0.
+BAND_RANGE_DB = 36.0
 
 
 @dataclass(frozen=True)
 class SpectralBalance:
     centroid_hz: float
     bass_over_treble_db: float
+
+
+@dataclass(frozen=True)
+class BeatFeatures:
+    """Starfire's per-beat music signals, each 0..1."""
+
+    onset: float
+    bass: float
+    mid: float
+    high: float
+
+
+def kick_flux(previous: np.ndarray, magnitude: np.ndarray) -> float:
+    """Half-wave rectified: only energy arriving counts, so decays never read as onsets."""
+    return float(np.maximum(magnitude[_KICK_BINS] - previous[_KICK_BINS], 0.0).sum())
+
+
+def band_powers(magnitude: np.ndarray) -> dict[str, float]:
+    power = magnitude**2
+    return {name: float(power[bins].sum()) for name, bins in _BEAT_BAND_BINS.items()}
+
+
+def decayed_reference(reference: float, value: float) -> float:
+    return max(value, reference * _REFERENCE_DECAY)
+
+
+def relative_level(power: float, reference: float) -> float:
+    if reference <= _SILENT_POWER:
+        return 0.0
+    below_db = 10.0 * math.log10((power + _SILENT_POWER) / reference)
+    return min(1.0, max(0.0, 1.0 + below_db / BAND_RANGE_DB))
+
+
+def onset_strength(peak: float, reference: float) -> float:
+    return min(1.0, peak / reference) if reference > 0.0 else 0.0
 
 
 def spectral_balance(frame: np.ndarray) -> SpectralBalance:
@@ -127,6 +178,15 @@ class MusicAnalyser:
         self.silence_period_start: datetime.datetime = self._clock.now()
         self._rms_window: deque = deque(maxlen=_ENERGY_WINDOW_BUFFERS)
         self._spectrum_frame: np.ndarray = np.zeros(FRAME_SIZE)
+        self._magnitude: np.ndarray = np.zeros(FRAME_SIZE // 2 + 1)
+        self._flux_window: deque = deque(
+            maxlen=max(1, math.ceil(ONSET_WINDOW_SECONDS * self.sample_rate / self.buffer_size))
+        )
+        self._band_sums: dict[str, float] = dict.fromkeys(BEAT_BANDS_HZ, 0.0)
+        self._band_buffers = 0
+        self._onset_reference = 0.0
+        self._band_references: dict[str, float] = dict.fromkeys(BEAT_BANDS_HZ, 0.0)
+        self._beat_features: BeatFeatures | None = None
 
     def get_song_current_duration(self) -> datetime.timedelta:
         if self.is_playing:
@@ -168,6 +228,33 @@ class MusicAnalyser:
     def get_spectral_balance(self) -> SpectralBalance:
         return spectral_balance(self._spectrum_frame)
 
+    def get_beat_features(self) -> BeatFeatures | None:
+        """The newest beat's onset and band levels; None before any beat since sound start."""
+        return self._beat_features
+
+    def _track_spectrum(self) -> None:
+        magnitude = np.abs(np.fft.rfft(self._spectrum_frame * _SPECTRUM_WINDOW))
+        self._flux_window.append(kick_flux(self._magnitude, magnitude))
+        self._magnitude = magnitude
+        for name, power in band_powers(magnitude).items():
+            self._band_sums[name] += power
+        self._band_buffers += 1
+
+    def _measure_beat(self) -> None:
+        """Closes the beat: its onset peak and band averages against the track's references."""
+        peak = max(self._flux_window, default=0.0)
+        self._onset_reference = decayed_reference(self._onset_reference, peak)
+        levels = {}
+        for name, total in self._band_sums.items():
+            average = total / max(1, self._band_buffers)
+            self._band_references[name] = decayed_reference(self._band_references[name], average)
+            levels[name] = relative_level(average, self._band_references[name])
+        self._band_sums = dict.fromkeys(BEAT_BANDS_HZ, 0.0)
+        self._band_buffers = 0
+        self._beat_features = BeatFeatures(
+            onset=onset_strength(peak, self._onset_reference), **levels
+        )
+
     async def analyse(self, audio_signal: np.ndarray) -> np.ndarray:
         silent = self._track_digital_silence(audio_signal)
         self._sample_clock += len(audio_signal)
@@ -189,6 +276,7 @@ class MusicAnalyser:
         rms = float(np.sqrt(np.mean(audio_signal**2)))
         self._rms_window.append(rms)
         self._spectrum_frame = np.concatenate((self._spectrum_frame, audio_signal))[-FRAME_SIZE:]
+        self._track_spectrum()
         self._track_song_duration(rms, now)
 
         rhythm = self._rhythm.process(audio_signal)
@@ -294,6 +382,7 @@ class MusicAnalyser:
             )
             bpm_changed: bool = self._has_bpm_changed(this_bpm)
             self.beat_count += 1
+            self._measure_beat()
             await self.handler.on_beat(self.beat_count, this_bpm, bpm_changed)
             self.last_bpm = this_bpm
             self.last_beat_detected = now

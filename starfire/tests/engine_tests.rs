@@ -47,6 +47,7 @@ fn engine(scripts: &[(&str, &str)]) -> Engine {
                 bar_phase: None,
                 beats_per_bar: 4,
                 bpm: 120.0,
+                features: None,
             },
         )
         .unwrap();
@@ -962,6 +963,7 @@ fn crossfade_progress_uses_elapsed_beats_instead_of_corrected_phase() {
                 bar_phase: None,
                 beats_per_bar: 4,
                 bpm: 60.0,
+                features: None,
             },
         )
         .unwrap();
@@ -1124,6 +1126,7 @@ fn pause_goes_dark_holds_the_beat_and_resume_continues_from_the_held_position() 
                 bar_phase: None,
                 beats_per_bar: 4,
                 bpm: 120.0,
+                features: None,
             },
         )
         .unwrap();
@@ -1145,6 +1148,7 @@ fn pause_goes_dark_holds_the_beat_and_resume_continues_from_the_held_position() 
                 bar_phase: None,
                 beats_per_bar: 4,
                 bpm: 120.0,
+                features: None,
             },
         )
         .unwrap();
@@ -1329,6 +1333,7 @@ fn engine_on(rig: FixtureRig, scripts: &[(&str, &str)]) -> Engine {
                 bar_phase: None,
                 beats_per_bar: 4,
                 bpm: 120.0,
+                features: None,
             },
         )
         .unwrap();
@@ -1354,7 +1359,7 @@ fn a_loop_on_all_leaves_the_accent_fixtures_dark() {
 }
 
 #[test]
-fn a_crossfade_takes_the_target_preset_from_its_start_and_ramps_numeric_attributes() {
+fn a_crossfade_takes_the_target_preset_half_way_and_ramps_numeric_attributes() {
     use starfire::model::AttributeValue;
     let rig = FixtureRig::from_wire(&support::stage_definition_as_loops()).unwrap();
     let fx_fixture = rig.groups()["fx"][0].clone();
@@ -1382,13 +1387,19 @@ fn a_crossfade_takes_the_target_preset_from_its_start_and_ramps_numeric_attribut
             duration_beats: 4.0,
         },
     );
-    for time in [0.0, 1.0, 1.9] {
+    // A preset changes at the one snap point every wheel shares, half-way.
+    for (time, preset) in [
+        (0.0, None),
+        (0.9, None),
+        (1.0, Some(&red)),
+        (1.9, Some(&red)),
+    ] {
         let attributes = &engine
             .render_at(time)
             .unwrap()
             .fixture_properties_before_strobe[&fx_fixture]
             .attributes;
-        assert_eq!(attributes.get("Color1"), Some(&red), "{time}");
+        assert_eq!(attributes.get("Color1"), preset, "{time}");
         assert_eq!(
             attributes.get("Effects1PosRotate"),
             Some(&AttributeValue::Number(160.0)),
@@ -1404,13 +1415,17 @@ fn a_crossfade_takes_the_target_preset_from_its_start_and_ramps_numeric_attribut
             duration_beats: 4.0,
         },
     );
-    for (time, expected) in [(2.0, 0.0), (3.0, 80.0), (4.0, 160.0)] {
+    for (time, expected, preset) in [
+        (2.0, 0.0, None),
+        (3.0, 80.0, Some(&red)),
+        (4.0, 160.0, Some(&red)),
+    ] {
         let attributes = &engine
             .render_at(time)
             .unwrap()
             .fixture_properties_before_strobe[&fx_fixture]
             .attributes;
-        assert_eq!(attributes.get("Color1"), Some(&red), "{time}");
+        assert_eq!(attributes.get("Color1"), preset, "{time}");
         let AttributeValue::Number(rotation) = attributes["Effects1PosRotate"] else {
             panic!("{time}: {attributes:?}");
         };

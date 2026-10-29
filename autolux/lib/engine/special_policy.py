@@ -2,16 +2,18 @@ from __future__ import annotations
 
 import dataclasses
 import random
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Hashable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 
 from autolux.lib.clients.starfire_client import WHOLE_RIG
-from autolux.lib.engine.effect_definitions import STROBE_RATE_HZ, LightIntent
+from autolux.lib.engine.effect_definitions import LightIntent
 from autolux.lighting.mvr_schema import ACCENT_ROLE, LOOP_ROLE
 
 INTENSE_SPEED = 0.6
 ACCENT_WINDOW_SECONDS = 60.0
 VENUE_GROUP = 'venue'
+# The shared intense cooldown's bar on the dashboard: strobing cue overlays and intense specials.
+STROBE_COOLDOWN_LABEL = 'strobe'
 AXES = ('colour', 'speed', 'pulse', 'pattern')
 
 
@@ -34,21 +36,16 @@ class Special:
     attack_beats: float = 0.0
     release_beats: float = 0.0
     pattern: float | None = None
-    strobe_hz: float | None = None
     # Never on the wire: how long the row's group rests after it fires; no row on that group
     # is selectable meanwhile, since the fixtures are what the room tires of, not the recipe.
     cooldown_seconds: float = 0.0
 
     @property
     def intense(self) -> bool:
-        return (
-            self.strobe_hz is not None or self.pulse_beats is not None or self.speed > INTENSE_SPEED
-        )
+        return self.pulse_beats is not None or self.speed > INTENSE_SPEED
 
     @property
     def axes(self) -> frozenset[str]:
-        if self.strobe_hz is not None:
-            return frozenset()
         present = {
             'colour': True,
             'speed': self.speed > 0,
@@ -125,25 +122,20 @@ class SpecialCapabilities:
 @dataclass(frozen=True)
 class SpecialChoice:
     special: Special | None
-    strobes: tuple[Special, ...] = ()
     suppressed: str | None = None
 
     @property
     def intense(self) -> bool:
-        return bool(self.strobes) or (self.special is not None and self.special.intense)
+        return self.special is not None and self.special.intense
 
 
 @dataclass(frozen=True)
 class Venue:
     """Room-wide limits on top of each group's own rest."""
 
-    # Specials fired on accent groups in any 60 s, whichever groups; strobe rows do not count.
-    # At least 1; remove the accent rows to keep the accents dark.
+    # Accent events in any 60 s: specials fired on accent groups and the white or strobing entry
+    # hits of cues. At least 1; remove the accent rows to keep the accents dark.
     max_accent_events_per_minute: int = 2
-
-
-DROP_STROBE = Special('strobe_burst', (LightIntent.DROP,), WHOLE_RIG, strobe_hz=STROBE_RATE_HZ)
-DEFAULT_SPECIALS = (DROP_STROBE,)
 
 
 class SpecialPolicy:
@@ -151,7 +143,9 @@ class SpecialPolicy:
         self._specials = tuple(specials)
         self._rng = rng
         self._venue = venue or Venue()
-        self._accent_fired: list[float] = []  # when each accent special fired, oldest first
+        # Room time of each accent event by its moment: a cue's planned hit and the special
+        # entering with that cue share one key, so they count once.
+        self._accents: dict[Hashable, float] = {}
         self._selections = 0
         self._last_used: dict[tuple[str, str], int] = {}
         # group -> the row that last fired there and when; the group rests that row's cooldown.
@@ -165,6 +159,7 @@ class SpecialPolicy:
         soft_drop: str | None = None,
         *,
         now: float = 0.0,
+        moment: Hashable = None,
     ) -> SpecialChoice:
         rows = [
             row
@@ -172,43 +167,71 @@ class SpecialPolicy:
             if intent in special.intents
             for row in capabilities.targets(special)
         ]
-        strobes = tuple(special for special in rows if special.strobe_hz is not None)
-        crowded = len(self._recent_accents(now)) >= self._venue.max_accent_events_per_minute
+        recent = self._recent_accents(now, moment)
+        crowded = len(recent) >= self._venue.max_accent_events_per_minute
         selectable = [
             special
             for special in rows
-            if special.strobe_hz is None
-            and not self._cooling(special, now)
+            if not self._cooling(special, now)
             and not (crowded and capabilities.role(special.group) == ACCENT_ROLE)
         ]
         calm = [special for special in selectable if not special.intense]
-        if intense_blocked:
-            suppressed = intense_blocked if strobes or len(calm) < len(selectable) else None
+        # A soft drop plays no intense special on top of its entry either.
+        restraint = intense_blocked or soft_drop
+        if restraint:
+            suppressed = restraint if len(calm) < len(selectable) else None
             chosen = self._pick(calm, capabilities) if calm else None
             return SpecialChoice(chosen, suppressed=suppressed)
-        if soft_drop:
-            # A soft drop keeps its strobe burst but not an intense special on top of it.
-            suppressed = soft_drop if len(calm) < len(selectable) else None
-            chosen = self._pick(calm, capabilities) if calm else None
-            return SpecialChoice(chosen, strobes, suppressed)
         chosen = self._pick(selectable, capabilities) if selectable else None
-        return SpecialChoice(chosen, strobes)
+        return SpecialChoice(chosen)
 
     def record(
         self,
         special: Special,
         now: float = 0.0,
         capabilities: SpecialCapabilities | None = None,
+        moment: Hashable = None,
     ) -> None:
         self._selections += 1
         self._last_used[special.name, special.group] = self._selections
         self._group_fired[special.group] = (special, now)
         if capabilities is not None and capabilities.role(special.group) == ACCENT_ROLE:
-            self._accent_fired = [*self._recent_accents(now), now]
+            self.plan_accent(object() if moment is None else moment, now)
 
-    def _recent_accents(self, now: float) -> list[float]:
-        fired = list(self._accent_fired)  # replaced, never mutated, so the snapshot reads safely
-        return [at for at in fired if now - at < ACCENT_WINDOW_SECONDS]
+    def plan_accent(self, moment: Hashable, at: float) -> None:
+        """An accent event at room time `at`; the same moment again moves it."""
+        kept = {
+            key: when
+            for key, when in self._accents.items()
+            if abs(at - when) < ACCENT_WINDOW_SECONDS
+        }
+        # Replaced, never mutated, so the dashboard thread reads a whole snapshot.
+        self._accents = {**kept, moment: at}
+
+    def forget_accent(self, moment: Hashable) -> None:
+        self._accents = {key: at for key, at in self._accents.items() if key != moment}
+
+    def forget_accents_after(self, now: float) -> None:
+        """Planned events still ahead of the room that will never happen."""
+        self._accents = {key: at for key, at in self._accents.items() if at <= now}
+
+    def accent_crowded(self, at: float, moment: Hashable = None) -> bool:
+        """Another event within a minute either side of `at` would break the cap; either side,
+        since cues are planned ahead of specials that fire in the room's now."""
+        near = [
+            when
+            for key, when in dict(self._accents).items()
+            if key != moment and abs(at - when) < ACCENT_WINDOW_SECONDS
+        ]
+        return len(near) >= self._venue.max_accent_events_per_minute
+
+    def _recent_accents(self, now: float, moment: Hashable = None) -> list[float]:
+        accents = dict(self._accents)
+        return sorted(
+            at
+            for key, at in accents.items()
+            if key != moment and 0.0 <= now - at < ACCENT_WINDOW_SECONDS
+        )
 
     def cooldowns(
         self,
@@ -217,13 +240,12 @@ class SpecialPolicy:
         intense_remaining: float,
         capabilities: SpecialCapabilities | None = None,
     ) -> list[dict]:
-        """One entry per group with special rows, plus each strobe row on the shared intense one."""
+        """One entry per group with special rows, plus the shared intense cooldown."""
         fired = dict(self._group_fired)  # read from the snapshot thread while the engine records
         capabilities = capabilities or SpecialCapabilities()
         groups = dict.fromkeys(
             row.group
             for special in self._specials
-            if special.strobe_hz is None
             for row in (capabilities.targets(special) if special.role else [special])
         )
         entries = []
@@ -231,9 +253,8 @@ class SpecialPolicy:
             last, at = fired.get(group, (None, now))
             total = last.cooldown_seconds if last else 0.0
             entries.append(_entry(group, last and last.name, total, total - (now - at)))
-        for strobe in (s for s in self._specials if s.strobe_hz is not None):
-            entry = _entry(strobe.group, strobe.name, intense_total, intense_remaining)
-            entries.append({**entry, 'strobe': True})
+        intense = _entry(WHOLE_RIG, STROBE_COOLDOWN_LABEL, intense_total, intense_remaining)
+        entries.append({**intense, 'strobe': True})
         if ACCENT_ROLE in capabilities.roles.values():
             entries.append(self._venue_entry(now))
         return entries
