@@ -59,6 +59,8 @@ pub struct SectionContext {
     pub next_intent: Option<SectionIntent>,
     pub beats_until_next: Option<f64>,
     pub beats_until_dip: Option<f64>,
+    /// Elapsed musical beats when the next cue was received.
+    pub next_received_at: Option<f64>,
     pub drop_strength: Option<f64>,
     pub next_drop_strength: Option<f64>,
     pub seed: u32,
@@ -202,6 +204,8 @@ impl OverlayInstance {
 struct PendingCue {
     cue: SectionCue,
     id: u64,
+    /// Elapsed musical beats at receipt: when the room's next change became known.
+    received_at: f64,
     /// Fixed when first resolved: the start, or for a cue resolved after its start the next
     /// bar line (a late cue never enters mid-bar).
     activates_at: Option<i128>,
@@ -253,6 +257,7 @@ impl CueTimeline {
         let mut pending = PendingCue {
             cue,
             id: self.next_id,
+            received_at: now.elapsed_musical_beats,
             activates_at: None,
         };
         self.resolve(&mut pending, &now);
@@ -324,8 +329,10 @@ impl CueTimeline {
             context.drop_strength = active.cue.drop_strength;
             context.seed = active.cue.seed;
         }
-        if let Some((cue, grid)) = self.next_cue(now) {
+        if let Some((pending, grid)) = self.next_pending(now) {
+            let cue = &pending.cue;
             let until = (grid - now.beat_position).max(0.0);
+            context.next_received_at = Some(pending.received_at);
             context.next_intent = Some(cue.intent);
             context.beats_until_next = Some(until);
             context.next_drop_strength = cue.drop_strength;
@@ -343,6 +350,11 @@ impl CueTimeline {
     /// The earliest resolved pending cue and the grid beat it activates at. A re-sent cue for
     /// the active section is no next section.
     pub fn next_cue(&self, now: &CueSample) -> Option<(&SectionCue, f64)> {
+        self.next_pending(now)
+            .map(|(pending, grid)| (&pending.cue, grid))
+    }
+
+    fn next_pending(&self, now: &CueSample) -> Option<(&PendingCue, f64)> {
         let active_start = self
             .active
             .as_ref()
@@ -353,7 +365,7 @@ impl CueTimeline {
             .filter(|pending| Some(pending.cue.start_beat_index) != active_start)
             .filter_map(|pending| Some((pending.activates_at?, pending)))
             .min_by_key(|(at, pending)| (*at, pending.id))?;
-        Some((&pending.cue, now.grid_of(at)?))
+        Some((pending, now.grid_of(at)?))
     }
 
     /// Running and releasing overlays, in start order; W2 composes them by priority.
