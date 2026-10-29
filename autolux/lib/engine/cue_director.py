@@ -64,7 +64,8 @@ TURNAROUND_FILL = ('fill', 'turnaround')
 MIXED_TEXTURE = 'mixed'
 STILL_MOVEMENT = 'still'
 # Banks that also yield the heads to a base loop moving them the same way.
-MOVEMENT_PAIRED_BANKS = ('accent', 'riser')
+MOVEMENT_PAIRED_BANKS = ('accent',)
+PIXEL_TEXTURE = 'pixel'
 
 # The dip before a drop, by the quiet beats before the one: half a beat, a beat, a bar, two bars.
 DIP_BEATS = (0.5, 1.0, float(BEATS_PER_BAR), 2.0 * BEATS_PER_BAR)
@@ -416,9 +417,12 @@ class CueDirector:
         )
 
     def _fights(self, overlay: tuple[str, str], base: AutoloopChoice) -> bool:
-        """An overlay on the layer the base loop leads with would cover its idea; an accent or
-        riser moving the heads the way the base does would take them over."""
+        """An overlay on the layer the base loop leads with would cover its idea; an accent
+        moving the heads the way the base does would take them over."""
         meta = self._overlays[overlay]
+        if overlay[0] == 'riser':
+            # Risers ride on top of the finale; only a strip riser over a strip build hides.
+            return meta.texture == base.meta.texture == PIXEL_TEXTURE
         if meta.texture != MIXED_TEXTURE and meta.texture == base.meta.texture:
             return True
         return (

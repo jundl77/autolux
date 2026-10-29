@@ -675,3 +675,14 @@ def test_balanced_rises_on_white_rise_over_any_build_it_pairs_with():
     assert 'riser' not in {o.bank for o in calm.cue.overlays}, (
         "the strip riser is countdown's own layer"
     )
+
+
+def test_a_riser_rides_on_any_build_but_a_strip_riser_never_on_a_strip_build():
+    meta = {
+        **{loop: value for loop, value in META.items() if loop[0] != 'buildup'},
+        ('buildup', 'stutter'): AutoloopMeta(2, 'snap', 'wash'),
+    }
+    _, drop = play(SET[1:3], cues=director(meta=meta))
+    assert row(drop, 'riser').autoloop == 'white_rise', 'the wash riser on top of a wash build'
+    calm = play(SET[1:3], level='calm', cues=director(meta=meta))[1]
+    assert row(calm, 'riser').autoloop == 'strip_fill'
