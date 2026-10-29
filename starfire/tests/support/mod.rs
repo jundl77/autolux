@@ -17,8 +17,6 @@ pub fn palettes() -> PaletteTable {
     PaletteTable::new(&palette_definitions()).unwrap()
 }
 
-/// The generic stage with every group a loop uses: two movers, four washes, a pixel bar and an
-/// accent, on a symmetric plot that is no venue's.
 pub fn stage_rig() -> PathBuf {
     sample_rig().join("stage.rig.pb")
 }
@@ -31,9 +29,7 @@ pub fn show_catalog() -> AutoloopCatalog {
     AutoloopCatalog::load(&Path::new(env!("CARGO_MANIFEST_DIR")).join("../show/autoloops")).unwrap()
 }
 
-/// A synthetic GDTF test description's mode as Autolux compiles it, named `profile_id`.
-/// `source` is `<file stem>#<mode>` under autolux/tests/data/gdtf; regenerate the fixture with
-/// `python tools/compile_test_profiles.py`.
+/// `source` is `<file stem>#<mode>`; regenerate with `python tools/compile_test_profiles.py`.
 pub fn compiled_profile(source: &str, profile_id: &str) -> wire::FixtureProfile {
     let rig =
         wire::RigDefinition::decode(include_bytes!("../data/compiled_profiles.pb").as_slice())
@@ -47,7 +43,6 @@ pub fn compiled_profile(source: &str, profile_id: &str) -> wire::FixtureProfile 
     profile
 }
 
-/// A shipped fixture type's compiled mode, as the exported rigs carry it, named `fixture_type`.
 pub fn catalogue_profile(fixture_type: &str) -> Option<wire::FixtureProfile> {
     let (_, spec) = SHIPPED_TYPES
         .iter()
@@ -68,7 +63,6 @@ pub fn catalogue_profile(fixture_type: &str) -> Option<wire::FixtureProfile> {
         })
 }
 
-/// The short profile names these tests patch, and the GDTFSpec each one is shipped as.
 const SHIPPED_TYPES: [(&str, &str); 6] = [
     ("generic_dimmer", "Generic@Dimmer@1.0.gdtf"),
     ("generic_rgb", "Generic@RGB@1.0.gdtf"),
@@ -87,7 +81,6 @@ const SHIPPED_TYPES: [(&str, &str); 6] = [
     ),
 ];
 
-/// The synthetic sample rig, kept with the test data rather than the venue rigs.
 pub fn sample_rig() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../autolux/tests/data/generic_rig")
 }
@@ -121,7 +114,6 @@ pub fn definition(spec: &Value) -> wire::RigDefinition {
         let uuid = fixture["fixture_uuid"].as_str().unwrap();
         rig.fixtures.push(wire::Fixture {
             fixture_uuid: uuid.into(),
-            // A spec's fixtures are labelled by their uuid unless one names them.
             name: fixture
                 .get("name")
                 .map_or(uuid, |name| name.as_str().unwrap())
@@ -134,7 +126,6 @@ pub fn definition(spec: &Value) -> wire::RigDefinition {
             matrix: numbers(fixture, "matrix"),
             focus: numbers(fixture, "focus"),
             cells: Vec::new(),
-            // A spec without an area sits in the centre; "UNSPECIFIED" tests the refusal.
             area: wire::StageArea::from_str_name(&format!(
                 "STAGE_AREA_{}",
                 fixture
@@ -174,7 +165,6 @@ pub fn rig(spec: Value) -> FixtureRig {
     try_rig(spec).unwrap()
 }
 
-/// The stage fixture's uuid that `name` labels.
 pub fn stage_uuid(name: &str) -> String {
     stage().uuid_of_label(name).unwrap().to_owned()
 }
@@ -183,7 +173,6 @@ pub fn stage_definition() -> wire::RigDefinition {
     wire::RigDefinition::decode(std::fs::read(stage_rig()).unwrap().as_slice()).unwrap()
 }
 
-/// The stage with its accent groups played as loop groups, for loops that must light the accent.
 pub fn stage_definition_as_loops() -> wire::RigDefinition {
     let mut definition = stage_definition();
     for group in &mut definition.groups {

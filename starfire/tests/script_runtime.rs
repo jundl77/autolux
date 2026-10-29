@@ -227,16 +227,11 @@ fn side_without_a_count_parks_each_half_of_a_mover_row_on_its_own_side() {
     assert_eq!(pans, [0.25, 0.25, 0.75, 0.75]);
 }
 
-/// `area` is a StageArea name without its prefix, as Autolux would derive it.
 fn placed_in(id: &str, address: u32, x: f64, y: f64, area: &str) -> String {
     let fixture = placed(id, address, x, y);
     format!(r#"{},"area":"{area}"}}"#, &fixture[..fixture.len() - 1])
 }
 
-/// Uneven spacing: the house-left members sit 100 mm off the house-right ones, the middle
-/// 40 mm off the centreline, and two rows of different depth interleave in X, so rank would
-/// pair across rows.
-/// Areas are the thirds of the box X -1000..1000, Y -2000..0.
 fn uneven_rig() -> FixtureRig {
     support::rig(
         serde_json::from_str(&format!(
@@ -275,7 +270,6 @@ fn mirror_pairs_by_reflection_about_the_centreline_not_by_rank() {
         .map(|effect| (effect.target.clone(), effect.values.intensity.unwrap()))
         .collect();
     let fixture = |id: &str| Target::Fixture(id.into());
-    // Outermost first: a↔c and b↔d both reach 1000 mm, broken by the left member's rank.
     assert_eq!(
         pairs,
         [

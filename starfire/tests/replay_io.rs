@@ -164,7 +164,6 @@ fn native_cli_emits_paced_artnet_then_blackout_without_moving_fixtures() {
         let mut packet = [0; 530];
         let count = receiver.recv(&mut packet).unwrap();
         assert_eq!(count, packet.len());
-        // The stage's wash and mover dimmer channels.
         let is_dark = [4, 12, 20, 28, 39, 51]
             .iter()
             .all(|offset| packet[18 + offset] == 0);
@@ -177,7 +176,6 @@ fn native_cli_emits_paced_artnet_then_blackout_without_moving_fixtures() {
     assert!(packets.len() >= 2);
     let last = packets.last().unwrap();
     let before = &packets[packets.len() - 2];
-    // The movers' pan and tilt (channels 33-36 and 45-48) hold through the blackout.
     assert_eq!(&last[50..54], &before[50..54]);
     assert_eq!(&last[62..66], &before[62..66]);
     assert_eq!(&last[..8], b"Art-Net\0");

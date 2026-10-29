@@ -149,7 +149,6 @@ fn capabilities_follow_each_profiles_attribute_families() {
         speed,
         pulse,
         pattern,
-        // Every synthetic fixture lies in the centre area.
         area: Some(wire::StageArea::Centre as i32),
         ..Default::default()
     };
@@ -185,7 +184,6 @@ fn the_stage_reports_what_its_profiles_declare() {
             ("wash".to_owned(), 4, [true, false, false, false]),
         ]
     );
-    // The movers and the washes stand in a left and a right area, so they report none.
     let places: Vec<_> = capabilities(&rig)
         .into_iter()
         .map(|group| (group.area.map(|_| group.area()), group.centre_x_metres))
@@ -332,7 +330,6 @@ fn a_cut_also_drops_a_special_already_fading_under_its_id() {
         release_beats: 64.0,
         ..steady("primary", 1.0, 0.0)
     };
-    // A plain release, and a replacement that leaves the first special fading beneath it.
     for replace in [false, true] {
         let mut engine = engine(&rig);
         fire(&mut engine, 0.0, &special("scanners", texture.clone()));
@@ -579,7 +576,6 @@ fn pause_homes_the_dimmerless_fx_fixture_to_its_gdtf_defaults_and_play_resumes_i
     let mut idle = rig.empty_states();
     idle.get_mut(member.as_str()).unwrap().output_blackout = true;
     let defaults = rig.encode(&idle).unwrap()[&0][fixture.clone()].to_vec();
-    // The Kinta manual's 0 rows: no colour, no strobe, motor indexed, no auto/sound program.
     assert_eq!(defaults, [0, 0, 0, 0]);
     assert_ne!(spinning, defaults);
 

@@ -1,5 +1,3 @@
-//! Standalone generated messages with bounded, typed stream framing.
-
 use std::io::{Read, Write};
 
 use anyhow::{Context, Result, bail, ensure};
@@ -36,8 +34,7 @@ fn check_payload_size(kind: wire::MessageType, length: usize, limit: usize) -> R
     Ok(())
 }
 
-// These enums dispatch in-process only. The frame carries the generated message
-// directly, with its generated MessageType; no Protobuf envelope is serialized.
+// The frame carries the generated message itself; no Protobuf envelope is serialized.
 macro_rules! messages {
     ($name:ident { $($variant:ident),+ $(,)? }) => {
         #[derive(Clone, Debug, PartialEq)]
@@ -138,8 +135,7 @@ pub fn error_message(error: &anyhow::Error) -> String {
     message
 }
 
-/// A clean EOF is allowed only between complete frames. Zero-length Protobuf
-/// payloads are valid for default-valued messages, such as server heartbeats.
+/// EOF is clean only between frames; a zero-length payload is a valid default-valued message.
 fn read_frame(
     input: &mut impl Read,
     accepts: impl FnOnce(wire::MessageType) -> bool,
@@ -258,7 +254,6 @@ fn section_cue(engine: &Engine, value: &wire::CueSection) -> Result<SectionCue> 
     })
 }
 
-/// Validate against the state left by preceding accepted commands.
 pub fn apply_command(engine: &mut Engine, at_seconds: f64, command: &ClientMessage) -> Result<()> {
     match command {
         ClientMessage::Login(_) => bail!("login is handled by the process host"),

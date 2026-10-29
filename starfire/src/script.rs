@@ -1,5 +1,3 @@
-//! Bounded Lua autoloops operating on musical time and fixture properties.
-
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs::{self, File};
@@ -44,13 +42,11 @@ pub struct AutoloopInfo {
 pub struct AutoloopCatalog {
     sources: BTreeMap<(String, String), String>,
     identities: BTreeMap<String, (String, String)>,
-    /// Loops whose intensity composes HTP as an overlay (Login metadata).
     intensity_htp: BTreeSet<(String, String)>,
 }
 
-/// Banks whose loops play as cue overlays; their header must say how they compose.
 const OVERLAY_BANKS: [&str; 5] = ["hit", "fill", "riser", "dip", "accent"];
-/// Autolux's OVERLAY_META_VALUES: the keys every overlay header declares, with their values.
+/// Mirrors Autolux's OVERLAY_META_VALUES.
 const OVERLAY_HEADER: [(&str, &[&str]); 4] = [
     ("strobe", &["yes", "no"]),
     ("intensity", &["htp", "ltp"]),
@@ -58,8 +54,7 @@ const OVERLAY_HEADER: [(&str, &[&str]); 4] = [
     ("texture", &["wash", "beam", "pixel", "mixed"]),
 ];
 
-/// An overlay's header, read as Autolux's read_overlay_meta reads it for Login: the
-/// `-- key: value` block right after the first line, keys in any order, each once, all required.
+/// Mirrors Autolux's read_overlay_meta: the `-- key: value` block after the first line.
 fn overlay_htp(source: &str) -> Result<bool> {
     let mut values: BTreeMap<&str, &str> = BTreeMap::new();
     for line in source.split('\n').skip(1) {
@@ -89,14 +84,10 @@ fn overlay_htp(source: &str) -> Result<bool> {
     Ok(values["intensity"] == "htp")
 }
 
-/// Every catalogue script compiled once at Login; cues and selections only look identities up,
-/// so nothing compiles on the render thread. One VM serves every layer naming the loop, which
-/// Lua purity allows: a render is a function of its ctx alone.
 pub struct CompiledScripts {
     scripts: BTreeMap<(String, String), Compiled>,
 }
 
-/// A shared VM, or the compile error a command naming the loop reports.
 type Compiled = std::result::Result<Rc<RefCell<LuaAutoloop>>, String>;
 
 impl CompiledScripts {
@@ -108,10 +99,7 @@ impl CompiledScripts {
         }
     }
 
-    /// Renders every script twice on one frame: one VM serves the base and overlay layers, so
-    /// state kept in chunk-level upvalues (which the frozen globals cannot stop) would leak
-    /// between them. A loop whose second render differs is refused. A render that fails is
-    /// left to the frame probe, which reports it in context.
+    /// A shared VM must not keep state in chunk-level upvalues, which frozen globals cannot stop.
     pub fn check_pure(&self, context: &RenderContext, palette: &PaletteSlots) -> Result<()> {
         for ((bank, autoloop), script) in &self.scripts {
             let Ok(script) = script else {
@@ -209,7 +197,6 @@ impl AutoloopCatalog {
             .collect();
         let mut intensity_htp = BTreeSet::new();
         for ((bank, autoloop), source) in &sources {
-            // Base loops never compose as overlays, so only overlay banks declare it.
             let htp = OVERLAY_BANKS.contains(&bank.as_str())
                 && overlay_htp(source)
                     .with_context(|| format!("invalid overlay header in {bank}/{autoloop}.lua"))?;
@@ -277,7 +264,6 @@ impl AutoloopCatalog {
             .contains(&(bank.to_owned(), autoloop.to_owned()))
     }
 
-    /// A script that fails to compile is kept as its error, reported when a command names it.
     pub fn compile(&self, rig: &FixtureRig, palettes: &PaletteTable) -> CompiledScripts {
         CompiledScripts {
             scripts: self
@@ -461,7 +447,6 @@ impl LuaAutoloop {
                 .cloned()
                 .context("palette slot is a table")
         };
-        // One white table for every palette, reset each frame like the active palette's slots.
         let white = colour_table(&WHITE)?;
         for (name, slots) in palettes.iter() {
             let table = colour_table_of(&lua, slots)?;
@@ -486,7 +471,6 @@ impl LuaAutoloop {
             Value::Table(active_palette),
             "palettes are read-only",
         )?)?;
-        // The closures outlive this call and the rig is large: they and the autoloop share one copy.
         let shared = Rc::new(rig.clone());
         let targets = Rc::clone(&shared);
         api.set(
@@ -524,7 +508,6 @@ impl LuaAutoloop {
                             .map(<[_]>::to_vec)
                             .unwrap_or_default()
                     }
-                    // A fixture's cells share its position, so only their order can pair them.
                     _ => {
                         let members = spatial
                             .resolve_for_loop(&target)
@@ -577,7 +560,6 @@ impl LuaAutoloop {
         api.set(
             "zone",
             lua.create_function(move |_, cell: Value| {
-                // Rig load refuses an unspecified area, so every known cell has a placement.
                 cell_fact(&areas, &cell, |id| areas.spatial().area(id)?.placement())
             })?,
         )?;
@@ -600,7 +582,7 @@ impl LuaAutoloop {
                     ));
                 }
                 let point = [x, y, z].map(|metres| metres * MM_PER_METRE);
-                // Only cells aim, and one without a pan range aims nowhere: nil, nil, not an error.
+                // A cell without a pan range aims nowhere: nil, nil, not an error.
                 let aim = cell_fact(&aiming, &cell, |id| {
                     aiming.profile(id).map(|_| aiming.aim_at(id, point))
                 })?;
@@ -676,8 +658,7 @@ impl LuaAutoloop {
         })
     }
 
-    /// Lua instructions the last render ran, to the hook's 100-instruction granularity; the
-    /// replay suite reports each loop's worst frame against the per-script budget.
+    /// To the instruction hook's 100-instruction granularity.
     pub fn instructions_used(&self) -> u32 {
         LUA_INSTRUCTION_LIMIT - self.instruction_budget.load(Ordering::Relaxed)
     }
@@ -806,7 +787,6 @@ impl LuaAutoloop {
     }
 }
 
-/// A cell (or fixture) name, given bare or as the `sf.fixture` target `sf.each` hands out.
 fn cell_name(value: &Value) -> mlua::Result<String> {
     match value {
         Value::String(id) => Ok(id.to_str()?.to_owned()),
@@ -817,7 +797,6 @@ fn cell_name(value: &Value) -> mlua::Result<String> {
     }
 }
 
-/// What the rig knows about the cell Lua names (by ID, or a fixture by label), which must exist.
 fn cell_fact<T>(
     rig: &FixtureRig,
     value: &Value,
@@ -828,8 +807,6 @@ fn cell_fact<T>(
     fact(id).ok_or_else(|| mlua::Error::RuntimeError(format!("unknown cell {name}")))
 }
 
-/// One VM serves every layer naming the loop and outlives reselection, so a render must not
-/// keep state in globals: they move behind the read-only metatable once the chunk has loaded.
 fn freeze_globals(lua: &Lua) -> mlua::Result<()> {
     let globals = lua.globals();
     let backing = lua.create_table()?;

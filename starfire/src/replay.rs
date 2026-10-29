@@ -1,5 +1,3 @@
-//! Deterministic playback of recorded control input through the real renderer.
-
 use std::fs::File;
 use std::io::{Read, Write};
 use std::path::Path;
@@ -126,7 +124,6 @@ pub fn render_replay(
     Ok(frames)
 }
 
-/// Hash the actual complete output: supplied frame time, universe and DMX bytes.
 pub fn dmx_digest(frames: &[RenderedFrame]) -> String {
     let mut hash = Sha256::new();
     for frame in frames {
@@ -139,9 +136,8 @@ pub fn dmx_digest(frames: &[RenderedFrame]) -> String {
     format!("{:x}", hash.finalize())
 }
 
-/// Capture format: magic, u32 version, u64 frame count; then each frame's f64
-/// seconds, f64 beat position, u16 universe count and (u16 universe, 512 bytes).
-/// Integer and float fields are little endian. No wall-clock or machine fields.
+/// Little endian: magic, u32 version, u64 frame count, then per frame f64 seconds, f64 beat
+/// position, u16 universe count and that many (u16 universe, 512 bytes).
 pub fn write_capture(path: &Path, frames: &[RenderedFrame]) -> Result<()> {
     let mut output =
         File::create(path).with_context(|| format!("create DMX capture {}", path.display()))?;
@@ -174,16 +170,9 @@ pub struct PreviewSummary {
     pub script_errors: std::collections::BTreeSet<String>,
 }
 
-/// The offline preview as JSON lines: a header naming the rig's cells, groups and bar length,
-/// then one frame per line at `rate_hz` naming the cue's section intent, the base loop and the
-/// sounding overlays (`bank/autoloop`, absent when none), each cell `[i, r, g, b, strobe_hz,
-/// direction, gobo]`
-/// in header order. Intensity and strobe are the output after masters and limits, the colour
-/// what the encode emits (a colour wheel's slot). Direction
-/// (a unit vector in the MVR scene frame) and gobo leave the tail when absent; a missing
-/// direction before a gobo is null. The replay renders at its own rate, as the show does, and
-/// every (replay rate / `rate_hz`)-th frame is written as it renders, so a long recording holds
-/// no frames in memory.
+/// JSON lines: a header, then one line per written frame. Each cell is `[i, r, g, b, strobe_hz,
+/// direction, gobo]` in header order, the tail dropped when absent and a direction before a gobo
+/// null; direction is a unit vector in the MVR scene frame.
 pub fn write_preview(
     replay: &Replay,
     rig: FixtureRig,
@@ -200,8 +189,7 @@ pub fn write_preview(
         "preview rate {rate_hz} Hz must divide the replay's {} Hz",
         replay.frame_rate_hz
     );
-    // The slew limit and strobe bursts step per rendered frame, so only the show's own rate
-    // reproduces them; the preview samples that render.
+    // The slew limit and strobe bursts step per rendered frame, so render at the show's rate.
     let stride = (replay.frame_rate_hz / rate_hz) as usize;
     let frame_count = replay.validate()?;
     let cells = rig.cell_ids();
@@ -243,7 +231,6 @@ pub fn write_preview(
     let mut events = replay.events.iter().peekable();
     let mut script_errors = BTreeSet::new();
     let mut diagnostic_bytes: usize = 0;
-    // A fault first seen between written frames is named on the next one written.
     let mut unwritten_error = None;
     for frame_index in 0..frame_count {
         let time_seconds =
@@ -275,7 +262,6 @@ pub fn write_preview(
             .iter()
             .map(|id| {
                 let state = &states[id];
-                // A wheel head shows the slot it lands on, not the colour asked of it.
                 let colour = rig
                     .profile(id)
                     .and_then(|profile| profile.emitted_colour(state).ok())
@@ -296,7 +282,6 @@ pub fn write_preview(
         if !overlays.is_empty() {
             line["overlays"] = json!(overlays);
         }
-        // A faulted loop renders dark; the flag keeps that from reading as restraint.
         if frame.script_error.is_some() {
             line["fault"] = Value::Bool(true);
         }
@@ -330,7 +315,6 @@ fn preview_cell(
     ]
     .map(|value| json!(preview_round(value)))
     .to_vec();
-    // GDTF names gobo wheels Gobo1, Gobo2, …; a selected slot is its ChannelSet's name.
     let gobo = state
         .attributes
         .iter()
@@ -353,7 +337,7 @@ fn preview_cell(
     Value::Array(cell)
 }
 
-/// Three decimals, with -0 written as 0.
+/// `+ 0.0` writes -0 as 0.
 fn preview_round(value: f64) -> f64 {
     (value * PREVIEW_DECIMALS).round() / PREVIEW_DECIMALS + 0.0
 }

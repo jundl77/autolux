@@ -4,21 +4,11 @@ package autolux.starfire;
 
 import "proto/starfire/rig.proto";
 
-// CLIENT = Autolux coordinator; SERVER = its owned Starfire process.
-// Frame: one byte MessageType, four-byte big-endian payload length, then the
-// standalone Protobuf message. No message envelope. Payload caps by MessageType:
-// LOGIN carries the session assets and may use 4 MiB (each
-// AutoloopDefinition.lua_source at most 64 KiB); every other type is real-time
-// and is capped at 4 KiB. Receivers check the cap before reading the payload.
-// Login comes first. Commands apply in order at render boundaries after login.
-// A successful Login binds the connection to its nonzero run_id; it cannot be replaced.
-// Later commands and heartbeats implicitly belong to that run.
-// Command IDs increase within the session; only Login has a success reply.
-// Rejections use ErrorReply. Metrics report the last processed command ID.
-// Both endpoints send heartbeats every 10 seconds; timeout is 30 seconds.
+// Frame: one byte MessageType, four-byte big-endian payload length, then the standalone
+// Protobuf message. LOGIN may use 4 MiB (each lua_source at most 64 KiB); every other type is
+// capped at 4 KiB, checked before the payload is read. Login comes first and binds its nonzero
+// run_id; command IDs increase. Both ends heartbeat every 10 s; the timeout is 30 s.
 
-// Build constants, not a wire field.
-// Major changes are incompatible; minor additions are compatible.
 enum ProtocolVersion {
   PROTOCOL_VERSION_UNSPECIFIED = 0;
   PROTOCOL_MINOR = 2;
@@ -52,41 +42,38 @@ enum SectionIntent {
 
 enum ParameterType {
   PARAMETER_TYPE_UNSPECIFIED = 0;
-  OUTPUT_BRIGHTNESS = 1;     // Number, 0..1; final output multiplier.
-  ANIMATION_SPEED = 2;       // Number, 0..8; independent of beat phase.
-  OUTPUT_BLACKOUT = 3;       // Boolean; final darkness gate.
-  AUDIO_RMS_NORMALIZED = 4;  // Number, 0..1; missing measurements remain unknown.
+  OUTPUT_BRIGHTNESS = 1;     // Number, 0..1.
+  ANIMATION_SPEED = 2;       // Number, 0..8.
+  OUTPUT_BLACKOUT = 3;       // Boolean.
+  AUDIO_RMS_NORMALIZED = 4;  // Number, 0..1.
   PAUSED = 5;
   DEFAULT_CROSSFADE_BEATS = 6;
   STROBE_MAX_RATE_HZ = 7;
   STROBE_MAX_BURST_SECONDS = 8;
   PALETTE = 9;
   INTENSITY = 10;
-  GROUP_MASTER = 11;  // Number, 0..1, for Parameter.group; caps that group after the master.
+  GROUP_MASTER = 11;  // Number, 0..1, for Parameter.group.
 }
 
-// [CLIENT -> SERVER]
-// Supply the complete controller-owned setup for one session; no server-side paths.
-// Failure releases partially acquired resources. Asset edits require a new session.
 message Login {
   uint64 command_id = 1;
   RigDefinition rig = 2;
   repeated AutoloopDefinition autoloops = 3;
   oneof output {
-    string artnet_destination = 4;  // IPv4:port, for direct Art-Net output.
-    RadiusOutput radius = 10;       // Embedded audio/lighting transmitter.
+    string artnet_destination = 4;  // IPv4:port.
+    RadiusOutput radius = 10;
   }
   repeated Parameter parameters = 6;
   uint32 protocol_major = 7;  // Must match the server's major version.
-  uint32 protocol_minor = 8;  // Backwards-compatible additions within this major.
-  fixed64 run_id = 9;         // Shared Autolux/Radius/Starfire run; unrelated to replay seeds.
-  optional uint32 render_core = 11;  // Logical CPU index; omitted leaves OS scheduling enabled.
+  uint32 protocol_minor = 8;
+  fixed64 run_id = 9;
+  optional uint32 render_core = 11;  // Logical CPU index.
   repeated Palette palettes = 12;
 
   message RadiusOutput {
     string receiver_address = 1;  // IPv4:TCP port.
     string capture_device_id = 2;
-    double playback_delay_seconds = 3;  // Analysis look-ahead, applied once to capture.
+    double playback_delay_seconds = 3;
     uint32 receiver_buffer_ms = 4;
     uint32 universe = 5;
     optional uint32 network_core = 6;
@@ -95,19 +82,16 @@ message Login {
   }
 }
 
-// [SERVER -> CLIENT]
-// The supplied rig, scripts, parameters and output are initialized and ready.
 message LoginReply {
   uint64 command_id = 1;
   uint32 frame_rate_hz = 3;
   uint32 max_message_bytes = 4;  // Cap for every type except LOGIN.
   uint32 protocol_major = 5;
-  uint32 protocol_minor = 6;  // Negotiated minimum of client and server minor versions.
+  uint32 protocol_minor = 6;
   fixed64 run_id = 7;
-  repeated GroupCapability groups = 8;  // One per rig group.
+  repeated GroupCapability groups = 8;
 }
 
-// Special axes at least one fixture in the group can express; energy always can.
 message GroupCapability {
   string name = 1;
   uint32 cell_count = 2;
@@ -115,23 +99,19 @@ message GroupCapability {
   bool speed = 4;
   bool pulse = 5;
   bool pattern = 6;
-  GroupRole role = 7;           // Echoed from the rig's FixtureGroup.
+  GroupRole role = 7;
   optional StageArea area = 8;  // Set only when every member lies in the same area.
   double centre_x_metres = 9;   // Mean member X in the MVR scene frame.
 }
 
-// [SERVER -> CLIENT]
 message ErrorReply {
   uint64 command_id = 1;
   string message = 2;
 }
 
-// [CLIENT -> SERVER]
-// One autoloop plays at a time; repeating its identity never restarts it.
-// An empty ID enters idle, clears effects and outputs darkness. Either way every cue is cleared.
 message PlayAutoloop {
   uint64 command_id = 1;
-  string autoloop_id = 2;
+  string autoloop_id = 2;  // Empty enters idle: effects cleared, darkness. Every cue is cleared.
   Transition transition = 4;
   string palette = 5;
 
@@ -140,9 +120,6 @@ message PlayAutoloop {
   }
 }
 
-// [CLIENT -> SERVER]
-// Replace this identified effect. Only specified properties override the baseline.
-// Higher priority wins; ties use command order. Brightness/blackout parameters apply last.
 message SetActiveEffect {
   // Physical values use GDTF units; presets name a ChannelSet.
   message AttributeValue {
@@ -160,26 +137,19 @@ message SetActiveEffect {
   }
   optional double intensity = 5;  // 0..1.
   RgbColor colour = 6;
-  optional double pan = 7;        // 0..1.
-  optional double tilt = 8;       // 0..1.
-  optional double strobe_hz = 9;  // 0..10.
-  sint32 priority = 10;
+  optional double pan = 7;                // 0..1.
+  optional double tilt = 8;               // 0..1.
+  optional double strobe_hz = 9;          // 0..10.
+  sint32 priority = 10;                   // Higher wins; ties use command order.
   optional double duration_seconds = 11;  // Positive; absent lasts until unset.
   // GDTF attribute, Geometry.Attribute or full function path.
   map<string, AttributeValue> attributes = 12;
-  // Rendered on the target; a group absent from the rig renders nothing.
   SpecialFX special_fx = 13;
-  // Pan runs low soft limit to high and back, one cycle per 8 s, and tilt reaches the focus
-  // point's elevation, in place of both.
-  bool pan_sweep = 14;
-  // Pan and tilt throw the beam through the fixture's focus point, in place of both.
+  bool pan_sweep = 14;  // One soft-limit cycle per 8 s, in place of pan and tilt.
   bool aim_focus = 15;
-  // The target fixture is patched and placed by this in place of the loaded rig's, so a test
-  // follows an edit before the show restarts. Only for a whole-fixture target.
-  FixturePose pose = 16;
+  FixturePose pose = 16;  // Only for a whole-fixture target.
 
-  // The rig Fixture's placement and patch fields, as the operator's unsaved patch has them. The
-  // universe must be one the rig uses, and the profile must keep the fixture's cells.
+  // The universe must be one the rig uses, and the profile must keep the fixture's cells.
   message FixturePose {
     repeated double matrix = 1;
     Fixture.MovementRange pan = 2;
@@ -191,104 +161,88 @@ message SetActiveEffect {
   }
 }
 
-// Fixture-agnostic accent; Starfire maps each axis onto the profiles' GDTF attribute families.
 message SpecialFX {
   string colour_slot = 1;  // Active palette slot: "primary", "secondary", "cold", ...
   float energy = 2;        // 0..1.
   float speed = 3;         // 0..1.
   optional uint32 pulse_beats = 4;
   float attack_beats = 5;
-  float release_beats = 6;     // Runs when the effect is cleared, replaced or expires.
+  float release_beats = 6;
   optional float pattern = 7;  // 0..1.
 }
 
-// [CLIENT -> SERVER]
 message UnsetActiveEffect {
   uint64 command_id = 1;
-  string effect_id = 2;  // Removing an absent ID does nothing.
-  // Drops a special this frame, its fade too; otherwise it runs its own release.
+  string effect_id = 2;
   bool instantaneous_release = 3;
 }
 
-// [CLIENT -> SERVER]
 message DiscardDelayedAudio {
   uint64 command_id = 1;
 }
 
-// [CLIENT -> SERVER]
 message UpdateBeat {
   uint64 command_id = 1;
   double tempo_bpm = 3;
   uint64 beat_index = 4;
   optional uint32 bar_phase = 5;
   uint32 beats_per_bar = 6;
-  BeatFeatures features = 7;  // Absent until the analyser has measured a beat.
+  BeatFeatures features = 7;
 }
 
-// Measured by Autolux over the beat that starts at beat_index; each 0..1.
+// Over the beat that starts at beat_index; each 0..1 against the track's peak.
 message BeatFeatures {
-  float onset = 1;  // Kick-band (<= 150 Hz) spectral flux at the beat, against the track's peak.
-  float bass = 2;   // 20-150 Hz band level.
-  float mid = 3;    // 150-2500 Hz band level.
-  float high = 4;   // 2500-16000 Hz band level.
+  float onset = 1;  // Kick-band (<= 150 Hz) spectral flux.
+  float bass = 2;   // 20-150 Hz.
+  float mid = 3;    // 150-2500 Hz.
+  float high = 4;   // 2500-16000 Hz.
 }
 
-// [CLIENT -> SERVER]
-// The plan for one section, sent when Autolux decides it, ahead of the room. Starfire starts it
-// on the first frame at or past start_beat_index on its own clock; a cue whose start has already
-// passed starts on the next bar line, its rotation still counted from the true start. A cue drops
-// every pending cue starting at or after its start, so Autolux re-sends cues in start order. A
-// re-sent cue's rows that are already playing carry on. At most 4 cues wait.
+// Starts on the first frame at or past start_beat_index; a cue whose start has passed starts on
+// the next bar line, its rotation still counted from the true start. A cue drops every pending
+// cue starting at or after its start, so cues are sent in start order. At most 4 cues wait.
 message CueSection {
   uint64 command_id = 1;
   uint64 start_beat_index = 2;  // An UpdateBeat.beat_index whose bar_phase is 0.
   SectionIntent intent = 3;
   repeated BaseLook rotation = 4;  // 1..8 entries, played in order from the start, then cycled.
   repeated Overlay overlays = 5;   // 0..8.
-  string palette = 6;              // Crossfaded over the first entry's transition, as PlayAutoloop.
-  optional double drop_strength = 7;  // 0..1, DROP only: the arrival against the track peak.
-  uint32 seed = 8;                    // For sf.random; Autolux draws it from its seeded RNG.
+  string palette = 6;
+  optional double drop_strength = 7;  // 0..1, DROP only.
+  uint32 seed = 8;
 
   message BaseLook {
     string autoloop_id = 1;
-    uint32 bars = 2;  // At least 1; entries change on these bar lines counted from the start.
-    // Into this entry; the first entry's enters the section.
+    uint32 bars = 2;  // At least 1.
     PlayAutoloop.Transition transition = 3;
   }
 
-  // A scheduled Lua layer above the base look and below every SetActiveEffect. Whether its
-  // intensity is HTP is the autoloop's own Login metadata. A pre-roll row from the "dip" bank is
-  // the blackout before the section: Starfire derives ctx.beats_until_dip and the move in black
-  // from that bank name, so the director plans the dip in that bank only.
+  // A pre-roll row from the "dip" bank is the blackout before the section: Starfire derives
+  // ctx.beats_until_dip and the move in black from that bank name alone.
   message Overlay {
     string autoloop_id = 1;
     sint32 priority = 2;  // Higher composes later; ties keep list order.
     // From the section start. Playing once: -64..1024, negative is pre-roll. Repeating: within the
     // period, and length plus release fit it.
     double begin_beats = 3;
-    double length_beats = 4;   // Positive.
-    uint32 every_bars = 5;     // 0 plays once; otherwise repeats every this many bars while active.
-    double attack_beats = 6;   // 0 is a snap.
-    double release_beats = 7;  // Runs after length, or when the cue is replaced; 0 is a snap.
+    double length_beats = 4;  // Positive.
+    uint32 every_bars = 5;    // 0 plays once.
+    double attack_beats = 6;
+    double release_beats = 7;
   }
 }
 
-// [CLIENT -> SERVER]
-// Drops every pending cue and ends the active one; its overlays release, the base look plays on.
 message ClearCues {
   uint64 command_id = 1;
 }
 
-// [CLIENT -> SERVER]
 message SetParameter {
   uint64 command_id = 1;
-  Parameter parameter = 2;  // One global setting; other values remain unchanged.
+  Parameter parameter = 2;
 }
 
-// [CLIENT -> SERVER] [SERVER -> CLIENT]
-message Heartbeat {}  // Independent liveness signal; no echo or command ID.
+message Heartbeat {}
 
-// [SERVER -> CLIENT]
 message Metrics {
   double elapsed_seconds = 1;
   uint64 rendered_frames = 2;
@@ -299,24 +253,20 @@ message Metrics {
   string active_autoloop = 7;
   string script_error = 8;
   string runtime_error = 9;
-  uint64 last_processed_command_id = 10;  // Includes accepted and rejected commands.
+  uint64 last_processed_command_id = 10;  // Includes rejected commands.
   fixed64 run_id = 11;
   uint32 pending_cues = 12;
-  // Overlay failures and cap refusals, at most 256 bytes; they never stop the show.
-  string overlay_error = 13;
+  string overlay_error = 13;  // At most 256 bytes.
   uint32 active_overlay_count = 14;
 }
 
-// Supplied source is sandboxed and bounded by Starfire; no file loading at runtime.
 message AutoloopDefinition {
-  string autoloop_id = 1;  // Unique across all banks; PlayAutoloop uses only this ID.
-  string bank = 2;         // Grouping metadata.
+  string autoloop_id = 1;  // Unique across all banks.
+  string bank = 2;
   string lua_source = 3;
-  // As an overlay, intensity takes the higher of below and overlay; else LTP.
   bool intensity_htp = 4;
 }
 
-// Shared by initialization and runtime updates. Independent of the active autoloop.
 message Parameter {
   ParameterType type = 1;
   oneof value {
@@ -325,11 +275,11 @@ message Parameter {
     string text = 5;
   }
   double fade_seconds = 4;
-  string group = 6;  // The rig group a GROUP_MASTER caps; empty for every other type.
+  string group = 6;  // Set only for GROUP_MASTER.
 }
 
 message RgbColor {
-  double red = 1;  // Each channel is normalized to 0..1.
+  double red = 1;  // Each channel 0..1.
   double green = 2;
   double blue = 3;
 }

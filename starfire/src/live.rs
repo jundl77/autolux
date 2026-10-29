@@ -1,5 +1,3 @@
-//! Owned rendering sessions and paced process I/O. Login acquires output resources.
-
 use std::collections::BTreeMap;
 use std::io::{Read, Write};
 use std::net::{Ipv4Addr, SocketAddrV4};

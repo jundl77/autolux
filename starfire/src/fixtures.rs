@@ -39,7 +39,6 @@ struct FixturePatch {
     area: wire::StageArea,
 }
 
-/// What pan, tilt and aim read of a fixture's pose.
 #[derive(Clone, Debug)]
 struct Placement {
     pan: MovementRange,
@@ -48,7 +47,6 @@ struct Placement {
     tilt_offset_degrees: f64,
     reversed: bool,
     position: Position,
-    /// None aims at the rig's stage centre: MVR's Focus is optional.
     focus: Option<Position>,
 }
 
@@ -83,8 +81,6 @@ impl Placement {
         })
     }
 
-    /// The tilt range a hanging head would have: the encode mirrors a standing head itself, so
-    /// aim reads lean as the hanging one.
     fn hanging_tilt(&self) -> MovementRange {
         MovementRange {
             inverted: self.tilt.inverted ^ self.reversed,
@@ -126,7 +122,6 @@ impl MovementRange {
         self.min + position * (self.max - self.min)
     }
 
-    /// The logical position `map` sends nearest to `physical`, held inside the soft limits.
     fn unmap(&self, physical: f64) -> f64 {
         let span = self.max - self.min;
         let position = if span > 0.0 {
@@ -205,7 +200,6 @@ pub fn home_orientation(matrix: &[f64]) -> Result<HomeOrientation> {
     })
 }
 
-/// Cells are the addressing unit: targets, groups and states name cells, never whole fixtures.
 #[derive(Clone, Debug)]
 pub struct FixtureRig {
     fixtures: Vec<FixturePatch>,
@@ -219,12 +213,9 @@ pub struct FixtureRig {
     stage_centre: Position,
     /// Every frame carries these, so the slots a test pose moves a fixture off go dark.
     universes: BTreeSet<u16>,
-    /// The login rig a test pose is patched into.
     definition: wire::RigDefinition,
 }
 
-/// The centre of the fixtures' plan bounding box on the floor, the box the stage areas are cut
-/// from, so every head without a focus point converges on one spot.
 fn stage_centre(fixtures: &[FixturePatch]) -> Position {
     let centre = |axis: usize| {
         let values = fixtures
@@ -241,7 +232,6 @@ fn stage_centre(fixtures: &[FixturePatch]) -> Position {
     [centre(0), centre(1), 0.0]
 }
 
-/// A single-cell fixture's cell is the fixture itself; other cells are named after their geometry.
 pub fn cell_id(fixture_uuid: &str, geometry: &str, cell_count: usize) -> String {
     if cell_count == 1 {
         fixture_uuid.to_owned()
@@ -359,7 +349,6 @@ impl FixtureRig {
                 patch.fixture_uuid,
                 patch.name
             );
-            // Autoloops name fixtures by label, so a label must pick out one fixture.
             ensure!(
                 names.insert(patch.name.clone(), index).is_none(),
                 "duplicate fixture name {}",
@@ -432,7 +421,6 @@ impl FixtureRig {
                     "group {group} repeats fixture {member}"
                 );
             }
-            // A master cell follows its pixels, so groups name the pixels only.
             let members = members
                 .iter()
                 .filter_map(|member| {
@@ -495,7 +483,6 @@ impl FixtureRig {
         })
     }
 
-    /// A fixture target names one cell, or every cell of a multi-cell fixture.
     pub fn resolve(&self, target: &Target) -> Result<Vec<String>> {
         match target {
             Target::All => Ok(self.cell_ids()),
@@ -521,12 +508,10 @@ impl FixtureRig {
         &self.groups
     }
 
-    /// Cell positions, stage areas and mirror partners, derived once at rig load.
     pub fn spatial(&self) -> &Spatial {
         &self.spatial
     }
 
-    /// Groups whose MVR Layer is `accent`: they play specials only, never autoloops.
     pub fn is_accent(&self, group: &str) -> bool {
         self.accent_groups.contains(group)
     }
@@ -543,8 +528,6 @@ impl FixtureRig {
         Ok(())
     }
 
-    /// The cells an autoloop's target lights. Naming an accent group or fixture is refused;
-    /// `all` passes over accent cells, which rig load keeps out of loop groups.
     pub fn resolve_for_loop(&self, target: &Target) -> Result<Vec<String>> {
         let mut cells = self.resolve(target)?;
         match target {
@@ -574,8 +557,6 @@ impl FixtureRig {
         Some(&self.profiles[&self.fixtures[fixture].profile][cell].profile)
     }
 
-    /// The rig with one fixture patched and placed as `pose` has it, built and checked as the
-    /// login rig is. Its cells stay those the show's states are keyed by.
     pub fn posed(&self, fixture_uuid: &str, pose: &FixturePose) -> Result<Self> {
         let mut definition = self.definition.clone();
         let fixture = definition
@@ -605,8 +586,6 @@ impl FixtureRig {
         Ok(rig)
     }
 
-    /// The point a cell (or fixture) rests its beam on: its MVR focus point, or the stage centre
-    /// without one.
     pub fn focus(&self, id: &str) -> Option<Position> {
         let fixture = match self.cells.get(id) {
             Some(&(fixture, _)) => &self.fixtures[fixture],
@@ -618,22 +597,13 @@ impl FixtureRig {
         Some(fixture.placement.focus.unwrap_or(self.stage_centre))
     }
 
-    /// Logical pan and tilt throwing the beam through the cell's focus point. None for a cell
-    /// without a pan range.
     pub fn aim(&self, cell_id: &str) -> Option<(f64, f64)> {
         self.aim_at(cell_id, self.focus(cell_id)?)
     }
 
-    /// Logical pan and tilt throwing the beam through `point` (scene millimetres), held inside
-    /// the soft limits. A pan range past a full turn reaches a heading more than once; this takes
-    /// the copy nearest the middle of the soft limits, so a circle round a near-plumb beam, which
-    /// sweeps every heading, crosses the wrap point once per cycle. A point at the head itself
-    /// rests along the pan axis. None for a cell without a pan range.
     pub fn aim_at(&self, cell_id: &str, point: Position) -> Option<(f64, f64)> {
         let placement = &self.fixtures[self.cells.get(cell_id)?.0].placement;
         let [x, y, z] = [0, 1, 2].map(|axis| point[axis] - placement.position[axis]);
-        // The scene heading clockwise from +Y the encode reads a logical pan as, and the lean
-        // off the pan axis, which runs down from a hanging head and up from a standing one.
         let heading_degrees = x.atan2(y).to_degrees();
         let lean_degrees = if [x, y, z] == [0.0; 3] {
             // No direction at all; atan2(+0, -0) would read it as a half turn.
@@ -662,9 +632,6 @@ impl FixtureRig {
         Some((placement.pan.unmap(position), tilt))
     }
 
-    /// The scene unit vector `aim_at` reads a logical pan and tilt as: the inverse of `aim_at`
-    /// wherever `aim_at` did not clamp. A head without a tilt range throws along its pan axis.
-    /// None for a cell without a pan range.
     pub fn beam_direction(&self, cell_id: &str, pan: f64, tilt: f64) -> Option<[f64; 3]> {
         let placement = &self.fixtures[self.cells.get(cell_id)?.0].placement;
         let profile = self.profile(cell_id)?;
@@ -696,13 +663,10 @@ impl FixtureRig {
         Some(&self.fixtures[fixture].fixture_uuid)
     }
 
-    /// The fixture uuid a label names; autoloops are written against labels.
     pub fn uuid_of_label(&self, name: &str) -> Option<&str> {
         Some(&self.fixtures[*self.names.get(name)?].fixture_uuid)
     }
 
-    /// The target with a fixture label resolved to its uuid; uuids, cell ids and unknown names
-    /// pass through.
     pub fn by_label(&self, target: Target) -> Target {
         match target {
             Target::Fixture(name) => {
@@ -712,8 +676,6 @@ impl FixtureRig {
         }
     }
 
-    /// A fixture uuid or cell id with the fixture's label in place of its uuid, for
-    /// messages people read; unknown ones come back unchanged.
     pub fn label(&self, id: &str) -> String {
         let fixture = self
             .cells
@@ -737,7 +699,6 @@ impl FixtureRig {
             .collect()
     }
 
-    /// Every cell in patch order, each fixture's cells in DMX offset order.
     pub fn cell_ids(&self) -> Vec<String> {
         self.fixtures
             .iter()
@@ -752,7 +713,6 @@ impl FixtureRig {
             .collect()
     }
 
-    // Blackout zeroes intensity only; movement and device-control bytes keep their values.
     pub fn encode(&self, states: &FixtureStates) -> Result<BTreeMap<u16, Vec<u8>>> {
         ensure!(
             states.len() == self.cells.len(),
@@ -777,10 +737,8 @@ impl FixtureRig {
                 let position = placement.pan.map(position);
                 pan_range.map_or(position, |(from, to)| {
                     if placement.reversed {
-                        // Standing turns pan the other way round about physical 0 and the
-                        // reversed tilt throws the beam a half turn, so heading L needs
-                        // 180 - L - yaw: the mirror of the whole range, then this offset,
-                        // canonical like the yaw.
+                        // Standing reverses pan about physical 0 and the reversed tilt adds a
+                        // half turn, so heading L needs 180 - L - yaw: the mirrored range, offset.
                         let offset = HALF_TURN_DEGREES
                             - (placement.pan_offset_degrees + from + to)
                                 .rem_euclid(FULL_TURN_DEGREES);
@@ -830,7 +788,6 @@ impl FixtureRig {
                     .iter()
                     .position(|master| master.governed.contains(&index))
                 {
-                    // Master level times pixel output equals what the pixel would show alone.
                     let level = master_levels[master];
                     let scale = |value: f64| {
                         if level > 0.0 {
@@ -858,8 +815,6 @@ impl FixtureRig {
     }
 }
 
-/// The light a pixel cell asks for: its intensity, or the brightness scaling its explicit
-/// attributes when it has any.
 fn light_demand(state: &FixtureState) -> f64 {
     if state.attributes.is_empty() {
         state.intensity

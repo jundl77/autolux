@@ -10,7 +10,6 @@ use starfire::model::{
 use starfire::protocol::wire;
 use starfire::script::AutoloopCatalog;
 
-// Modes are built as Autolux's GDTF compiler emits them; parsing is tested in Python.
 const ROOT_GEOMETRY: &str = "Base";
 
 fn function(attribute: &str, name: &str) -> wire::ChannelFunction {
@@ -54,8 +53,6 @@ fn set(name: &str, dmx_from: u32, dmx_to: u32, physical: (f64, f64)) -> wire::Ch
     }
 }
 
-/// One DMX channel whose first logical channel is `logical`; function paths and geometry
-/// qualification follow GDTF naming (`Geometry_Logical.Logical.Function`).
 fn channel_with(
     logical: &[(&str, Vec<wire::ChannelFunction>)],
     geometry: &str,
@@ -270,7 +267,6 @@ fn a_pan_sweep_covers_exactly_the_soft_limits_on_an_eight_second_triangle() {
     engine
         .apply(0.0, &Command::SetOverride { value: sweep })
         .unwrap();
-    // Two full cycles on the render clock, 10 ms frames.
     let pan: Vec<u16> = (0..=1600)
         .map(|frame| {
             let dmx = &engine
@@ -280,7 +276,6 @@ fn a_pan_sweep_covers_exactly_the_soft_limits_on_an_eight_second_triangle() {
             u16::from_be_bytes([dmx[0], dmx[1]])
         })
         .collect();
-    // The soft limits 0.25 and 0.75 at 16 bits, as the patch calibration encodes them.
     let (low, high) = (16384, 49151);
     assert_eq!(pan.iter().min(), Some(&low));
     assert_eq!(pan.iter().max(), Some(&high));
@@ -290,7 +285,6 @@ fn a_pan_sweep_covers_exactly_the_soft_limits_on_an_eight_second_triangle() {
     );
 }
 
-/// A yawed MVR Matrix at `position`, flipped about its facing when standing.
 fn mounted(hanging: bool, yaw: f64, position: [f64; 3]) -> Vec<f64> {
     let (sin, cos) = f64::to_radians(yaw).sin_cos();
     let flip = if hanging { 1.0 } else { -1.0 };
@@ -303,7 +297,6 @@ fn mounted(hanging: bool, yaw: f64, position: [f64; 3]) -> Vec<f64> {
     .concat()
 }
 
-/// The first frame's DMX for one Intimidator under a highlight that sweeps or aims.
 fn moved(matrix: &[f64], focus: [f64; 3], inverted: bool, motion: Motion) -> Vec<u8> {
     let rig = support::rig(serde_json::json!({"fixtures": [{
         "fixture_uuid": "test", "profile": "chauvet_intimidator_spot_110_12ch",
@@ -364,7 +357,6 @@ fn beam(frame: &[u8], matrix: &[f64]) -> [f64; 3] {
         .movement_range("Pan")
         .unwrap();
     let share = |at: usize| f64::from(u16::from_be_bytes([frame[at], frame[at + 1]])) / 65535.0;
-    // Pan from physical 0 of the profile's declared range, tilt off its range centre.
     let (pan, tilt) = (
         (from + share(0) * (to - from)).to_radians(),
         ((share(2) - 0.5) * 270.0).to_radians(),
@@ -404,7 +396,6 @@ fn a_focus_aim_throws_the_beam_through_the_focus_point_at_any_yaw_and_mount() {
                     let context =
                         format!("hanging {hanging} yaw {yaw} inverted {inverted} focus {offset:?}");
                     assert_through(beam(&aimed, &matrix), towards(position, focus), &context);
-                    // A sweep pans on but holds the tilt that reaches the point's elevation.
                     let swept = moved(&matrix, focus, inverted, Motion::Sweep);
                     assert_eq!(swept[2..4], aimed[2..4], "{context}");
                 }
@@ -415,7 +406,6 @@ fn a_focus_aim_throws_the_beam_through_the_focus_point_at_any_yaw_and_mount() {
 
 #[test]
 fn without_a_focus_point_every_head_aims_at_the_stage_centre_on_the_floor() {
-    // The fixtures' plan bounding box runs x -2000..3000, y -1000..1000: centre (500, 0, 0).
     let positions = [[-2000.0, 1000.0, 3000.0], [3000.0, -1000.0, 2500.0]];
     let matrices = [
         mounted(true, 37.0, positions[0]),
@@ -507,8 +497,6 @@ fn a_pose_aims_through_the_edited_focus_before_the_rig_reloads() {
     assert_through(beam(&posed, &matrix), towards(position, focus), "posed");
 }
 
-/// A red test of the stage fixture `name`, without a pose and then with its loaded patch as
-/// `edit` changes it: the universe 0 frames, the second or its refusal.
 fn stage_test(
     definition: &wire::RigDefinition,
     name: &str,
@@ -569,7 +557,6 @@ fn slots(frame: &[u8], address: usize, count: usize) -> &[u8] {
 
 #[test]
 fn a_pose_at_a_new_address_moves_the_test_there_and_leaves_the_old_slots_dark() {
-    // The stage's mover_left (12 channels) sits at 33; nothing is patched from 200.
     let (loaded, posed) = stage_test(&support::stage_definition(), "mover_left", |pose| {
         pose.address = 200;
     });
@@ -585,7 +572,6 @@ fn a_pose_at_a_new_address_moves_the_test_there_and_leaves_the_old_slots_dark() 
 
 #[test]
 fn a_pose_in_another_mode_patches_that_modes_channel_count() {
-    // The bar (at 57) in 7Channel, one cell like 4Channel, so a pose may switch between them.
     let mut definition = support::stage_definition();
     let mode = |name: &str| {
         let profiles = &support::stage_definition().profiles;
@@ -606,7 +592,6 @@ fn a_pose_in_another_mode_patches_that_modes_channel_count() {
     assert_ne!(slots(&posed, 509, 4), [0; 4]);
     assert_eq!(slots(&posed, 57, 7), [0; 7]);
     assert_ne!(slots(&loaded, 57, 7), [0; 7]);
-    // Seven channels do not fit where four do.
     let (_, refused) = stage_test(&definition, "bar_upstage", |pose| pose.address = 509);
     assert!(refused.unwrap_err().contains("exceeds universe boundary"));
 }
@@ -615,7 +600,6 @@ fn a_pose_in_another_mode_patches_that_modes_channel_count() {
 fn a_pose_that_overlaps_another_fixture_leaves_the_universe_or_changes_the_cells_is_refused() {
     let definition = support::stage_definition();
     let refusal = |name: &str, edit: fn(&mut FixturePose)| stage_test(&definition, name, edit).1;
-    // mover_right sits at 45.
     let overlap = refusal("mover_left", |pose| pose.address = 40).unwrap_err();
     assert!(
         overlap.contains("overlaps DMX channel 45 in universe 0"),

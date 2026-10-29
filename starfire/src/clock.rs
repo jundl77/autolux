@@ -152,7 +152,6 @@ impl MusicalClock {
         self.anchor_seconds = time_seconds;
         self.anchor_beat = grid_beat as f64;
         self.anchor_elapsed_musical_beats = before.elapsed_musical_beats;
-        // Beat measurements correct musical phase; integrated animation stays continuous.
         self.anchor_animation_beats = before.animation_beats;
         self.tempo_bpm = beat.bpm;
         self.beats_per_bar = beat.beats_per_bar;
@@ -160,13 +159,12 @@ impl MusicalClock {
         Ok(())
     }
 
-    /// The newest received beat as (beat index, grid beat): grid = index + a session offset.
+    /// (beat index, grid beat): grid = index + a session offset.
     pub fn last_beat(&self) -> Option<(u64, u64)> {
         self.last_received
             .map(|beat| (beat.beat_index, beat.grid_beat))
     }
 
-    /// The newest beat's tempo, held while paused; 0 before the first beat.
     pub fn tempo_bpm(&self) -> f64 {
         self.tempo_bpm
     }

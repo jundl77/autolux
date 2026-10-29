@@ -405,7 +405,6 @@ mod tests {
         let mut packet = [0; 1024];
         let count = listener.recv(&mut packet).unwrap();
         assert_eq!(count, 530);
-        // The stage's wash and mover dimmer channels.
         for dimmer in [4, 12, 20, 28, 39, 51] {
             assert_eq!(packet[18 + dimmer], 0);
         }

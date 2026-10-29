@@ -29,35 +29,23 @@ const WHITE: Rgb = Rgb {
 };
 const OVERLAY_BANKS: [&str; 5] = ["hit", "fill", "riser", "dip", "accent"];
 const LOOP_GROUPS: [&str; 3] = ["wash", "strip", "movers"];
-/// Base loops leave the headroom above for HTP hits and risers.
 const BASE_PEAK: f64 = 0.9;
-/// A level swing smaller than this is shimmer, not a pulse.
 const PULSE_DEPTH: f64 = 0.05;
-/// Half-beat steps are the fastest a base loop pulses; faster reads as a strobe. Sampling every
-/// 0.07 beats never divides the beat, so a pulse can land anywhere in it.
 const SAMPLE_BEATS: f64 = 0.07;
 const MIN_PULSE_GAP_BEATS: f64 = 0.5 - SAMPLE_BEATS;
-/// starfire::script's MAX_EFFECTS_PER_FRAME, a detector a loop must stay inside on any rig.
 const EFFECT_CAP: usize = 512;
-/// The finale replay: the drop is cued at beat 92 for beat 128, its riser runs from 111 and its
-/// dip blacks out beat 127.
 const DROP_BEAT: f64 = 128.0;
 const DIP_BEAT: f64 = 127.0;
 const COUNT_STEPS: usize = 8;
-/// A 4-beat window of a looping figure gains or loses one edge frame against the next; a sag
-/// smaller than this share is sampling, not the build falling back.
 const WINDOW_EDGE_SHARE: f64 = 0.02;
-/// Heads slew back to the base after a moving overlay ends; compare once they are home.
 const OVERLAY_SETTLE_BEATS: f64 = 4.0;
-/// Worst frames on the stage rig, well inside the 100k per-script budget (B1): a heavier loop
-/// is a regression to look at, not a bound to raise.
+/// A heavier loop is a regression to look at, not a bound to raise.
 const LEAN_BASE_INSTRUCTIONS: u32 = 8_000;
 const LEAN_OVERLAY_INSTRUCTIONS: u32 = 4_000;
 
 struct Look {
     bank: String,
     autoloop: String,
-    /// 0 for an overlay, which has a length per cue instead.
     loop_beats: f64,
     source: String,
 }
@@ -71,7 +59,6 @@ impl Look {
         OVERLAY_BANKS.contains(&self.bank.as_str())
     }
 
-    /// An overlay's `-- strobe: yes`; base loops never strobe.
     fn strobes(&self) -> bool {
         self.source
             .lines()
@@ -97,7 +84,6 @@ fn root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
 }
 
-/// Every base loop (the overlays have their own replays and checks).
 fn looks() -> Vec<Look> {
     every_look()
         .into_iter()
@@ -210,7 +196,6 @@ fn replay_for(look: &Look) -> Replay {
     substitute(replay, look)
 }
 
-/// The finale replay with the buildup under test as the build.
 fn finale_for(look: &Look) -> Replay {
     substitute(
         Replay::load(&root().join("tests/replays/buildup_finale.json")).unwrap(),
@@ -218,8 +203,6 @@ fn finale_for(look: &Look) -> Replay {
     )
 }
 
-/// The late replay: a 16-bar build whose drop is cued at beat 52 for beat 64, under the Balanced
-/// plan (a 1-beat dip, the white rise, the white hit).
 fn late_for(look: &Look) -> Replay {
     substitute(
         Replay::load(&root().join("tests/replays/buildup_late.json")).unwrap(),
@@ -227,9 +210,6 @@ fn late_for(look: &Look) -> Replay {
     )
 }
 
-/// The look under test takes the place of its bank's loop: in selections, in the first rotation
-/// entry and in the first overlay row. It panics unless exactly one command (sent once or
-/// repeated) took the look, so a fixture cannot silently test something else.
 fn substitute(mut replay: Replay, look: &Look) -> Replay {
     let mut took: Vec<Command> = Vec::new();
     for event in &mut replay.events {
@@ -270,7 +250,6 @@ fn substitute(mut replay: Replay, look: &Look) -> Replay {
     replay
 }
 
-/// The same replay without the named overlay banks' rows.
 fn without_overlays(mut replay: Replay, banks: &[&str]) -> Replay {
     for event in &mut replay.events {
         if let Command::CueSection { value } = &mut event.command {
@@ -282,7 +261,6 @@ fn without_overlays(mut replay: Replay, banks: &[&str]) -> Replay {
     replay
 }
 
-/// The (bank, autoloop) pairs the replay plays as its base.
 fn base_looks_of(replay: &Replay) -> Vec<(String, String)> {
     replay
         .events
@@ -307,7 +285,6 @@ fn loop_cells() -> Vec<String> {
         .collect()
 }
 
-/// The summed intensity of every cell a loop drives.
 fn total_light(frame: &RenderedFrame, cells: &[String]) -> f64 {
     cells
         .iter()
@@ -459,7 +436,6 @@ fn check_replay(look: &Look) {
     let digest = dmx_digest(&first);
     assert_eq!(digest, dmx_digest(&second), "{look} is not deterministic");
 
-    // Duplicate selections and re-sent cues cannot restart the current autoloop.
     let mut without_duplicate = replay.clone();
     let mut seen = Vec::new();
     without_duplicate.events.retain(|event| {
@@ -482,7 +458,6 @@ fn check_replay(look: &Look) {
         "{look} restarted on reselect"
     );
 
-    // Frame rate changes sampling density, never the authored effect at a given time.
     let mut slower = replay.clone();
     slower.frame_rate_hz = replay.frame_rate_hz / 2;
     let slower = render_replay(&slower, support::stage(), support::show_catalog()).unwrap();
@@ -509,8 +484,6 @@ fn every_autoloop_replays_deterministically_and_matches_any_golden() {
 
 #[test]
 fn every_autoloop_repeats_on_its_declared_loop_length() {
-    // Builds keep climbing for as long as they last, so they repeat in shape, not in level:
-    // buildups_keep_climbing_and_never_restart covers them.
     for look in looks().into_iter().filter(|look| !look.ramps()) {
         let (mut first, mut repeated) = (look.engine(0.0), look.engine(0.0));
         for step in 0..(2.0 * look.loop_beats / 0.07) as usize {
@@ -565,8 +538,6 @@ fn no_autoloop_ever_strobes_even_when_loud() {
 
 #[test]
 fn selecting_mid_bar_keeps_the_musical_phrase() {
-    // Phrase time counts from the bar line at or before a selection, so a loop selected mid-bar
-    // renders as if selected on that downbeat.
     for look in looks().iter().filter(|look| !look.ramps()) {
         let mut on_the_one = look.engine(0.0);
         let mut mid_bar = look.engine(2.25);
@@ -583,7 +554,6 @@ fn selecting_mid_bar_keeps_the_musical_phrase() {
 
 #[test]
 fn measured_energy_scales_levels_and_reach_but_not_colour_or_structure() {
-    // Builds never follow loudness: their RMS falls as the music high-passes (C5).
     let rig = support::stage();
     for look in looks()
         .into_iter()
@@ -602,7 +572,6 @@ fn measured_energy_scales_levels_and_reach_but_not_colour_or_structure() {
                 quiet.intensity <= strong.intensity + FLOAT_TOLERANCE,
                 "{look}: {id}"
             );
-            // Reach is how far a head points from its rest beam on its focus point.
             if let Some((pan, tilt)) = rig.focus(id).and_then(|focus| rig.aim_at(id, focus)) {
                 let reach = |state: &FixtureState| (state.pan - pan).hypot(state.tilt - tilt);
                 assert!(
@@ -862,7 +831,6 @@ fn the_same_autoloops_work_on_a_different_rig_through_named_groups() {
         FixtureRig::load(&root().join("../autolux/tests/data/generic_rig/generic.rig.pb")).unwrap();
     for look in every_look() {
         let mut replay = replay_for(&look);
-        // Long enough for the overlay replays' rows, which begin at beat 16.
         replay.duration_seconds = if look.is_overlay() { 12.0 } else { 8.0 };
         replay
             .events
@@ -921,8 +889,7 @@ fn one_loop_under_two_palettes_changes_only_colour() {
 
 #[test]
 fn the_bar_emits_the_bytes_the_eight_pixel_fixtures_did() {
-    // The stage's bar at 57-80. The bytes were captured when it was eight 3-channel fixtures,
-    // before it became one 24-channel fixture.
+    // Captured when the bar was eight 3-channel fixtures, before it became one 24-channel one.
     const BAR: std::ops::Range<usize> = 56..80;
     let rain = [
         (
@@ -984,8 +951,6 @@ fn the_bar_emits_the_bytes_the_eight_pixel_fixtures_did() {
     }
 }
 
-/// What a viewer sees of a cell: its dimmer times its brightest channel, so a colour flicker
-/// at a constant dimmer is a pulse too.
 fn seen(state: &FixtureState) -> f64 {
     state.intensity
         * state
@@ -995,9 +960,6 @@ fn seen(state: &FixtureState) -> f64 {
             .max(state.colour.blue)
 }
 
-/// The peak beat of every completed pulse: a rise of at least PULSE_DEPTH, then a fall of as
-/// much. Peaks, not the falls, so a sharp and a soft pulse half a beat apart stay half a beat
-/// apart.
 fn pulse_beats(samples: &[(f64, f64)]) -> Vec<f64> {
     let Some(&(first_beat, first)) = samples.first() else {
         return Vec::new();
@@ -1117,8 +1079,6 @@ fn peak_light(frames: &[RenderedFrame], from: f64, to: f64, cells: &[String]) ->
 
 #[test]
 fn buildup_regime_u_never_restarts() {
-    // With no drop known the build only climbs: each 16-beat stride peaks at least as high as the
-    // last up to the plateau, and bar 16 is at least twice as bright as bar 1.
     let cells = loop_cells();
     for look in looks_in(&["buildup"]) {
         let frames = render_replay(
@@ -1152,7 +1112,6 @@ fn buildup_regime_u_never_restarts() {
 fn buildup_finale_rises_into_the_drop_and_the_last_beat_is_dark() {
     let cells = loop_cells();
     for look in looks_in(&["buildup"]) {
-        // The base alone must rise: the riser and the hit would hide a build that sags.
         let base = without_overlays(finale_for(&look), &["riser", "hit"]);
         let frames = render_replay(&base, support::stage(), support::show_catalog()).unwrap();
         let mut previous = 0.0;
@@ -1311,7 +1270,6 @@ fn beat_features_change_levels_not_colour_or_structure() {
 
 #[test]
 fn buildups_render_the_same_at_any_loudness() {
-    // RMS falls as a build high-passes, so a build that followed it would dim as it climbs (C5).
     for look in looks_in(&["buildup"]) {
         let (mut silent, mut loud) = (look.engine(0.0), look.engine(0.0));
         set_rms(&mut silent, 0.0);
@@ -1378,7 +1336,6 @@ fn overlays_end_within_length_plus_release() {
             .zip(&without)
             .any(|(a, b)| a.dmx_frames_by_universe != b.dmx_frames_by_universe);
         assert!(touched, "{look} never shows");
-        // Light and colour are the base's from the end; heads may still be slewing home.
         for (a, b) in with
             .iter()
             .zip(&without)
@@ -1404,7 +1361,6 @@ fn overlays_end_within_length_plus_release() {
     }
 }
 
-/// Contexts covering both build regimes and an overlay's whole length, for instruction counts.
 fn contexts(look: &Look) -> Vec<RenderContext> {
     let length = 16.0;
     let mut contexts = Vec::new();
@@ -1483,7 +1439,6 @@ fn every_loop_stays_lean_inside_the_instruction_budget() {
     );
 }
 
-/// A fixture copied from the stage at a new place and patch.
 fn placed(
     template: &wire::Fixture,
     id: String,
@@ -1518,7 +1473,6 @@ fn stage_fixture_of(definition: &wire::RigDefinition, group: &str) -> wire::Fixt
         .clone()
 }
 
-/// `count` copies of the stage's `group` fixture along x, patched in shuffled order.
 fn shuffled_row(
     definition: &mut wire::RigDefinition,
     template: &wire::Fixture,
@@ -1550,8 +1504,6 @@ fn shuffled_row(
     });
 }
 
-/// Large rigs a loop must stay inside the effect cap on: 400 washes, and 60 eight-cell bars as
-/// the only movers. Both are patched in shuffled order.
 fn large_rigs() -> Vec<(&'static str, FixtureRig)> {
     let stage = support::stage_definition();
     let empty = |template: &wire::Fixture| wire::RigDefinition {
@@ -1631,7 +1583,6 @@ fn a_fan_spreads_in_stage_order_on_a_shuffled_patch() {
             &palettes.slots("techno").unwrap(),
         )
         .unwrap();
-    // How far each beam swings towards +X from its rest beam on its focus.
     let mut swings: Vec<(f64, f64)> = effects
         .iter()
         .flat_map(|effect| {
@@ -1668,7 +1619,6 @@ fn a_fan_spreads_in_stage_order_on_a_shuffled_patch() {
     );
 }
 
-/// A bigger generic rig: eight movers and a 40-cell strip of five bars beside the stage's washes.
 fn big_generic_rig() -> FixtureRig {
     let mut definition = support::stage_definition();
     let mover = stage_fixture_of(&definition, "movers");
@@ -1720,7 +1670,6 @@ fn the_semantic_rules_hold_on_a_bigger_generic_rig() {
         (8, 40)
     );
     for look in every_look().into_iter().filter(Look::follows_music) {
-        // A base loop alone: a fill releasing over a pulse is the fill's shape, not the loop's.
         let mut replay = if look.is_overlay() {
             replay_for(&look)
         } else {
@@ -1749,7 +1698,6 @@ fn the_semantic_rules_hold_on_a_bigger_generic_rig() {
             }
         }
         if !look.is_overlay() {
-            // Only while the look plays: a rotation's cut may set two loops' pulses close.
             for playing in frames
                 .chunk_by(|a, b| a.active_autoloop == b.active_autoloop)
                 .filter(|run| run[0].active_autoloop.as_deref() == Some(look.autoloop.as_str()))
@@ -1763,8 +1711,6 @@ fn the_semantic_rules_hold_on_a_bigger_generic_rig() {
 
 #[test]
 fn buildups_keep_climbing_and_never_restart() {
-    // Past the old 128-beat plateau an uncued build still never falls back: each loop-length
-    // window peaks at least as high as the one before.
     let cells = loop_cells();
     for look in looks_in(&["buildup"]) {
         let mut engine = look.engine(0.0);
@@ -1790,8 +1736,6 @@ fn buildups_keep_climbing_and_never_restart() {
 
 const LATE_CUE_BEAT: f64 = 52.0;
 const LATE_DROP_BEAT: f64 = 64.0;
-/// How far a build may move in the first frames after its drop is cued, against the same frames
-/// uncued: a fast hand-over moves it a little, the old jump moved it by a third.
 const CUE_ARRIVAL_SHARE: f64 = 0.03;
 const CUE_ARRIVAL_BEATS: f64 = 0.1;
 
@@ -1832,7 +1776,6 @@ fn a_late_cue_hands_over_without_a_jump() {
     }
 }
 
-/// After the entry hit the drop's beams show colour B, so the drop changes colour.
 fn assert_beams_in_b_after_the_hit(look: &Look, replay: &Replay, drop_beat: f64) {
     let secondary = replay.palettes[0].secondary;
     let frames = render_replay(replay, support::stage(), support::show_catalog()).unwrap();

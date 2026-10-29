@@ -1,6 +1,3 @@
-//! Aim geometry (`FixtureRig::aim_at`, `beam_direction`) and the Lua aim and phaser helpers, on
-//! synthetic heads placed on grids.
-
 mod support;
 
 use serde_json::{Value, json};
@@ -17,8 +14,6 @@ const TILT_TRAVEL: f64 = 270.0;
 const DMX_STEP: f64 = 0.05;
 const EXACT: f64 = 1e-9;
 
-/// Heads are the compiled `beam_scanner` test description (Pan 0..540, Tilt 0..270, 8 bit),
-/// bars the two-pixel `pixel_bar`, washes Generic RGB.
 fn rig(fixtures: Value, groups: Value) -> FixtureRig {
     let mut definition = support::definition(&json!({ "fixtures": fixtures, "groups": groups }));
     definition.profiles.extend([
@@ -28,7 +23,6 @@ fn rig(fixtures: Value, groups: Value) -> FixtureRig {
     FixtureRig::from_wire(&definition).unwrap()
 }
 
-/// An MVR Matrix yawed by `yaw` degrees at `position`, flipped about its facing when standing.
 fn mounted(hanging: bool, yaw: f64, position: [f64; 3]) -> Vec<f64> {
     let (sin, cos) = yaw.to_radians().sin_cos();
     let flip = if hanging { 1.0 } else { -1.0 };
@@ -80,7 +74,6 @@ fn degrees_between(a: [f64; 3], b: [f64; 3]) -> f64 {
     dot(a, b).clamp(-1.0, 1.0).acos().to_degrees()
 }
 
-/// The unit beam at `heading` degrees clockwise from +Y, leaning `lean` degrees off straight down.
 fn hanging_beam(heading: f64, lean: f64) -> [f64; 3] {
     let (sin_h, cos_h) = heading.to_radians().sin_cos();
     let (sin_l, cos_l) = lean.to_radians().sin_cos();
@@ -96,7 +89,6 @@ fn assert_near(actual: [f64; 3], expected: [f64; 3], tolerance: f64, context: &s
 
 #[test]
 fn aim_at_and_beam_direction_are_inverses_over_mounts_yaws_points_and_soft_limits() {
-    // Every limit pair still reaches every heading (378 of 540 degrees) and leans to 121.5.
     let limits = [
         (json!({}), json!({})),
         (
@@ -111,7 +103,6 @@ fn aim_at_and_beam_direction_are_inverses_over_mounts_yaws_points_and_soft_limit
     let steep = 89.9_f64.to_radians();
     for hanging in [true, false] {
         let position = [1000.0, -500.0, if hanging { 3000.0 } else { 0.0 }];
-        // Points on the side the head throws to: below a hanging one, above a standing one.
         let side = if hanging { -1.0 } else { 1.0 };
         let offsets = [
             [1500.0, 2500.0, 2500.0 * side],
@@ -170,7 +161,6 @@ fn aim_at_and_beam_direction_are_inverses_over_mounts_yaws_points_and_soft_limit
 
 #[test]
 fn a_point_outside_the_soft_limits_clamps_to_the_nearest_edge() {
-    // Soft limits: headings 54..162 degrees, leans 0..54 degrees.
     let position = [0.0, 0.0, 3000.0];
     let mut fixture = head("head", 0, mounted(true, 0.0, position), [0.0; 3]);
     fixture["pan"] = json!({"min": 0.1, "max": 0.3});
@@ -287,8 +277,6 @@ fn autoloop(rig: &FixtureRig, body: &str) -> LuaAutoloop {
     .unwrap()
 }
 
-/// `beats` since the loop started, with the beat position and clock elsewhere: phasers count
-/// from the section or loop start.
 fn elapsed(beats: f64) -> RenderContext {
     RenderContext {
         time_seconds: beats + 5.0,
@@ -299,8 +287,6 @@ fn elapsed(beats: f64) -> RenderContext {
     }
 }
 
-/// A plain sf.pan_tilt effect's cell, pan and tilt: it sets nothing else, so composition, slew
-/// and soft limits treat it as any loop's.
 fn aimed(effect: Effect) -> (String, f64, f64) {
     let Target::Fixture(cell) = effect.target else {
         panic!("{:?} is not one cell", effect.target)
@@ -393,7 +379,6 @@ fn sf_aim_and_sf_focus_read_the_rig_in_metres_and_only_cells_with_pan_aim() {
     for (call, error) in [
         (r#"sf.aim("head", 0/0, 0, 0)"#, "aim point must be finite"),
         (r#"sf.aim("nobody", 0, 0, 0)"#, "unknown cell nobody"),
-        // A multi-cell fixture is not one cell, though sf.position and sf.focus place it.
         (r#"sf.aim("bar", 0, 0, 0)"#, "unknown cell bar"),
     ] {
         let message = fails(
@@ -404,8 +389,6 @@ fn sf_aim_and_sf_focus_read_the_rig_in_metres_and_only_cells_with_pan_aim() {
     }
 }
 
-/// Heads whose rest beams run straight down, straight up, upstage, cross-stage, on a slant, and
-/// from the side across and down with no Y component and with one.
 fn rest_beams() -> FixtureRig {
     rig(
         json!([
@@ -484,7 +467,6 @@ fn aim_offset_spreads_across_and_elevates_up_round_any_rest_beam() {
                 let context = format!("{cell} spread {spread} elevation {elevation}");
                 let (sin_s, cos_s) = f64::to_radians(spread).sin_cos();
                 let (sin_e, cos_e) = f64::to_radians(elevation).sin_cos();
-                // A plumb beam elevates about X; a cross-stage one spreads clockwise from above.
                 let expected = match cell {
                     "down" => Some([cos_e * sin_s, sin_e, -cos_e * cos_s]),
                     "up" => Some([cos_e * sin_s, -sin_e, cos_e * cos_s]),
@@ -495,7 +477,6 @@ fn aim_offset_spreads_across_and_elevates_up_round_any_rest_beam() {
                 if let Some(expected) = expected {
                     assert_near(beam, expected, EXACT, &context);
                 } else if elevation == 0.0 {
-                    // Spread stays level across the heading, towards +X when positive.
                     let across = cross(slant, [0.0, 0.0, 1.0]);
                     assert!(
                         (degrees_between(beam, slant) - spread.abs()).abs() < 1e-7,
@@ -526,8 +507,6 @@ fn aim_offset_spreads_across_and_elevates_up_round_any_rest_beam() {
     }
 }
 
-/// How a cell's beam turns from rest at each `(spread, elevation)`, as the parts of each turned
-/// beam perpendicular to the rest beam.
 fn turns(rest: [f64; 3], turned: &[[f64; 3]]) -> Vec<[f64; 3]> {
     turned
         .iter()
@@ -572,7 +551,6 @@ fn spread_and_elevation_turn_at_right_angles_so_a_side_stand_circles() {
             );
         }
     }
-    // A quarter cycle apart the circle's turns are as long and at right angles: not a line.
     let side = rest_beams[0];
     let circle: Vec<_> = [0.0, 1.0]
         .map(|beats| beams(&rig, &render(&mut autoloop, &elapsed(beats))[6..])[0])
@@ -619,9 +597,6 @@ fn aim_direction_throws_the_beam_along_the_vector_whatever_the_focus() {
     assert!(error.contains("finite nonzero vector"), "{error}");
 }
 
-/// Hanging heads a, b, c, d across the stage at x = -3, -1, 1, 3 m and m on the centreline, each
-/// focused at `focus(x)`. Groups: "row" a..d, "odd" a, m, d, "mixed" a, d and a wash between
-/// them, and "ends" a..d between washes outside them at x = -5 and 5 m.
 fn row(focus: impl Fn(f64) -> [f64; 3]) -> FixtureRig {
     let mut fixtures: Vec<Value> = ["a", "b", "c", "d", "m"]
         .into_iter()
@@ -647,7 +622,6 @@ fn row(focus: impl Fn(f64) -> [f64; 3]) -> FixtureRig {
 
 #[test]
 fn fans_and_crosses_spread_partners_by_stage_position_whichever_way_they_throw() {
-    // Focus points on the floor straight below each head, upstage of it and downstage of it.
     for (throw, focus_y) in [("down", 0.0), ("upstage", 3000.0), ("downstage", -3000.0)] {
         let rig = row(|x| [x, focus_y, 0.0]);
         let mut autoloop = autoloop(
@@ -669,7 +643,6 @@ fn fans_and_crosses_spread_partners_by_stage_position_whichever_way_they_throw()
                 offset(function() return 0 end),
             }"#,
         );
-        // Half way through an 8-beat cycle a moving fan is closed.
         let aims = render(&mut autoloop, &elapsed(4.0));
         let chunks: Vec<_> = aims.chunks(4).collect();
         for (index, label) in ["fan", "cross", "parallel fan", "closed fan"]
@@ -753,8 +726,6 @@ fn phase_runs_the_wave_in_selection_order_and_mirror_partners_share_a_rank() {
         )
     };
     let mut together = phasers(0.0);
-    // Lags in beats of the 4-beat cycle: two ranks with wings, four without, and tilt_wave has
-    // no wings by default. A positive phase delays later members, a negative one leads them.
     let lags = [
         [0.0, 2.0, 2.0, 0.0],
         [0.0, 1.0, 2.0, 3.0],
@@ -810,7 +781,6 @@ fn a_phaser_can_rest_on_a_point_or_along_a_direction_instead_of_the_focus() {
             cell,
         );
     }
-    // At the start of its cycle a circle is the plain spread round the same rest beam.
     assert_same_aims(chunks[2], chunks[3], "circle along a direction");
     for (spec, error) in [
         ("at = { 0, 0, 0 }, direction = { 0, 0, -1 }", "not both"),
@@ -852,7 +822,6 @@ fn every_shape_is_a_pure_periodic_function_of_the_elapsed_beats() {
             let cells: Vec<_> = aims.iter().map(|(cell, ..)| cell.as_str()).collect();
             assert_eq!(cells, ["a", "d"], "{shape}: the wash has no pan range");
             if shape == "ballyhoo" {
-                // Partners move on their own phases, not as one mirrored figure.
                 let [left, [x, y, z]] = beams(&rig, &aims)[..] else {
                     unreachable!()
                 };
