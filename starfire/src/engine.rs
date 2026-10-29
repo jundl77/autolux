@@ -30,7 +30,13 @@ const MAX_IDENTIFIER_BYTES: usize = 128;
 const MAX_INTENSITY_MULTIPLIER: f64 = 8.0;
 const MAX_TRANSITION_BEATS: f64 = 1_024.0;
 const MAX_STROBE_BURST_SECONDS: f64 = 60.0;
-const STROBE_OPEN_FRACTION: f64 = 0.5;
+/// A flash lasts this long at every rate, up to half a cycle: a short flash reads as a strobe
+/// rather than a blink, and puts less light into a small room.
+const STROBE_FLASH_SECONDS: f64 = 0.05;
+const MAX_STROBE_OPEN_FRACTION: f64 = 0.5;
+/// At rates dividing the render rate, flash edges fall exactly on frame times; this keeps float
+/// rounding from moving an edge by a whole frame.
+const STROBE_EDGE_CYCLES: f64 = 1e-9;
 /// Slow enough to follow the beam by eye, inside even calm's movement slew limit.
 const PAN_SWEEP_SECONDS: f64 = 8.0;
 pub const MAX_SCRIPT_ERROR_BYTES: usize = 1024;
@@ -171,7 +177,7 @@ pub struct Engine {
     strobe_max_rate_hz: f64,
     strobe_max_burst_seconds: f64,
     strobe_started_seconds: BTreeMap<String, f64>,
-    strobe_gates: BTreeMap<String, StrobeGate>,
+    strobe_gates: StrobeGates,
     palette: ActivePalette,
     intensity: f64,
     last_render_seconds: Option<f64>,
@@ -212,7 +218,7 @@ impl Engine {
             strobe_max_rate_hz: MAX_STROBE_HZ,
             strobe_max_burst_seconds: f64::INFINITY,
             strobe_started_seconds: BTreeMap::new(),
-            strobe_gates: BTreeMap::new(),
+            strobe_gates: StrobeGates::default(),
             palette,
             intensity: 1.0,
             last_render_seconds: None,
@@ -762,8 +768,12 @@ impl Engine {
                 .strobe_started_seconds
                 .entry(id.clone())
                 .or_insert(seconds);
+            // A strobe past its burst stays dark until it is no longer asked for, rather than
+            // turning into steady light at the strobe's level.
             if seconds - started >= max_burst_seconds {
                 state.strobe_hz = 0.0;
+                state.intensity = 0.0;
+                state.attribute_brightness = 0.0;
             }
         }
     }
@@ -1665,24 +1675,10 @@ fn blend_states(
 ) -> FixtureStates {
     for (id, to) in &mut destination {
         if let Some(from) = source.get(id) {
-            let profile = rig.profile(id);
-            for (key, value) in &from.attributes {
-                if let Some(destination) = to.attributes.get(key) {
-                    let blended = profile
-                        .expect("validated cell state")
-                        .interpolate_attribute(key, value, destination, amount);
-                    to.attributes.insert(key.clone(), blended);
-                } else if amount < 1.0
-                    && profile.is_none_or(|profile| !profile.shares_channel(key, &to.attributes))
-                {
-                    to.attributes.insert(key.clone(), value.clone());
-                }
-            }
+            let profile = rig.profile(id).expect("validated cell state");
+            to.attributes = profile.blend_attributes(&from.attributes, &to.attributes, amount);
             to.intensity = lerp(from.intensity, to.intensity, amount);
-            to.colour = profile.map_or_else(
-                || from.colour.lerp(to.colour, amount),
-                |profile| profile.blend_colour(from.colour, to.colour, amount),
-            );
+            to.colour = profile.blend_colour(from.colour, to.colour, amount);
             to.pan = lerp(from.pan, to.pan, amount);
             to.tilt = lerp(from.tilt, to.tilt, amount);
             if amount < 1.0 {
@@ -1705,45 +1701,61 @@ pub fn extinguish(states: &mut FixtureStates) {
     }
 }
 
-/// A strobing cell's gate: its phase in cycles at `seconds`, advancing at `hz` until the rate
-/// changes. Integrating the rate frame by frame keeps a sweep continuous; a phase of
-/// time x rate would gate at rate + time x d(rate)/dt and alias past the cap.
+/// One gate per strobe rate, shared by every cell at that rate, so cells that start on
+/// different frames still flash together.
+#[derive(Default)]
+struct StrobeGates {
+    by_rate: BTreeMap<u64, StrobeGate>,
+    rate_of_cell: BTreeMap<String, u64>,
+}
+
+/// A gate's phase in cycles at `seconds`. A rate change re-anchors from the phase reached, so a
+/// sweep integrates frame by frame; a phase of time x rate would gate at
+/// rate + time x d(rate)/dt and alias past the cap.
+#[derive(Clone, Copy)]
 struct StrobeGate {
     seconds: f64,
     cycles: f64,
     hz: f64,
 }
 
-fn apply_software_strobe(
-    gates: &mut BTreeMap<String, StrobeGate>,
-    seconds: f64,
-    states: &mut FixtureStates,
-) {
+impl StrobeGate {
+    fn cycles_at(&self, seconds: f64) -> f64 {
+        self.cycles + self.hz * (seconds - self.seconds)
+    }
+}
+
+fn apply_software_strobe(gates: &mut StrobeGates, seconds: f64, states: &mut FixtureStates) {
+    let mut next = StrobeGates::default();
     for (id, state) in states.iter_mut() {
         let hz = state.strobe_hz;
         state.strobe_hz = 0.0;
         if hz <= 0.0 {
-            gates.remove(id);
             continue;
         }
-        // A strobe starts open, so its first frame is a flash.
-        let gate = gates.entry(id.clone()).or_insert(StrobeGate {
-            seconds,
-            cycles: 0.0,
-            hz,
+        let rate = hz.to_bits();
+        // A rate already strobing keeps its timing; a cell changing rate carries its old gate's
+        // phase into the new one; anything else is a new burst, which opens at once.
+        let gate = *next.by_rate.entry(rate).or_insert_with(|| {
+            gates.by_rate.get(&rate).copied().unwrap_or_else(|| {
+                let cycles = gates
+                    .rate_of_cell
+                    .get(id)
+                    .and_then(|previous| gates.by_rate.get(previous))
+                    .map_or(0.0, |previous| previous.cycles_at(seconds).rem_euclid(1.0));
+                StrobeGate {
+                    seconds,
+                    cycles,
+                    hz,
+                }
+            })
         });
-        let cycles = (gate.cycles + gate.hz * (seconds - gate.seconds)).fract();
-        // Re-anchoring only when the rate changes keeps a steady rate exact over a long burst.
-        if gate.hz != hz {
-            *gate = StrobeGate {
-                seconds,
-                cycles,
-                hz,
-            };
-        }
-        if cycles >= STROBE_OPEN_FRACTION {
+        next.rate_of_cell.insert(id.clone(), rate);
+        let phase = (gate.cycles_at(seconds) + STROBE_EDGE_CYCLES).rem_euclid(1.0);
+        if phase >= (STROBE_FLASH_SECONDS * hz).min(MAX_STROBE_OPEN_FRACTION) {
             state.intensity = 0.0;
             state.attribute_brightness = 0.0;
         }
     }
+    *gates = next;
 }
