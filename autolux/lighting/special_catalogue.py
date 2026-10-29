@@ -3,6 +3,7 @@ import re
 import tomllib
 from pathlib import Path
 
+from autolux.lib.engine.cue import Envelope
 from autolux.lib.engine.effect_definitions import LightIntent
 from autolux.lib.engine.special_policy import Special, Venue
 from autolux.lighting.mvr_schema import DEPTHS, ROLES, ZONES
@@ -152,9 +153,11 @@ def _special_values(data: dict, labels: dict | None = None) -> dict:
         'energy': _number(data, 'energy', 0.0, 1.0, labels),
         'speed': _number(data, 'speed', 0.0, 1.0, labels),
         'pulse_beats': _optional(data, 'pulse_beats', _pulse, labels),
-        'attack_beats': _number(data, 'attack_beats', 0.0, math.inf, labels),
-        'release_beats': _number(data, 'release_beats', 0.0, math.inf, labels),
         'pattern': _optional(data, 'pattern', _pattern, labels),
+        'envelope': Envelope(
+            _number(data, 'attack_beats', 0.0, math.inf, labels),
+            _number(data, 'release_beats', 0.0, math.inf, labels),
+        ),
     }
 
 

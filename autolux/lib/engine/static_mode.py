@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 
 from autolux.lib.clients.starfire_client import StarfireClient
 from autolux.lib.clock import SYSTEM_CLOCK, Clock
+from autolux.lib.engine.cue import Envelope
 from autolux.lib.engine.effect_controller import SPECIAL_PRIORITY
 from autolux.lib.engine.special_policy import Special, SpecialCapabilities
 
@@ -127,8 +128,7 @@ class StaticLooks:
         self._special = dataclasses.replace(
             self._rows[row],
             group=target,
-            attack_beats=0.0,
-            release_beats=STATIC_SPECIAL_RELEASE_BEATS,
+            envelope=Envelope(release_beats=STATIC_SPECIAL_RELEASE_BEATS),
             cooldown_seconds=0.0,
         )
         self._send_special()

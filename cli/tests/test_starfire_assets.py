@@ -46,7 +46,6 @@ def test_login_carries_embedded_gdtf_inversion_class_and_scene_matrix(login_asse
     assert login.run_id == (1 << 64) - 1
     assert login.command_id == 0
     assert login.protocol_major == wire.PROTOCOL_MAJOR
-    assert login.protocol_minor == wire.PROTOCOL_MINOR
     assert login.artnet_destination == '127.0.0.1:6454'
     assert login.parameters == [parameter]
     fixture = login.rig.fixtures[0]

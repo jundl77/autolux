@@ -66,9 +66,11 @@ class StarfireClient:
             command['features'] = dict(features)
         self._send_command(command)
 
-    def cue_section(self, cue: Cue) -> None:
+    def cue_section(self, cue: Cue, beats_per_bar: int) -> dict:
         # Starfire clears every cue on a selection or a stop, so the engine re-sends after one.
-        self._send_command(cue.command())
+        command = cue.command(beats_per_bar)
+        self._send_command(command)
+        return command['value']
 
     def clear_cues(self) -> None:
         self._send_command({'kind': 'clear_cues'})

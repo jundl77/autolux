@@ -15,7 +15,7 @@ from autolux.lib.engine.autoloop_policy import (
     look_intent,
     soft_drop,
 )
-from autolux.lib.engine.cue import MAX_OVERLAYS, BaseLook, Cue, Overlay, recurring_rows
+from autolux.lib.engine.cue import MAX_OVERLAYS, Cue, Envelope, Overlay, Step, recurring_rows
 from autolux.lib.engine.effect_definitions import (
     CALM,
     CROSSFADE_SCALE,
@@ -174,9 +174,20 @@ def _row(
     every_bars: int = 0,
     attack: float = 0.0,
     release: float = 0.0,
+    *,
+    blackout: bool = False,
 ) -> Overlay:
     bank, autoloop = overlay
-    return Overlay(bank, autoloop, PRIORITY[bank], begin, length, every_bars, attack, release)
+    return Overlay(
+        bank,
+        autoloop,
+        PRIORITY[bank],
+        begin,
+        length,
+        every_bars,
+        Envelope(attack, release),
+        blackout,
+    )
 
 
 class CueDirector:
@@ -250,7 +261,7 @@ class CueDirector:
             cue=Cue(
                 request.start_beat_index,
                 request.intent,
-                self._looks(request, choices, settings, previous, continued),
+                self._steps(request, choices, settings, previous, continued),
                 section_palette(
                     palette, choices[0].look, request.intent, after_first_drop=bool(drops)
                 ),
@@ -326,20 +337,20 @@ class CueDirector:
             choices.append(following)
         return tuple(choices)
 
-    def _looks(
+    def _steps(
         self,
         request: SectionRequest,
         choices: tuple[AutoloopChoice, ...],
         settings: ShowSettings,
         previous: SectionPlan | None,
         continued: bool,
-    ) -> tuple[BaseLook, ...]:
+    ) -> tuple[Step, ...]:
         scale = CROSSFADE_SCALE[intensity_level(settings.intensity)]
         _, bars = ROTATION[request.intent]
-        step = _crossfade(STEP_CROSSFADE_BEATS * scale)
-        entry = step if continued else self._entry_transition(request.intent, previous, scale)
+        between = _crossfade(STEP_CROSSFADE_BEATS * scale)
+        entry = between if continued else self._entry_transition(request.intent, previous, scale)
         return tuple(
-            BaseLook(choice.bank, choice.autoloop, bars, entry if index == 0 else step)
+            Step(choice.bank, choice.autoloop, bars, entry if index == 0 else between)
             for index, choice in enumerate(choices)
         )
 
@@ -446,7 +457,17 @@ class CueDirector:
         elif intent is LightIntent.BREAKDOWN:
             rows = []
             if self._shipped(BREAKDOWN_DIP):
-                rows.append(_row(BREAKDOWN_DIP, -BREAKDOWN_DIP_BEATS, BREAKDOWN_DIP_BEATS, 0, 1, 4))
+                rows.append(
+                    _row(
+                        BREAKDOWN_DIP,
+                        -BREAKDOWN_DIP_BEATS,
+                        BREAKDOWN_DIP_BEATS,
+                        0,
+                        1,
+                        4,
+                        blackout=True,
+                    )
+                )
             rows += self._fills(plan.picks.fill, level, attack=1.0, release=2.0, calm_every=32)
         elif intent is LightIntent.ATMOSPHERIC:
             rows = self._fills(plan.picks.fill, level, attack=2.0, release=2.0, calm_every=None)
@@ -526,7 +547,7 @@ class CueDirector:
         rows: list[Overlay] = []
         dip = plan.dip_beats
         if self._shipped(DROP_DIP):
-            rows.append(_row(DROP_DIP, -dip, dip))
+            rows.append(_row(DROP_DIP, -dip, dip, blackout=True))
         intense = False
 
         riser_beats = self._riser_beats(plan)

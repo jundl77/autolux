@@ -244,7 +244,6 @@ def load_login(
         login = wire.Login(
             run_id=run_id,
             protocol_major=wire.PROTOCOL_MAJOR,
-            protocol_minor=wire.PROTOCOL_MINOR,
             rig=rig_definition(Path(rig)),
             autoloops=_autoloop_definitions(autoloops),
             palettes=palette_definitions(),

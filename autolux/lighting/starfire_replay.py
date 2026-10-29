@@ -175,7 +175,7 @@ def _cue_events(
                 lead_beats=(beat_at - sent_at) * bpm / 60.0,
             )
             cue = plan(moment, request)
-            events.append({'at_seconds': sent_at, 'command': cue.command()})
+            events.append({'at_seconds': sent_at, 'command': cue.command(BEATS_PER_BAR)})
             new_track = False
         if intent not in BUILD_INTENTS:
             build_started_at = None

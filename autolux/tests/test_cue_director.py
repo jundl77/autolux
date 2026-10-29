@@ -148,7 +148,7 @@ def test_each_section_is_one_cue_on_its_start_beat_with_its_intent_seed_and_stre
     assert first.cue.drop_strength is None
     assert (first.cue.seed, drop.cue.seed) == (cue_seed(0, 1, 0), cue_seed(0, 1, 64))
     assert first.cue.seed != drop.cue.seed
-    command = drop.cue.command()['value']
+    command = drop.cue.command(4)['value']
     assert set(command) == {
         'start_beat_index',
         'intent',
@@ -320,12 +320,13 @@ def test_the_drop_entry_per_venue_setting(level, gate, expected):
 def test_the_entry_rows_land_on_the_one():
     drop = play(SET[:3])[2]
     dip, riser = row(drop, 'dip'), row(drop, 'riser')
-    assert (dip.begin_beats + dip.length_beats, dip.attack_beats) == (0.0, 0.0)
+    assert (dip.begin_beats + dip.length_beats, dip.envelope.attack_beats) == (0.0, 0.0)
+    assert [o.bank for o in drop.cue.overlays if o.blackout] == ['dip'], 'the dip blacks out'
     assert riser.begin_beats + riser.length_beats == dip.begin_beats, 'the riser ends at the dip'
-    assert (riser.length_beats, riser.every_bars, riser.release_beats) == (16, 0, 2.0)
+    assert (riser.length_beats, riser.every_bars, riser.envelope.release_beats) == (16, 0, 2.0)
     hits = [o for o in drop.cue.overlays if o.bank == 'hit']
     assert [o.autoloop for o in hits] == ['white']
-    assert {(o.begin_beats, o.attack_beats, o.every_bars) for o in hits} == {(0.0, 0.0, 0)}
+    assert {(o.begin_beats, o.envelope.attack_beats, o.every_bars) for o in hits} == {(0.0, 0.0, 0)}
     priorities = {overlay.bank: overlay.priority for overlay in drop.cue.overlays}
     assert priorities['fill'] < priorities['accent'] < priorities['riser']
     assert priorities['riser'] < priorities['hit'] < priorities['dip']
@@ -334,7 +335,11 @@ def test_the_entry_rows_land_on_the_one():
 def test_the_wild_strobe_hit_is_the_burst_setting_in_beats_and_the_riser_fits_the_cap():
     drop = play(SET[:3], level='wild')[2]
     [strobe] = [o for o in drop.cue.overlays if o.autoloop == 'strobe']
-    assert (strobe.begin_beats, strobe.length_beats, strobe.release_beats) == (0.0, 2.0, 0.0)
+    assert (strobe.begin_beats, strobe.length_beats, strobe.envelope.release_beats) == (
+        0.0,
+        2.0,
+        0.0,
+    )
     tight = ShowSettings(intensity=INTENSITY_WILD, strobe_max_burst_seconds=3.0)
     cues = director()
     for number, (intent, start) in enumerate(SET[:3]):
@@ -354,7 +359,9 @@ def test_fills_on_bar_8_and_a_bigger_one_on_bar_16_and_accents_8_bars_off_the_ba
         if o.bank == 'accent'
     )
     assert accents == [(32.0, 64.0, 32), (96.0, 64.0, 32)], 'bars 8 and 24 of each 32'
-    assert all(o.attack_beats >= 0.5 for o in drop.cue.overlays if o.bank in ('fill', 'accent'))
+    assert all(
+        o.envelope.attack_beats >= 0.5 for o in drop.cue.overlays if o.bank in ('fill', 'accent')
+    )
     calm = play(SET[:3], level='calm')[2]
     assert [(o.begin_beats, o.every_bars) for o in calm.cue.overlays if o.bank == 'fill'] == [
         (60.0, 16)
@@ -365,6 +372,7 @@ def test_breakdown_and_atmospheric_rows():
     atmos, build, _, breakdown, _, _ = play()
     assert [o.bank for o in breakdown.cue.overlays] == ['dip', 'fill']
     assert (row(breakdown, 'dip').begin_beats, row(breakdown, 'fill').begin_beats) == (-2.0, 60.0)
+    assert [o.blackout for o in breakdown.cue.overlays] == [True, False]
     assert [o.bank for o in atmos.cue.overlays] == ['fill'] and rows(build) == []
     calm_atmos, _, _, calm_breakdown, _, _ = play(level='calm')
     assert rows(calm_atmos) == []

@@ -74,9 +74,8 @@ def test_a_row_parses_into_the_wire_vocabulary():
         'energy': 0.2,
         'speed': 0.1,
         'pulse_beats': 2,
-        'attack_beats': 32.0,
-        'release_beats': 32.0,
         'pattern': 0.5,
+        'envelope': {'attack_beats': 32.0, 'release_beats': 32.0},
     }
 
 

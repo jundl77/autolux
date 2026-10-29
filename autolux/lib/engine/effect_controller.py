@@ -18,7 +18,7 @@ from autolux.lib.engine.autoloop_policy import (
     max_energy_for_intensity,
     soft_drop,
 )
-from autolux.lib.engine.cue import BaseLook, Cue, Overlay
+from autolux.lib.engine.cue import Cue, Overlay, Step
 from autolux.lib.engine.cue_director import CueDirector, SectionPlan, SectionRequest
 from autolux.lib.engine.effect_definitions import (
     DEFAULT_AUTOLOOP_META,
@@ -67,8 +67,8 @@ def operator_transition(bpm: float | None) -> dict:
     return {'kind': 'cut'}
 
 
-def _loop_ids(looks: Sequence[BaseLook | Overlay]) -> str:
-    return ','.join(f'{look.bank}/{look.autoloop}' for look in looks)
+def _loop_ids(rows: Sequence[Step | Overlay]) -> str:
+    return ','.join(f'{row.bank}/{row.autoloop}' for row in rows)
 
 
 class EffectController:
@@ -503,7 +503,7 @@ class EffectController:
             self._special.name,
             'instantaneous release'
             if instantaneous
-            else f'released over {self._special.release_beats:g} beats',
+            else f'released over {self._special.envelope.release_beats:g} beats',
         )
         self._special_on = False
         if self.event_buffer:

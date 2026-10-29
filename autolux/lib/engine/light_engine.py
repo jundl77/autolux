@@ -862,9 +862,9 @@ class LightEngine(IMusicAnalyserHandler):
         if planned is self._current_plan:
             # Starfire anchors one-shot rows on the bar it activates on: they would fire again.
             cue = dataclasses.replace(cue, overlays=recurring_rows(cue.overlays))
-        self.lighting_client.cue_section(cue)
+        sent = self.lighting_client.cue_section(cue, BEATS_PER_BAR)
         if self.event_buffer is not None:
-            self.event_buffer.add_cue(cue.command()['value'])
+            self.event_buffer.add_cue(sent)
 
     def _resend_cues(self, *, current: bool) -> None:
         for planned in self._planned_sections(current=current):

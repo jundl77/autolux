@@ -301,7 +301,6 @@ class StarfireRuntime:
                         or event.frame_rate_hz != DEFAULT_FRAME_RATE_HZ
                         or event.max_message_bytes != MAX_MESSAGE_BYTES
                         or event.protocol_major != wire.PROTOCOL_MAJOR
-                        or event.protocol_minor > wire.PROTOCOL_MINOR
                         or event.run_id != self.run_id
                     ):
                         raise ValueError('Unexpected Starfire login reply')

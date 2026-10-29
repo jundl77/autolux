@@ -157,16 +157,12 @@ def build_command(command: dict | Message) -> Message:
 def _cue_section(value):
     value = dict(value)
     rotation = [
-        wire.CueSection.BaseLook(
-            autoloop_id=f'{entry.pop("bank")}/{entry.pop("autoloop")}',
-            **(
-                {'transition': _transition(entry.pop('transition'))}
-                if 'transition' in entry
-                else {}
-            ),
-            **entry,
+        wire.CueSection.Step(
+            autoloop_id=f'{step.pop("bank")}/{step.pop("autoloop")}',
+            **({'transition': _transition(step.pop('transition'))} if 'transition' in step else {}),
+            **step,
         )
-        for entry in map(dict, value.pop('rotation'))
+        for step in map(dict, value.pop('rotation'))
     ]
     overlays = [
         wire.CueSection.Overlay(
@@ -188,9 +184,9 @@ def _transition(value):
     if kind == 'cut':
         if value:
             raise ValueError('Cut transition contains unexpected fields')
-        return wire.PlayAutoloop.Transition()
+        return wire.Transition()
     if kind == 'crossfade':
-        return wire.PlayAutoloop.Transition(crossfade_beats=value.pop('duration_beats'), **value)
+        return wire.Transition(crossfade_beats=value.pop('duration_beats'), **value)
     raise ValueError('Invalid Starfire transition')
 
 
@@ -258,15 +254,7 @@ def _active_effect(value):
     )
 
 
-SPECIAL_FX_FIELDS = {
-    'colour_slot',
-    'energy',
-    'speed',
-    'pulse_beats',
-    'attack_beats',
-    'release_beats',
-    'pattern',
-}
+SPECIAL_FX_FIELDS = {'colour_slot', 'energy', 'speed', 'pulse_beats', 'pattern', 'envelope'}
 
 
 def _special_fx(value):

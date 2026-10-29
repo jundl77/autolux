@@ -369,9 +369,8 @@ def test_a_picked_row_is_held_at_the_static_priority_and_clear_fx_releases_it_sh
         'energy': 0.15,
         'speed': 0.05,
         'pulse_beats': None,
-        'attack_beats': 0.0,
-        'release_beats': STATIC_SPECIAL_RELEASE_BEATS,
         'pattern': None,
+        'envelope': {'attack_beats': 0.0, 'release_beats': STATIC_SPECIAL_RELEASE_BEATS},
     }
     assert looks.state()['special_fx'] == {'name': 'cold_drift', 'group': 'fx'}
 

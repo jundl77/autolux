@@ -15,8 +15,17 @@ STANDBY_INTENT = 'standby'
 STOP_PERSISTENCE_SEC = 2.0
 
 
-def _loop_id(entry: dict) -> str:
-    return f"{entry['bank']}/{entry['autoloop']}"
+def _loop_id(row: dict) -> str:
+    return f"{row['bank']}/{row['autoloop']}"
+
+
+def cue_record(cue: dict) -> dict:
+    return {
+        'start_beat_index': cue['start_beat_index'],
+        'intent': cue['intent'],
+        'rotation': [_loop_id(step) for step in cue['rotation']],
+        'overlays': [_loop_id(row) for row in cue['overlays']],
+    }
 
 
 class EventBuffer:
@@ -127,13 +136,7 @@ class EventBuffer:
     def add_cue(self, cue: dict) -> None:
         with self._lock:
             now = self.elapsed()
-            record = {
-                't': now,
-                'start_beat_index': cue['start_beat_index'],
-                'intent': cue['intent'],
-                'rotation': [_loop_id(look) for look in cue['rotation']],
-                'overlays': [_loop_id(row) for row in cue['overlays']],
-            }
+            record = {'t': now, **cue_record(cue)}
             cutoff = now - self._window_sec * 2
             self._cues = [*(c for c in self._cues if c['t'] >= cutoff), record]
 

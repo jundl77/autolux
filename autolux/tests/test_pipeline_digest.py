@@ -132,8 +132,8 @@ def _cue(t=1.0, start=8, overlays=('hit/white',)):
                 'begin_beats': 0.0,
                 'length_beats': 2.0,
                 'every_bars': 0,
-                'attack_beats': 0.0,
-                'release_beats': 2.0,
+                'envelope': {'attack_beats': 0.0, 'release_beats': 2.0},
+                'blackout': False,
             }
             for name in overlays
         ],

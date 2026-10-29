@@ -4,6 +4,7 @@ import pytest
 
 from autolux.lib.clock import VirtualClock
 from autolux.lib.engine.autoloop_policy import SelectionContext
+from autolux.lib.engine.cue import Envelope
 from autolux.lib.engine.effect_controller import (
     SPECIAL_ID,
     SPECIAL_PRIORITY,
@@ -320,7 +321,7 @@ SPIN = Special(
     energy=0.8,
     speed=0.8,
     pulse_beats=1,
-    release_beats=4,
+    envelope=Envelope(release_beats=4),
 )
 DRIFT = Special(
     'drift',
@@ -329,8 +330,7 @@ DRIFT = Special(
     colour_slot='secondary',
     energy=0.2,
     speed=0.1,
-    attack_beats=32,
-    release_beats=32,
+    envelope=Envelope(32, 32),
 )
 
 
@@ -372,9 +372,8 @@ async def test_a_special_is_sent_in_the_wire_vocabulary_unscaled_by_intensity():
                     'energy': 0.2,
                     'speed': 0.1,
                     'pulse_beats': None,
-                    'attack_beats': 32.0,
-                    'release_beats': 32.0,
                     'pattern': None,
+                    'envelope': {'attack_beats': 32.0, 'release_beats': 32.0},
                 },
                 'priority': SPECIAL_PRIORITY,
             },
@@ -799,7 +798,7 @@ def _long_texture_on_a_drop(tmp_path):
     control.settings = FULL_INTENSITY
     clock = VirtualClock()
     lighting = RecordingStarfireClient(clock=clock, groups=(FX_GROUP,))
-    texture = dataclasses.replace(SPIN, release_beats=64)
+    texture = dataclasses.replace(SPIN, envelope=Envelope(release_beats=64))
     controller = EffectController(
         lighting, clock=clock, settings=lambda: control.settings, specials=[texture]
     )

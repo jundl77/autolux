@@ -1996,9 +1996,9 @@ async def planned_drop(light, decoder, clock):
 
 
 def planned_cue(planned):
-    from autolux.lib.engine.cue import BaseLook, Cue
+    from autolux.lib.engine.cue import Cue, Step
 
-    return Cue(planned.start_beat_index, planned.intent, (BaseLook('drop', 'kick', 16),), 'techno')
+    return Cue(planned.start_beat_index, planned.intent, (Step('drop', 'kick', 16),), 'techno')
 
 
 async def test_the_cue_is_sent_at_commit_time_on_the_sections_analysed_downbeat():
@@ -2143,7 +2143,7 @@ async def test_a_level_change_re_sends_the_planned_cue_with_its_start_and_seed()
         first['seed'],
         first['rotation'],
     )
-    assert light.effect_controller.cue_for(planned).command()['value'] == again
+    assert light.effect_controller.cue_for(planned).command(4)['value'] == again
 
 
 async def test_static_holds_the_look_without_cues_and_leaving_it_sends_them_again():
@@ -2155,7 +2155,7 @@ async def test_static_holds_the_look_without_cues_and_leaving_it_sends_them_agai
     assert cue_events(lighting, 'clear_cues')
     await light.leave_static()
     [sent] = cue_events(lighting)
-    assert sent['command'] == light.effect_controller.cue_for(planned).command()
+    assert sent['command'] == light.effect_controller.cue_for(planned).command(4)
     light.enter_static()
     clock.advance(14.5)
     await queue.drain()
@@ -2218,7 +2218,7 @@ async def test_a_selection_or_leaving_standby_sends_the_planned_cues_again(stand
     await light._switch_held_intent()
     *_, select, again = lighting.events
     assert select['command']['kind'] == 'select'
-    assert again['command'] == light.effect_controller.cue_for(planned).command()
+    assert again['command'] == light.effect_controller.cue_for(planned).command(4)
 
 
 async def test_a_skip_holds_the_operators_loop_and_keeps_the_later_cues():
@@ -2248,7 +2248,7 @@ async def test_a_skip_holds_the_operators_loop_and_keeps_the_later_cues():
     light.next_autoloop()
     *_, select, again = lighting.events
     assert select['command']['kind'] == 'select'
-    assert again['command'] == light.effect_controller.cue_for(later).command()
+    assert again['command'] == light.effect_controller.cue_for(later).command(4)
     before = len(cue_events(lighting))
     light.intensity_changed()
     assert [e['command']['value']['intent'] for e in cue_events(lighting)[before:]] == [
