@@ -279,7 +279,7 @@ class LightEngine(IMusicAnalyserHandler):
             return
         self._held_intent = self._current_intent
         self._held_plan = self._current_plan
-        if self._room_beat_phase is None:
+        if self._showing_standby or self._room_beat_phase is None:
             await self._switch_held_intent()
 
     def _holding(self) -> bool:
@@ -305,6 +305,8 @@ class LightEngine(IMusicAnalyserHandler):
         self.static_looks.clear()
         self._static_mode = False
         self._send_brightness(OPERATOR_FADE_SECONDS)
+        if self._showing_standby and (self._current_intent is None or not self._room_playing):
+            self.effect_controller.enter_standby(None if self._paused else self._last_bpm)
         self._resend_cues(current=True)
         await self._rejoin_current_intent()
 
@@ -375,8 +377,11 @@ class LightEngine(IMusicAnalyserHandler):
         self._revise_cues(palette=False, replan=True)
 
     def _send_brightness(self, fade_seconds: float = BRIGHTNESS_FADE_SECONDS) -> None:
-        quiet = self._room_quiet and not self._static_mode
-        dimmed = (quiet or self._paused) and not self._showing_standby
+        dimmed = (
+            (self._room_quiet or self._paused)
+            and not self._static_mode
+            and not self._showing_standby
+        )
         brightness = self._master_level * (self._settings().quiet_brightness if dimmed else 1.0)
         if brightness == self._sent_brightness:
             return
@@ -478,11 +483,11 @@ class LightEngine(IMusicAnalyserHandler):
             self.event_buffer.set_intent(
                 STANDBY_INTENT, song_sec=self.event_buffer.elapsed(), trigger=SILENCE_TRIGGER
             )
+        if self._static_mode:
+            return
         # Paused, the beat clock is frozen: a crossfade would only start on play.
         self.effect_controller.enter_standby(None if self._paused else self._last_bpm)
         self.static_looks.clear_highlight()
-        if self._static_mode:
-            self.static_looks.resend()
 
     def on_digital_gap(self, started_sec: float, seconds: float) -> None:
         detected_at = self._clock.monotonic()

@@ -308,7 +308,7 @@ async def test_a_colour_look_carries_a_visible_dimmer_under_a_dark_loop():
     assert overrides(lighting)[-1]['value']['values']['intensity'] == 0.4
 
 
-async def test_standby_during_static_keeps_the_operator_look_and_resends_it():
+async def test_standby_during_static_leaves_the_operator_look_untouched():
     decoder = FakeDecoder()
     light, _, _, lighting = static_engine(decoder=decoder, queue=False)
     await beat_at_phase(light, decoder, 0, decision='breakdown')
@@ -318,7 +318,7 @@ async def test_standby_during_static_keeps_the_operator_look_and_resends_it():
 
     light.on_digital_silence()
     assert light.mode == 'static'
-    assert overrides(lighting)[-1]['value']['id'] == 'static_all'
+    assert overrides(lighting) == [] and selections(lighting) == []
     light.on_signal_return()
     light.on_sound_start()
     await beat_at_phase(light, decoder, 0, decision='drop')
