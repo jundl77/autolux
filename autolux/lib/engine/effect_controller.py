@@ -18,7 +18,7 @@ from autolux.lib.engine.autoloop_policy import (
     max_energy_for_intensity,
     soft_drop,
 )
-from autolux.lib.engine.cue import Cue
+from autolux.lib.engine.cue import BaseLook, Cue, Overlay
 from autolux.lib.engine.cue_director import CueDirector, SectionPlan, SectionRequest
 from autolux.lib.engine.effect_definitions import (
     DEFAULT_AUTOLOOP_META,
@@ -42,6 +42,7 @@ from autolux.lib.engine.special_policy import (
     SpecialCapabilities,
     SpecialPolicy,
     Venue,
+    moments_near,
 )
 from autolux.lighting.palettes import PALETTE_NAMES, PALETTES, Mood, Palette
 
@@ -61,10 +62,13 @@ def drop_strobe_cooldown_seconds(settings: ShowSettings) -> float:
 
 
 def operator_transition(bpm: float | None) -> dict:
-    # Starfire fades autoloops in beats; without a tempo there is no beat to fade over.
     if bpm and bpm > 0:
         return {'kind': 'crossfade', 'duration_beats': bpm / 60.0 * OPERATOR_FADE_SECONDS}
     return {'kind': 'cut'}
+
+
+def _loop_ids(looks: Sequence[BaseLook | Overlay]) -> str:
+    return ','.join(f'{look.bank}/{look.autoloop}' for look in looks)
 
 
 class EffectController:
@@ -86,17 +90,12 @@ class EffectController:
         self.event_buffer = event_buffer
         self.clock = clock
         self._settings = settings
-        # Room time of each intense moment: a fired special, or a cue's strobing entry booked
-        # at its start. A cue and the special entering with it share their section's key.
         self._intense_at: dict[Hashable, float] = {}
         self._policy = AutoloopPolicy(autoloops, autoloop_meta, random.Random(seed))
         self._director = CueDirector(self._policy, overlay_meta or {}, seed)
         self._entered: tuple[LightIntent, AutoloopChoice] | None = None
-        # The section key of the entered cue; None while the look came from a selection.
         self._entered_moment: Hashable = None
-        # The room's track has played a drop: uncued looks leave mono from then on.
         self._track_dropped = False
-        # Called after the track palette or the pin changes, so planned cues follow it.
         self.palette_listener: Callable[[], None] | None = None
         self._palette_policy = PalettePolicy(palettes, random.Random(f'{seed}/palette'))
         self._pinned_palette: str | None = None
@@ -109,7 +108,6 @@ class EffectController:
         self.special_capabilities()
         if event_buffer is not None:
             event_buffer.set_cooldown_source(self.special_cooldowns)
-            # The director's plans follow from this seed, the venue and the settings over time.
             event_buffer.set_planning(seed, dataclasses.asdict(venue or Venue()))
             event_buffer.record_settings(settings().to_dict())
 
@@ -133,8 +131,7 @@ class EffectController:
             self.lighting_client.set_palette(palette)
         self._publish_palette()
         LOGGER.info('[lighting] palette %s', f'pinned to {name}' if name else 'follows the policy')
-        if self.palette_listener is not None:
-            self.palette_listener()
+        self._palette_changed()
 
     def choose_track_palette(self, mood: Mood, *, send_now: bool = True) -> str:
         chosen = self._palette_policy.choose_for_track(mood)
@@ -147,9 +144,12 @@ class EffectController:
         if send_now and palette is not None and palette != self.lighting_client.palette:
             self.lighting_client.set_palette(palette)
             self._publish_palette()
+        self._palette_changed()
+        return chosen
+
+    def _palette_changed(self) -> None:
         if self.palette_listener is not None:
             self.palette_listener()
-        return chosen
 
     def _palette_for_current_look(self) -> str | None:
         plan = self._entered_plan()
@@ -171,7 +171,6 @@ class EffectController:
         return self._pinned_palette or self._palette_policy.track_palette
 
     def _palette_for(self, look: LightIntent, intent: LightIntent) -> str:
-        """An uncued section's palette, under the cues' mono discipline."""
         return section_palette(
             self._palette_base(), look, intent, after_first_drop=self._track_dropped
         )
@@ -182,22 +181,19 @@ class EffectController:
         return self._director.plan_for(self._entered_moment)
 
     def plan_cue(self, moment: Hashable, request: SectionRequest) -> Cue:
-        """The director's cue for a committed section, keyed by `moment`; its entry's venue
-        events are booked at the section's room time."""
         plan = self._director.plan(moment, request, self._settings(), self._palette_base(), self)
         self._book(moment, plan)
         LOGGER.info(
             '[lighting] cue | intent=%s start=%d | looks=%s | palette=%s | overlays=%s',
             request.intent.name,
             request.start_beat_index,
-            ','.join(f'{look.bank}/{look.autoloop}' for look in plan.cue.rotation),
+            _loop_ids(plan.cue.rotation),
             plan.cue.palette,
-            ','.join(f'{row.bank}/{row.autoloop}' for row in plan.cue.overlays) or '-',
+            _loop_ids(plan.cue.overlays) or '-',
         )
         return plan.cue
 
     def revise_cue(self, moment: Hashable, *, started: bool, palette: bool = False) -> Cue | None:
-        """The stored cue at the current level (or palette), same start and seed."""
         plan = self._director.revise(
             moment,
             self._settings(),
@@ -216,12 +212,10 @@ class EffectController:
         return None if plan is None else plan.cue
 
     def drop_cue(self, moment: Hashable) -> None:
-        """A superseded section: its loops stay spent, its venue events are released."""
         if self._director.drop(moment) is not None:
             self._release_booking(moment)
 
     def reset_cues(self) -> None:
-        """Forget every plan; booked events still ahead of the room never happen."""
         now = self.clock.monotonic()
         self._director.reset()
         for moment, at in list(self._intense_at.items()):
@@ -231,11 +225,7 @@ class EffectController:
 
     def _book(self, moment: Hashable, plan: SectionPlan) -> None:
         at = plan.request.room_sec
-        kept = {
-            key: when
-            for key, when in self._intense_at.items()
-            if key != moment and abs(at - when) < MAX_STROBE_COOLDOWN_SECONDS
-        }
+        kept = moments_near(self._intense_at, at, MAX_STROBE_COOLDOWN_SECONDS, excluding=moment)
         # Replaced, never mutated, so the dashboard thread reads a whole snapshot.
         self._intense_at = {**kept, moment: at} if plan.events.intense else kept
         if plan.events.accent:
@@ -275,15 +265,13 @@ class EffectController:
         context: SelectionContext | None = None,
         moment: Hashable = None,
     ) -> bool:
-        """Enter a section; `moment` keys its planned cue, which Starfire already started on the
-        planned beat, so a cue'd section sends no selection."""
         context = context or SelectionContext(intent)
+        if context.new_track:
+            self._track_dropped = False
         plan = None if moment is None else self._director.plan_for(moment)
         if plan is not None:
             return self._enter_cue(intent, bpm, context, moment, plan)
         self._entered_moment = None
-        if context.new_track:
-            self._track_dropped = False
         choice, fresh = self._entry_choice(context)
         bank, autoloop = choice.bank, choice.autoloop
         transition = transition_for(choice.look)
@@ -316,14 +304,11 @@ class EffectController:
         plan: SectionPlan,
     ) -> bool:
         fresh = moment is not self._entered_moment
-        if context.new_track:
-            self._track_dropped = False
         self._track_dropped = self._track_dropped or intent is LightIntent.DROP
         choice = plan.choices[0]
         self._entered = intent, choice
         self._entered_moment = moment
-        # The cue set the look and palette on Starfire's clock, so the client's record of the last
-        # selection is stale: the next selection must always go out.
+        # Starfire's clock changed the look, so the client's dedup record is stale.
         self.lighting_client.selected_autoloop = None
         self.lighting_client.palette = plan.cue.palette
         self._publish_palette()
@@ -335,16 +320,11 @@ class EffectController:
         return True
 
     def apply_intensity(self, context: SelectionContext, bpm: float | None) -> None:
-        """Re-map the running look to the new level's bank, or swap it for a calmer loop.
-
-        Entering or leaving calm moves a drop or build to its level's bank at once; within
-        one bank a raised cap waits for the next entry.
-        """
         if self._entered is None or self._entered[0] != context.intent:
             return
         current = self._entered[1]
         if self.lighting_client.selected_autoloop != (current.bank, current.autoloop):
-            return  # Standby or another look is showing; the next entry obeys the level.
+            return
         intensity = self._settings().intensity
         remapped = look_intent(context.intent, intensity) != current.look
         if not remapped and current.meta.energy <= max_energy_for_intensity(
@@ -367,15 +347,12 @@ class EffectController:
         )
         if palette is not None:
             self._publish_palette()
-        # Not recorded: an operator swap must not spend the loop's turn in the rotation.
         self._entered = context.intent, choice
         self._announce(
             f'[lighting] {cause} |', context.intent, choice, self.lighting_client.palette
         )
 
     def skip_autoloop(self, context: SelectionContext) -> AutoloopChoice:
-        """The operator's next loop; its selection ends every cue, so the section plays on
-        uncued."""
         playing = self.lighting_client.selected_autoloop
         if playing is None and self._entered is not None:
             playing = self._entered[1].bank, self._entered[1].autoloop
@@ -404,7 +381,6 @@ class EffectController:
                 'AUTOLOOP',
                 cue_start_beat_index=None if cue is None else cue.start_beat_index,
                 selection={
-                    # A calm remap plays another bank's look; the section stays the intent.
                     'intent': intent.value,
                     'look': choice.look.value,
                     'level': intensity_level(self._settings().intensity),
@@ -453,8 +429,6 @@ class EffectController:
     def _intense_blocked(
         self, settings: ShowSettings, at: float, moment: Hashable = None
     ) -> str | None:
-        """Why an intense event at room time `at` may not happen; either side counts, since
-        cues are booked ahead of the specials that fire in the room's now."""
         if settings.intensity <= STROBE_GATE_INTENSITY:
             return f'intensity {settings.intensity:.2f} at or below {STROBE_GATE_INTENSITY:.2f}'
         cooldown = drop_strobe_cooldown_seconds(settings)
@@ -489,7 +463,6 @@ class EffectController:
             moment=moment,
         )
         if not settings.fx_auto:
-            # FX off drops the special; the cue's entry is the show's own accent.
             choice = dataclasses.replace(choice, special=None)
         if choice.suppressed:
             LOGGER.info('[lighting] intense special suppressed | %s', choice.suppressed)
@@ -521,8 +494,7 @@ class EffectController:
         )
 
     def release_special(self, *, instantaneous: bool = False) -> None:
-        # Sent straight to the renderer, never through the delayed queue: a cut is the operator's,
-        # not the music's, so it belongs to the room's now.
+        # Never through the delayed queue: a cut is the operator's, so it belongs to the room's now.
         if not self._special_on:
             return
         self.lighting_client.clear_override(SPECIAL_ID, instantaneous_release=instantaneous)
@@ -538,8 +510,6 @@ class EffectController:
             self.event_buffer.set_special(None)
 
     def forget_special(self, *, instantaneous: bool = False) -> None:
-        """Release the running special (at once if instantaneous); nothing returns before the
-        next entry fires one."""
         self.release_special(instantaneous=instantaneous)
         self._special = None
 

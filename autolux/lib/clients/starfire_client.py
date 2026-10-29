@@ -1,5 +1,3 @@
-"""Musical lighting commands; process and protobuf ownership stays in the CLI."""
-
 from __future__ import annotations
 
 import math
@@ -18,7 +16,6 @@ WHOLE_RIG = 'all'
 
 
 def rms_to_normalized_level(rms: float) -> float:
-    """Map smoothed signal amplitude to a bounded loudness control, not emotion."""
     if not math.isfinite(rms) or rms < 0:
         raise ValueError('RMS must be finite and nonnegative')
     if rms == 0:
@@ -38,8 +35,6 @@ def special_target(group: str) -> str | dict:
 
 
 class StarfireClient:
-    """Submit commands to a bounded nonblocking transport or simulation recorder."""
-
     def __init__(
         self,
         send_command: Callable[[dict], None],
@@ -72,7 +67,7 @@ class StarfireClient:
         self._send_command(command)
 
     def cue_section(self, cue: Cue) -> None:
-        """Starfire starts the cue on its own clock; PlayAutoloop and stop clear it."""
+        # Starfire clears every cue on a selection or a stop, so the engine re-sends after one.
         self._send_command(cue.command())
 
     def clear_cues(self) -> None:

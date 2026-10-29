@@ -26,7 +26,6 @@ from autolux.lighting.special_catalogue import discover_specials
 from autolux.simulate.lighting_recorder import RecordingStarfireClient
 
 FULL_INTENSITY = ShowSettings(intensity=1.0)
-# Wild halves the intense cooldown; balanced keeps the setting as written.
 BALANCED = ShowSettings(intensity=0.7)
 BALANCED = ShowSettings(intensity=INTENSITY_BALANCED)
 CUT = {'kind': 'clear_override', 'id': SPECIAL_ID, 'instantaneous_release': True}
@@ -391,7 +390,6 @@ async def test_the_catalogue_plays_one_texture_per_fx_cooldown_then_a_drop_accen
         await controller.change_effect(LightIntent.ATMOSPHERIC)
         textures += [c['value']['special_fx']['colour_slot'] for c in accents(lighting, start)]
         await controller.change_effect(LightIntent.BUILDUP)
-    # The first texture rests fx for 240 s, so neither texture plays again inside it.
     assert len(textures) == 1
     start = len(lighting.events)
     await controller.change_effect(LightIntent.DROP)
@@ -737,7 +735,6 @@ async def test_the_snapshot_carries_each_special_cooldown_on_the_engine_clock():
     first = cooldowns()
     clock.advance(30.0)
     later = cooldowns()
-    # Spin sets no cooldown of its own, so fx is free at once; the strobe waits out the shared one.
     assert (first['fx']['last'], first['fx']['ready']) == ('spin', True)
     assert first['all']['last'] == 'strobe'
     assert first['venue']['label'] == 'venue · accents 1/2'
@@ -762,25 +759,21 @@ async def test_fx_off_picks_no_automatic_fx():
     clock = VirtualClock()
     lighting = RecordingStarfireClient(clock=clock, groups=(FX_GROUP,))
     current = [FULL_INTENSITY]
-    # Own rows, not the catalogue, so the test does not hang on which intents ship an fx row.
     controller = EffectController(
         lighting, clock=clock, settings=lambda: current[0], specials=[SPIN]
     )
-    # Every drop here is loud: no arrival is measured, and an unknown arrival is never soft.
     await controller.change_effect(LightIntent.DROP)
     assert [c['value']['id'] for c in accents(lighting)] == [SPECIAL_ID]
 
     current[0] = dataclasses.replace(FULL_INTENSITY, fx_auto=False)
     start = len(lighting.events)
     await controller.change_effect(LightIntent.BUILDUP)
-    # Settings read directly, not the toggle: the section change releases it as usual.
     assert accents(lighting, start) == [{'kind': 'clear_override', 'id': SPECIAL_ID}]
     start = len(lighting.events)
     clock.advance(STROBE_COOLDOWN_SECONDS + 1)
     await controller.change_effect(LightIntent.DROP)
     assert accents(lighting, start) == [], 'a loud drop leaves the special out'
 
-    # The operator's Static FX row does not ask the policy, so it still plays.
     drift = Special('drift', (LightIntent.BREAKDOWN,), 'fx', colour_slot='primary', speed=0.5)
     looks = StaticLooks(
         lighting, StaticRig(groups=('fx',)), [drift], controller.special_capabilities
@@ -899,7 +892,6 @@ async def test_fx_auto_round_trips_from_the_bridge_through_the_engine_to_show_js
     await control.apply_pending(light)
     assert light.effect_controller._settings().fx_auto is False
     assert len(lighting.events) == sent, 'switching FX off cuts nothing at once'
-    # The control's own clock settles the save; saving at once stands in for that wait.
     control.save_settings()
     saved = json.loads((tmp_path / 'show.json').read_text(encoding='utf-8'))
     assert saved['settings']['fx_auto'] is False

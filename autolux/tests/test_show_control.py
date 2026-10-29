@@ -78,7 +78,6 @@ def test_the_settings_area_has_one_master_brightness_style_fader_per_rig_group()
 
 
 def test_a_page_load_renders_what_the_first_poll_would_above_the_controls():
-    # Anything the first poll adds above the controls moves them under a click already aimed.
     page = build_app(_Recorder()).layout()
     texts = [item.children[0].children for item in page['show-status'].children]
     assert texts[0] == 'Health' and 'Render FPS' in texts
@@ -100,8 +99,6 @@ def test_telemetry_notices_share_one_line_most_severe_first_with_a_count_and_the
 
 
 class _Browser:
-    """POSTs to the show's control bridge as control.js does."""
-
     def __init__(self, port):
         self.port = port
 
@@ -215,7 +212,6 @@ def test_an_intensity_outside_zero_to_one_is_refused_and_queues_nothing(show, le
 
 
 def _built(call: str):
-    """The payload control.js builds for one call, under the config the dashboard serves."""
     config = json.dumps(control_page_config(_Recorder()))
     return _run_control_js(
         f'window.autoluxControlConfig = {config};\nconsole.log(JSON.stringify(control.{call}));'
@@ -256,7 +252,6 @@ def static_show():
                 'dimmer': None,
             },
         ),
-        # Off must not carry the picker's colour.
         (
             'static-preset-off',
             'all',
@@ -478,7 +473,6 @@ def _run_js(function_source, calls):
 @pytest.mark.skipif(NODE is None, reason='needs node to run the clientside callback')
 def test_the_palette_dropdown_follows_only_a_changed_pin():
     unpinned = {'palette': {'name': 'techno', 'pinned': False}}
-    # In a breakdown the show reports the variant; the pin must still read as confirmed.
     landed = _with_base_palette({'palette': {'name': 'ice_breakdown', 'pinned': True}})
     assert landed['palette'] == {'name': 'ice', 'pinned': True}
 
@@ -497,7 +491,6 @@ def _static_targets(state):
 
 @pytest.mark.skipif(NODE is None, reason='needs node to run the clientside callback')
 def test_static_targets_and_uv_chips_follow_the_published_rig():
-    # Group names a venue might use that the room rig does not have.
     venue = {'targets': ['all', 'truss_a', 'floor_pars'], 'blacklight': False}
     options, uv_off = _static_targets({'mode': 'static', 'static': venue})
     assert [option['value'] for option in options] == venue['targets']
@@ -537,7 +530,6 @@ def test_restart_show_is_enabled_while_a_show_runs_and_confirms_on_a_second_clic
         [NODE, '-'], input=script, capture_output=True, text=True, encoding='utf8', check=True
     )
     seen = json.loads(result.stdout)
-    # [banner, disabled]: no show means nothing to restart; the banner only names an older rig.
     assert seen['none'] == ['', True]
     assert seen['saved'] == ['', False]
     assert seen['older'] == [
@@ -549,7 +541,6 @@ def test_restart_show_is_enabled_while_a_show_runs_and_confirms_on_a_second_clic
         'Click again to restart; lights go dark until it is back',
         'Restart show',
     ]
-    # A same-revision restart holds until the next session reports, not the full minute.
     restarting = ['Restarting the show on the saved patch.', True]
     assert seen['restart'] == [restarting, restarting, ['', False]]
 
@@ -569,7 +560,6 @@ def test_the_gate_asks_for_the_rig_until_the_config_page_holds_it():
         'const patch = window.dash_clientside.fixture_patch;\n'
         'const asked = () => gate(0, "config").rig ?? null;\n'
         'const seen = [asked()];\n'
-        # The state that carried the rig was overtaken: the page saw one without it.
         'patch.syncTest({rig_revision: "r1"}, "config", "r1");\n'
         'seen.push(asked());\n'
         'patch.syncTest({rig_revision: "r1", rig: {fixtures: []}}, "config", "r1");\n'
@@ -579,7 +569,6 @@ def test_the_gate_asks_for_the_rig_until_the_config_page_holds_it():
     result = subprocess.run(
         [NODE, '-'], input=script, capture_output=True, text=True, encoding='utf8', check=True
     )
-    # Until the page holds a rig the request names none, so every Config poll carries it.
     assert json.loads(result.stdout) == [None, None, 'r1']
 
 
@@ -704,9 +693,7 @@ globalThis.fetch = async (url, options) => {
     )
     assert result == {
         'status': [['control-status', 'Rejected: the show is not answering']],
-        # Every request carries a timeout, so a host that drops packets cannot hang it.
         'signals': [True],
-        # The FX click's hold outlives the failed level.
         'shown': {'settings': {'fx_auto': False}},
     }
 
@@ -758,7 +745,6 @@ def test_the_config_tab_polls_only_the_control_state_its_fixture_test_reads():
         highlight,
         rig,
     )
-    # A page holding this revision's rig is not sent it again; an older revision is.
     assert 'rig' not in poll(rig='r1')['control-state']['data']
     assert poll(rig='r0')['control-state']['data']['rig'] == rig
 
@@ -792,11 +778,9 @@ FX_STATE = {
         'special_fx': {'name': 'drift', 'group': 'fx'},
     },
 }
-# (picked row, static target, the command the show must receive or None)
 FX_PICKS = [
     ('cold_drift', 'fx', {**SPECIAL_FX, 'row': 'cold_drift', 'target': 'fx'}),
     ('drift', 'all', {**SPECIAL_FX, 'row': 'drift', 'target': 'all'}),
-    # The row already held there: a poll syncing the picker must not re-fire it.
     ('drift', 'fx', None),
     (None, 'fx', None),
 ]
@@ -856,7 +840,6 @@ def test_the_fx_picker_lists_only_the_rows_that_fit_the_target():
         [[], 'wash has no FX that fits'],
         [[], ''],
     ]
-    # The held row is written once, and again only when the target's held row changes.
     assert synced == [['static-fx-row', 'drift'], ['static-fx-row', None]]
 
 
@@ -907,7 +890,6 @@ def test_a_picked_fx_row_is_sent_once_and_clear_fx_empties_the_picker_in_the_bro
         '  return fx(row, 1, "fx", state);\n'
         '};\n'
         'const a = run("static-fx-row.value", "cold_drift");\n'
-        # The poll has not caught up, so the held pick is what the picker syncs back to.
         'const b = run("static-fx-row.value", "cold_drift");\n'
         'const c = run("static-fx-clear.n_clicks", "cold_drift");\n'
         'console.log(JSON.stringify([sent, a, b, c]));'
@@ -970,7 +952,6 @@ def test_the_render_rate_is_the_measured_rate_over_the_last_three_seconds():
 
     steady = [sample(at, 40.0, 0.0) for at in range(100, 106)]
     assert render_rate_text(render_window(steady, now=105.5)[0]) == '40.0'
-    # A late frame loop renders fewer than 40 per second; the slow sample at 101 has aged out.
     rough = [sample(100, 40.0, 0.0), sample(101, 10.0, 30.0), sample(103, 40.0, 0.0)]
     rough += [sample(104, 38.6, 1.4), sample(105, 38.6, 1.4)]
     fps, missed = render_window(rough, now=105.2)
@@ -1115,7 +1096,6 @@ def test_the_chips_show_fx_auto_by_default_and_following_greys_the_segments():
     states = [
         {'settings': {}},
         {'settings': {'fx_auto': False, 'intensity_auto': True}},
-        # Before the first poll neither FX chip is lit.
         None,
     ]
     painted = _run_control_js(
@@ -1135,17 +1115,14 @@ def test_the_chips_show_fx_auto_by_default_and_following_greys_the_segments():
         ['', '', '', ''],
     ]
     app = build_app(_Recorder())
-    # The segments stay clickable (a pick turns auto off) and are still fed the show's level.
     writers = [key for key in app.callback_map if 'control-intensity-set.disabled' in key]
     assert len(writers) == 1
 
 
 @pytest.mark.skipif(NODE is None, reason='needs node to run control.js')
 def test_restored_or_polled_settings_send_nothing_and_one_edit_sends_one_command():
-    # More digits than the form shows: a resend of the rounded text would change the show.
     settings = ShowSettings(quiet_brightness=0.1234567, crossfade_beats=1.0).to_dict()
     state = {'settings': settings, 'settings_text': settings_text(settings)}
-    # (edited field, its text): every field first shows the show's own text.
     edits = [
         *[(name, None) for name in FORM_SETTINGS],
         ('crossfade_beats', '2'),
@@ -1182,8 +1159,6 @@ def test_restored_or_polled_settings_send_nothing_and_one_edit_sends_one_command
 @pytest.mark.skipif(NODE is None, reason='needs node to run control.js')
 def test_a_group_master_edit_sends_only_the_group_masters_with_that_group_changed():
     state = {'settings': ShowSettings(group_masters={'movers': 0.25}).to_dict()}
-    # (group, fader level, control-state): the show's own levels and the 1.0 default send
-    # nothing, and nothing goes before the first settings poll.
     moves = [('movers', 0.25, state), ('wash', 1.0, state), ('wash', 0.5, {}), ('wash', 0.5, state)]
     sent, shown = _run_control_js(
         'const sent = [];\n'
@@ -1232,7 +1207,6 @@ async def test_a_preset_on_a_group_target_changes_only_that_group(
     apply_static(light, commands.get_nowait())
     await light.sync_static()
     assert light.mode == 'static'
-    # Every other group keeps what it showed: no dark floor, no whole-rig look, no blackout.
     assert overrides(lighting) == [
         {
             'kind': 'set_override',
@@ -1262,7 +1236,6 @@ def test_the_auto_tab_has_fx_auto_and_off_chips():
 
 @pytest.mark.skipif(NODE is None, reason='needs node to run control.js')
 def test_an_fx_chip_click_dispatches_whatever_the_page_last_polled():
-    # No poll yet, a state from before the chips, and one that already reports the value.
     states = [None, {'settings': {}}, {'settings': {'fx_auto': True}}]
     clicks = [(state, chip) for state in states for chip in ('control-fx-off', 'control-fx-auto')]
     result = _run_control_js(
@@ -1328,7 +1301,6 @@ def test_the_fx_effects_block_shows_one_bar_per_group_readiest_first():
         'movers · Spin',
         'fx · Cold drift',
     ]
-    # The ticker in control.js draws each bar from these.
     props = rows[3].to_plotly_json()['props']
     assert (props['data-total'], props['data-remaining']) == (240, 179.5)
     assert (props['data-group'], props['data-last'], props['data-ready']) == (
@@ -1336,14 +1308,10 @@ def test_the_fx_effects_block_shows_one_bar_per_group_readiest_first():
         'cold_drift',
         'false',
     )
-    # Every bar paints in the same page colour: no per-group tint on any row.
     assert all('style' not in row.to_plotly_json()['props'] for row in rows)
 
 
 def test_an_fx_effects_bar_fills_in_a_colour_the_page_defines():
-    # The block sits outside #show-control, so every token the fill and the fire flash paint
-    # with must be set on .cooldowns or the row itself; an undefined var() would leave the bar
-    # transparent.
     css = (CONTROL_JS.parent / 'control.css').read_text(encoding='utf8')
     css = re.sub(r'/\*.*?\*/', '', css, flags=re.DOTALL)
     rules = dict(re.findall(r'([^{}]+?)\s*\{([^{}]*)\}', css))
@@ -1358,15 +1326,12 @@ def test_an_fx_effects_bar_fills_in_a_colour_the_page_defines():
     assert 'transparent' not in background
     assert 'var(' in background
     assert set(re.findall(r'var\((--[\w-]+)\)', background)) <= defined
-    # The fire pulse paints only with tokens the block itself sets.
     pulse = re.search(r'@keyframes cooldown-fire\s*\{(.*?)\n\}', css, re.DOTALL).group(1)
     assert set(re.findall(r'var\((--[\w-]+)\)', pulse)) <= defined
 
 
 @pytest.mark.skipif(NODE is None, reason='needs node to run control.js')
 def test_the_fx_effects_ticker_counts_a_bar_down_from_the_last_poll():
-    # (total, remaining at the poll, seconds since the poll) -> (fill, caption, ready): empty as
-    # the group fires, 1 - remaining/cooldown on the way, full once ready or with no cooldown.
     cases = {
         (240, 240.0, 0.0): ('0.0%', '240 s', False),
         (240, 180.0, 0.0): ('25.0%', '180 s', False),
@@ -1386,15 +1351,14 @@ def test_an_fx_effects_bar_flashes_once_when_its_group_fires_and_not_on_a_routin
     def poll(last, remaining, ready=False, total=240):
         return {'last': last, 'remaining': remaining, 'ready': ready, 'total': total}
 
-    # (previous poll of the group, this poll)
     cases = [
-        (None, poll('drift', 240)),  # first sight of the group: no history, no flash
-        (poll('drift', 180), poll('drift', 179)),  # counting down
-        (poll('drift', 0, True), poll('drift', 0, True)),  # staying ready
-        (poll('drift', 0, True), poll('drift', 240)),  # ready group fires the same special
-        (poll('drift', 30), poll('drift', 240)),  # fired again before it was ready
-        (poll('drift', 0, True), poll('spin', 90)),  # a different special fired
-        (poll('drift', 30), poll('drift', 330, total=540)),  # the operator lengthened it
+        (None, poll('drift', 240)),
+        (poll('drift', 180), poll('drift', 179)),
+        (poll('drift', 0, True), poll('drift', 0, True)),
+        (poll('drift', 0, True), poll('drift', 240)),
+        (poll('drift', 30), poll('drift', 240)),
+        (poll('drift', 0, True), poll('spin', 90)),
+        (poll('drift', 30), poll('drift', 330, total=540)),
     ]
     calls = ', '.join(
         f'control.cooldownFired({json.dumps(previous)}, {json.dumps(polled)})'
@@ -1406,7 +1370,6 @@ def test_an_fx_effects_bar_flashes_once_when_its_group_fires_and_not_on_a_routin
 
 @pytest.mark.skipif(NODE is None, reason='needs node to run control.js')
 def test_the_fx_effects_ticker_holds_the_flash_class_through_the_pulse_after_a_fire():
-    # A fake document with one bar and a hand-driven clock and setInterval.
     body = """
 const row = {
     dataset: {group: 'fx', last: 'drift', total: '240', remaining: '0', ready: 'true'},
@@ -1439,9 +1402,6 @@ console.log(JSON.stringify(seen));
     assert json.loads(result.stdout) == [False, False, True, True, False, False]
 
 
-# Just enough DOM for control.js's press listeners: elements answer closest() by id or as a
-# level's label, events reach the capture listeners as the browser hands them over, and the
-# clock only moves by hand.
 FAKE_DOM = """
 const listeners = [];
 let now = 0;

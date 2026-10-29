@@ -67,10 +67,8 @@ OVERLAYS = {
     ('accent', 'mover_shapes'): overlay(htp=False, movement='sweep', texture='beam'),
 }
 LEVELS = {'calm': INTENSITY_CALM, 'balanced': INTENSITY_BALANCED, 'wild': INTENSITY_WILD}
-# Atmospheric, buildup, drop, breakdown, buildup, drop: start beats, 16 or 32 bars apart.
 SET = ((A, 0), (B, 64), (D, 128), (BR, 256), (B, 384), (D, 448))
 LOUD_BUILD = (0.8,) * 16
-# About the commit's 9 s lead at 120 bpm.
 LEAD_BEATS = 18.0
 
 
@@ -115,6 +113,13 @@ def play(sections=SET, *, level='balanced', gate=None, cues=None, seed=0):
             )
         )
     return plans
+
+
+def drop_after_build(build_beats=64, *, level='balanced', **drop):
+    cues = director()
+    settings = ShowSettings(intensity=LEVELS[level])
+    cues.plan(0, request(B, 0, new_track=True), settings, 'ice', Gate())
+    return cues.plan(1, request(D, build_beats, **drop), settings, 'ice', Gate())
 
 
 def entry_of(cue):
@@ -203,7 +208,6 @@ def test_consecutive_looks_contrast_in_movement_or_texture():
     for seed in range(12):
         for plan in play(seed=seed):
             metas = [choice.meta for choice in plan.choices]
-            # The rotation cycles, so the last look leads back into the first.
             for first, second in itertools.pairwise([*metas, metas[0]] if metas[1:] else []):
                 assert (first.movement, first.texture) != (second.movement, second.texture)
 
@@ -329,7 +333,6 @@ def test_the_entry_rows_land_on_the_one():
 
 def test_the_wild_strobe_hit_is_the_burst_setting_in_beats_and_the_riser_fits_the_cap():
     drop = play(SET[:3], level='wild')[2]
-    # 1 s at 120 bpm is two beats; a strobe ends on a snap.
     [strobe] = [o for o in drop.cue.overlays if o.autoloop == 'strobe']
     assert (strobe.begin_beats, strobe.length_beats, strobe.release_beats) == (0.0, 2.0, 0.0)
     tight = ShowSettings(intensity=INTENSITY_WILD, strobe_max_burst_seconds=3.0)
@@ -378,23 +381,30 @@ def test_a_riser_only_after_a_buildup():
 @pytest.mark.parametrize(
     ('build_beats', 'levels', 'lead', 'riser_beats'),
     [
-        (64, LOUD_BUILD, 18.0, 16),  # the usual 16 beats
-        (64, (0.8,) * 12 + (0.0,) * 4, 18.0, 14),  # a bar of dip leaves 14 beats of lead
-        (64, (0.8,) * 8 + (0.0,) * 8, 16.0, 8),  # two bars at a short lead
-        (64, LOUD_BUILD, 6.0, 5),  # a late commit: only what Starfire still has time for
-        (64, LOUD_BUILD, 4.0, None),  # under the 4-beat floor: none
-        (10, LOUD_BUILD, 18.0, 9.5),  # a short build: never before it
-        (128, LOUD_BUILD, 40.0, 32),  # a 32-bar build carries a 32-beat riser
-        (128, LOUD_BUILD, 24.0, 23),  # still inside the lead
+        (64, LOUD_BUILD, 18.0, 16),
+        (64, (0.8,) * 12 + (0.0,) * 4, 18.0, 14),
+        (64, (0.8,) * 8 + (0.0,) * 8, 16.0, 8),
+        (64, LOUD_BUILD, 6.0, 5),
+        (64, LOUD_BUILD, 4.0, None),
+        (10, LOUD_BUILD, 18.0, 9.5),
+        (128, LOUD_BUILD, 40.0, 32),
+        (128, LOUD_BUILD, 24.0, 23),
+    ],
+    ids=[
+        'usual-16',
+        'bar-of-dip',
+        'short-lead',
+        'late-commit',
+        'under-4-beat-floor',
+        'short-build',
+        '32-bar-build',
+        'inside-the-lead',
     ],
 )
 def test_the_riser_starts_after_starfire_has_the_cue_and_inside_the_build(
     build_beats, levels, lead, riser_beats
 ):
-    cues = director()
-    settings = ShowSettings(intensity=INTENSITY_BALANCED)
-    cues.plan(0, request(B, 0, new_track=True), settings, 'ice', Gate())
-    drop = cues.plan(1, request(D, build_beats, levels=levels, lead=lead), settings, 'ice', Gate())
+    drop = drop_after_build(build_beats, levels=levels, lead=lead)
     risers = [o for o in drop.cue.overlays if o.bank == 'riser']
     if riser_beats is None:
         assert risers == []
@@ -455,15 +465,12 @@ def test_a_filtered_build_is_no_gap_and_only_near_silence_earns_two_bars():
 
 def test_dip_shapes_land_in_the_drop_cue():
     for levels, dip in (
-        (LOUD_BUILD, 0.5),  # the build runs into the one
-        ((0.8,) * 15 + (0.1,), 1.0),  # a one-beat breath
-        ((0.7,) * 12 + (0.05,) * 4, 4.0),  # a bar of silence
-        ((0.9,) * 8 + (0.05,) * 8, 8.0),  # two bars of near silence
+        (LOUD_BUILD, 0.5),
+        ((0.8,) * 15 + (0.1,), 1.0),
+        ((0.7,) * 12 + (0.05,) * 4, 4.0),
+        ((0.9,) * 8 + (0.05,) * 8, 8.0),
     ):
-        cues = director()
-        settings = ShowSettings(intensity=INTENSITY_BALANCED)
-        cues.plan(0, request(B, 0, new_track=True), settings, 'ice', Gate())
-        drop = cues.plan(1, request(D, 64, levels=levels), settings, 'ice', Gate())
+        drop = drop_after_build(levels=levels)
         assert (row(drop, 'dip').begin_beats, row(drop, 'dip').length_beats) == (-dip, dip)
         riser = row(drop, 'riser')
         assert riser.begin_beats + riser.length_beats == -dip
@@ -483,7 +490,6 @@ def test_a_second_drop_opens_on_the_first_drops_look_and_hit_and_adds_one_layer(
     assert once[1][: len(once[0])] == once[0] and len(once[1]) == len(once[0]) + 1
     [added] = once[1][len(once[0]) :]
     meta = OVERLAYS[added.bank, added.autoloop]
-    # An accent that takes the heads waits out the hit, so it never moves them lit.
     begin = 0.0 if meta.intensity_htp and meta.movement == 'still' else 2.0
     assert (added.bank, added.begin_beats, added.length_beats) == ('accent', begin, 32.0 - begin)
     assert second.drop_number == 2
@@ -514,10 +520,7 @@ def test_a_drop_split_in_two_goes_on_with_its_next_look_and_no_second_entry():
 
 
 def test_a_soft_drop_keeps_its_white_but_never_strobes():
-    cues = director()
-    settings = ShowSettings(intensity=INTENSITY_WILD)
-    cues.plan(0, request(B, 0, new_track=True), settings, 'ice', Gate())
-    soft = cues.plan(1, request(D, 64, arrival=0.6), settings, 'ice', Gate())
+    soft = drop_after_build(level='wild', arrival=0.6)
     assert entry_of(soft.cue) == 'white' and row(soft, 'riser').autoloop == 'white_rise'
     assert not soft.events.intense and soft.events.accent
 
@@ -583,9 +586,6 @@ def test_a_dropped_or_reset_plan_is_forgotten():
     assert opening.track == 2, 'the next plan after a reset starts a track'
 
 
-# ---- the venue gate through the effect controller, on a simulated clock ----
-
-
 def controller(level='wild', clock=None, venue=None):
     clock = clock or VirtualClock()
     settings = ShowSettings(intensity=LEVELS[level])
@@ -610,7 +610,6 @@ def plan_drop(effects, moment, at, start):
 
 def test_the_intense_cooldown_blocks_strobe_rows_between_drops():
     effects, _ = controller('wild', venue=Venue(max_accent_events_per_minute=10))
-    # Wild halves the 60 s cooldown.
     assert entry_of(plan_drop(effects, 'one', 100.0, 128)) == 'strobe'
     second = plan_drop(effects, 'two', 125.0, 384)
     assert entry_of(second) != 'strobe' and 'strobe_ramp' not in {
@@ -660,7 +659,6 @@ def test_a_wild_second_drop_keeps_its_entry_whole_under_the_row_cap():
     assert len(second.cue.overlays) <= 8
     banks = [o.bank for o in second.cue.overlays if o.every_bars == 0]
     assert banks.count('hit') == 2 and 'dip' in banks and 'riser' in banks
-    # Nine rows: the bar-8 fill gives way, the accents stay.
     assert [o.bank for o in second.cue.overlays if o.every_bars > 0].count('accent') == 2
 
 

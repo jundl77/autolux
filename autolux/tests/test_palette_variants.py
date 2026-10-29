@@ -121,7 +121,6 @@ def wheel_spinner() -> rig_wire.DmxMode:
 
 
 def white_for_green() -> rig_wire.DmxMode:
-    """wheel_spinner with an open white slot in place of green."""
     mode = wheel_spinner()
     open_slot = mode.channels[0].functions[0].sets[2]
     open_slot.name = 'Open'
@@ -147,7 +146,6 @@ def test_a_pale_colour_takes_its_nearest_coloured_slot_and_only_white_takes_open
     pale = (1.0, 0.95, 0.9)
     assert nearest_slot(slots, pale) == 'Red'
     assert nearest_slot(slots, WHITE) == nearest_slot(slots, (0.5, 0.5, 0.5)) == 'Open'
-    # A wheel with no coloured slot keeps the plain nearest rule: a pale colour shows white.
     assert nearest_slot([('Black', BLACK), ('Open', WHITE)], pale) == 'Open'
     palettes = (palette('pale_red', pale, RED), palette('fire', RED, ORANGE))
     patched = rig(('wheel', white_for_green()), ('plain', wheel_spinner()))
@@ -198,7 +196,6 @@ def two_wheels() -> rig_wire.DmxMode:
         function.attribute = 'Color2'
         function.path = function.path.replace('Color1', 'Color2')
         function.qualified_attribute = function.qualified_attribute.replace('Color1', 'Color2')
-    # A second wheel without green, its red slot reaching up to blue.
     second.functions[0].sets[1].dmx_to = second.functions[0].sets[2].dmx_to
     del second.functions[0].sets[2]
     mode.channels.append(second)
@@ -211,7 +208,6 @@ def test_every_wheel_is_checked_and_only_a_collision_on_all_of_them_is_reported(
         ['Black', 'Red', 'Green', 'Blue'],
         ['Black', 'Red', 'Blue'],
     ]
-    # Green and yellow share Color1's green slot but not Color2's slots.
     assert [nearest_slot(slots, YELLOW) for slots in wheel_slots(mode)] == ['Green', 'Red']
     assert [nearest_slot(slots, GREEN) for slots in wheel_slots(mode)] == ['Green', 'Black']
     assert wheel_warnings(rig(('wheels', mode)), (palette('lime', GREEN, YELLOW),)) == []
@@ -280,14 +276,11 @@ def test_every_shipped_palette_colour_clears_the_saturation_floor():
 
 
 def _chroma_distance(first, second) -> float:
-    """Distance on the hue-saturation disc: hue counts as much as the colour carries it."""
     (h1, s1, _), (h2, s2, _) = colorsys.rgb_to_hsv(*first), colorsys.rgb_to_hsv(*second)
     angle = 2 * math.pi * (h1 - h2)
     return math.sqrt(max(0.0, s1 * s1 + s2 * s2 - 2 * s1 * s2 * math.cos(angle)))
 
 
-# Calm's colour bump paints the accent and a drop turns to the secondary; either must read as a
-# change from the primary, and the secondary must not pass for the white of a hit.
 MIN_CHROMA_DISTANCE = 0.3
 MIN_SECONDARY_SATURATION = 0.35
 

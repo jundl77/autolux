@@ -13,21 +13,14 @@ SLOTS = ('primary', 'secondary', 'accent', 'cold', 'black')
 BREAKDOWN_SUFFIX = '_breakdown'
 DROP_SUFFIX = '_drop'
 MONO_SUFFIX = '_mono'
-# Each palette file becomes these Login palettes, in this order.
 VARIANT_SUFFIXES = ('', BREAKDOWN_SUFFIX, DROP_SUFFIX, MONO_SUFFIX, BREAKDOWN_SUFFIX + MONO_SUFFIX)
 # Starfire's palette table limits (starfire/src/palette.rs).
 MAX_PALETTES = 64
 MAX_PALETTE_NAME_BYTES = 64
-# A mono cold is primary held low, so builds and breakdowns keep white back for the hit. Linear
-# DMX: 0.4 still reads about 65 % bright and does not separate as a role.
 MONO_COLD_LEVEL = 0.15
-# Primary, secondary and accent stay coloured; white and greys are for sf.white() hits only. A
-# wheel slot below it is white, and only full white lands there (gdtf.rs WHITE_SLOT_SATURATION).
 MIN_COLOUR_SATURATION = 0.05
 WHITE: Rgb = (1.0, 1.0, 1.0)
 COLOUR_ROLES = ('primary', 'secondary', 'accent')
-# Primary and secondary this close in hue are one colour on purpose (the mono palettes), so a
-# wheel showing both on one slot is not worth a warning.
 SAME_HUE_DEGREES = 15.0
 PALETTE_NAME = re.compile(r'[a-z0-9_]{1,64}')
 BLACK: Rgb = (0.0, 0.0, 0.0)
@@ -39,20 +32,7 @@ HEX_COLOUR = re.compile(r'#[0-9a-fA-F]{6}')
 
 @dataclass(frozen=True)
 class Mood:
-    """Where a palette sits, and where a measured track sits; each axis spans -1..1.
-
-    temperature: cold -1 .. warm +1. A palette's colour cast, derived from its colours by
-        colour_temperature; a track's bass-over-treble balance.
-    weight: dark -1 .. bright +1. How much light a palette gives, hand-set and kept in the
-        order of its colours' luminance; a track's loudness and spectral brightness.
-    drive: laid-back -1 .. hard +1. How pushed a palette feels, hand-set; a track's tempo
-        and energy.
-
-    The shipped palettes (temperature / weight / drive): techno +0.60/+0.2/+0.9,
-    house +0.49/+0.3/+0.4, ice -0.80/+0.4/0, acid +0.52/+0.7/+0.8, sunset +0.39/-0.3/-0.8,
-    uv -0.42/-0.8/+0.3, ember +0.87/-0.6/-0.2, mono_cold -0.09/+0.6/+0.5,
-    mono_warm +0.42/+0.5/-0.6.
-    """
+    # Each axis spans -1..1: cold..warm, dark..bright, laid-back..hard.
 
     temperature: float
     weight: float
@@ -68,10 +48,6 @@ class Mood:
 
 
 def colour_temperature(colours: dict[str, Rgb]) -> float:
-    """Hue warmth (cos of the distance from orange, 30 deg) x chroma, averaged by slot share.
-
-    Chroma scales each slot's say, so near-grey palettes come out mild rather than extreme.
-    """
     warmth = sum(
         share * saturation * value * math.cos(math.radians(hue * 360.0 - WARMEST_HUE_DEGREES))
         for slot, share in COLOUR_SHARES
@@ -153,7 +129,6 @@ def _hue_degrees(colour: Rgb) -> float:
 
 
 def parse_palette(document: dict, name: str) -> tuple[int, Palette, Palette, Palette]:
-    """One file: its console number, the palette and its breakdown and drop variants."""
     unknown = sorted(document.keys() - {'number', 'slots', 'mood', 'breakdown', 'drop'})
     if unknown:
         raise PaletteError(f'unknown {", ".join(unknown)}')
@@ -176,7 +151,6 @@ def parse_palette(document: dict, name: str) -> tuple[int, Palette, Palette, Pal
 
 
 def load_palettes(directory: Path = PALETTE_DIRECTORY) -> tuple[tuple[Palette, ...], ...]:
-    """Base, breakdown and drop palettes, each in console-number order."""
     rows, problems = [], []
     for path in sorted(Path(directory).glob('*.toml')):
         try:
@@ -208,7 +182,6 @@ def load_palettes(directory: Path = PALETTE_DIRECTORY) -> tuple[tuple[Palette, .
 
 
 def mono(palette: Palette) -> Palette:
-    """Colour A alone: secondary and accent take primary, cold is primary held low."""
     cold = tuple(channel * MONO_COLD_LEVEL for channel in palette.primary)
     return replace(
         palette,
@@ -237,7 +210,6 @@ _FAMILIES = tuple(
 
 
 def palette_table() -> tuple[Palette, ...]:
-    """The Login table: each base palette followed by its variants, the default first."""
     return tuple(variant for family in _FAMILIES for variant in family)
 
 
@@ -275,7 +247,6 @@ def _normalised(colour) -> Rgb:
 
 
 def _slot_rgb(colour) -> Rgb | None:
-    """None where Starfire refuses the slot colour, so a bad rig cannot crash this check."""
     x, y, luminance = colour.x, colour.y, colour.luminance / 100
     if not all(math.isfinite(value) for value in (x, y, luminance)) or y <= 0 or luminance < 0:
         return None
@@ -287,9 +258,6 @@ def _slot_rgb(colour) -> Rgb | None:
 
 
 def wheel_slots(mode) -> list[list[tuple[str, Rgb]]]:
-    """Each colour wheel of a mode whose colour is only wheels, as Starfire picks among it: per
-    channel, the lowest-DMX unconditional colour-wheel function's reachable sets. Empty if the
-    mode mixes colour."""
     functions = [function for channel in mode.channels for function in channel.functions]
     if any(f.attribute.startswith(('ColorAdd_', 'ColorSub_')) for f in functions):
         return []
@@ -319,8 +287,6 @@ def wheel_slots(mode) -> list[list[tuple[str, Rgb]]]:
 
 
 def nearest_slot(slots: list[tuple[str, Rgb]], colour: Rgb) -> str:
-    """The slot Starfire's encode picks: white slots only for full white, unless the wheel has
-    no coloured slot; the highest-DMX slot of equally near ones."""
     requested = _normalised(colour)
     white = _white_slots(slots)
     if requested != WHITE and any(rgb != BLACK and name not in white for name, rgb in slots):
@@ -343,9 +309,6 @@ def _same_hue(palette: Palette) -> bool:
 
 
 def wheel_warnings(rig, palettes: tuple[Palette, ...] | None = None) -> list[str]:
-    """One line per patched wheel-only fixture type listing the palettes whose primary and
-    secondary land on the same slot of every wheel, so colour A and B look alike on it. Same-hue
-    palettes mean to; a variant is listed only where its colours differ from its palette's."""
     palettes = PALETTES + BREAKDOWN_PALETTES + DROP_PALETTES if palettes is None else palettes
     patched = {fixture.profile_id for fixture in rig.fixtures}
     warnings = []

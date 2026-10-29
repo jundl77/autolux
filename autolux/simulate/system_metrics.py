@@ -1,5 +1,3 @@
-"""Time-series panels for the existing Autolux dashboard."""
-
 import math
 import time
 from datetime import UTC, datetime
@@ -101,7 +99,6 @@ PANELS = (
 
 
 def build_metric_series(history, key, *, rate=False):
-    """Preserve gaps and counter resets; never interpolate an unknown interval."""
     x, y = [], []
     previous = None
     for sample in history:
@@ -227,7 +224,6 @@ def build_system_health_panels():
 def build_telemetry_notices(snapshot, *, now=None):
     now = time.time() if now is None else now
     system = snapshot.get('system') or {}
-    # Most severe first: the line ellipsises, and a routine link notice must not hide a fault.
     messages = []
     shed = snapshot.get('shed') or {}
     fault = shed.get('fault')
@@ -280,10 +276,8 @@ def build_telemetry_notices(snapshot, *, now=None):
             and (not finite(dmx_age) or dmx_age + age >= DMX_INPUT_STALE_SECONDS)
         ):
             messages.append('No recent lighting input from Starfire.')
-    # One line, however many: the line sits above the show controls and must never grow.
     if not messages:
         return []
     text = ' · '.join(messages)
-    # The count tells the operator the ellipsis may hide more than the first notice.
     count = [html.Span(f'{len(messages)} ·', className='notice-count')] if len(messages) > 1 else []
     return [html.Div([*count, text], title=text, className='telemetry-notice', role='status')]

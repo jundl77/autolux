@@ -48,7 +48,6 @@ def overlay_autoloops(directory: Path = AUTOLOOP_DIRECTORY) -> set[tuple[str, st
 
 
 def _header(source: str, allowed_values: Mapping[str, tuple[str, ...]]) -> dict[str, str]:
-    """The `-- key: value` lines right after the first line, each key once."""
     values: dict[str, str] = {}
     for line in source.split('\n')[1:]:
         line = line.removesuffix('\r')

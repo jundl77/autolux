@@ -258,7 +258,6 @@ async def test_show_control_applies_static_commands_as_an_overlay_and_clears_it(
         'blacklight': True,
         'blackout': True,
         'special_fx': None,
-        # This rig reports no group capabilities, so no target takes a row.
         'fx_rows': {target: [] for target in ROOM.targets},
         'looks': {'wash': {'colour': '#ff8000', 'dimmer': 1.0, 'uv': False}},
     }
@@ -349,8 +348,6 @@ def special_looks():
 
 def test_the_fx_picker_offers_only_the_rows_that_fit_each_target():
     looks, _ = special_looks()
-    # fx renders colour and speed but no pulse, so the spins fit no group, not even the
-    # whole rig; no row is a strobe.
     assert looks.state()['fx_rows'] == {
         'all': ['cold_drift', 'drift'],
         'fx': ['cold_drift', 'drift'],
@@ -367,7 +364,6 @@ def test_a_picked_row_is_held_at_the_static_priority_and_clear_fx_releases_it_sh
     assert held['value']['id'] == STATIC_SPECIAL_ID
     assert held['value']['target'] == {'group': 'fx'}
     assert held['value']['priority'] == STATIC_PRIORITY
-    # The row's look, cut in at once and released short instead of its 64-beat section fade.
     assert held['value']['special_fx'] == {
         'colour_slot': 'cold',
         'energy': 0.15,
@@ -444,7 +440,6 @@ async def test_a_picked_row_survives_section_changes_and_fx_auto_off(tmp_path):
     lighting.events.clear()
     for decision in ('drop', 'breakdown', 'drop'):
         await beat_at_phase(light, decoder, 0, decision=decision)
-    # Manual FX is not the automatic show's: turning automatic FX off leaves it alone.
     control.commands.put_nowait({'action': 'fx_auto', 'enabled': False})
     await control.apply_pending(light)
     await beat_at_phase(light, decoder, 0, decision='buildup')
@@ -472,7 +467,6 @@ async def test_static_releases_the_auto_special_and_auto_brings_it_back():
 
     lighting.events.clear()
     light.enter_static()
-    # Entering static is the operator's hand, so the special cuts at once.
     assert overrides(lighting) == [
         {'kind': 'clear_override', 'id': 'special', 'instantaneous_release': True}
     ]
@@ -503,7 +497,6 @@ async def test_operator_static_looks_reach_starfire_in_the_same_pass_bypassing_t
     looks = sent(lighting, 'set_override')
     assert [at for at, _ in looks] == [clock.monotonic()] * 2
     assert [look['value']['id'] for _, look in looks] == ['static_all', 'static_wash']
-    # No lifetime or transition: Starfire cuts an override in on its next 25 ms frame.
     assert all(look['value'].keys() == {'id', 'target', 'values', 'priority'} for _, look in looks)
     assert queue.pending == 0, 'operator looks must never wait behind the playback delay'
     assert control.commands.unfinished_tasks == 0, 'each command is marked handed to the engine'
@@ -512,7 +505,6 @@ async def test_operator_static_looks_reach_starfire_in_the_same_pass_bypassing_t
 HALL = StaticRig(
     groups=('wash',),
     uv_groups=('wash',),
-    # Labels differ from uuids, so a target can only match by uuid.
     fixtures=(
         ('par', 'front', ('par',)),
         ('bar', 'strip', ('bar/a', 'bar/b')),
@@ -654,7 +646,6 @@ def test_a_highlight_the_rig_cannot_show_is_refused_and_sends_nothing(
     looks, lighting = highlight_looks()
     looks.set_blackout(blackout)
     lighting.events.clear()
-    # A motion row lights white and asks for that motion; 'both' asks for the two at once.
     motions = {
         'sweep': {'sweep': True},
         'aim': {'aim': True},

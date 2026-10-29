@@ -800,13 +800,10 @@ def test_real_renderer_accepts_python_protobuf_and_blackouts_on_eof(tmp_path):
                 packet = receiver.recv(1024)
                 assert packet.startswith(b'Art-Net\x00')
                 runtime.check_health()
-                # The strip is RGB-only at address 97; pan/colour-wheel parking
-                # values on other fixtures must not count as emitted light.
                 if packet[18 + 96 : 18 + 99] == bytes([red_at_squared_master(0.5), 0, 0]):
                     break
             else:
                 pytest.fail('no rendered lighting arrived')
-            # Successful commands have no reply; their actual DMX proves application.
             runtime.send_command(
                 wire.SetParameter(parameter=wire.Parameter(type=wire.OUTPUT_BRIGHTNESS, number=1.0))
             )

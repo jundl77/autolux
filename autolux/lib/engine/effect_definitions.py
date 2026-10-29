@@ -11,7 +11,6 @@ class LightIntent(Enum):
     DROP = 'drop'
 
 
-# Nine musical sections map onto four lighting intents.
 SECTION_CLASS_INTENTS: dict[str, LightIntent] = {
     'intro': LightIntent.ATMOSPHERIC,
     'altintro': LightIntent.ATMOSPHERIC,
@@ -65,7 +64,6 @@ class AutoloopMeta:
 
 AutoloopMetaTable = Mapping[tuple[str, str], AutoloopMeta]
 
-# Banks of Lua layers a section cue schedules above its base look.
 OVERLAY_BANKS = ('hit', 'fill', 'riser', 'dip', 'accent')
 
 OVERLAY_META_VALUES: dict[str, tuple[str, ...]] = {
@@ -78,11 +76,6 @@ OVERLAY_META_VALUES: dict[str, tuple[str, ...]] = {
 
 @dataclass(frozen=True)
 class OverlayMeta:
-    """strobe: the overlay strobes, so the venue gate counts it as an intense event.
-    intensity_htp: its intensity takes the higher of the look below and its own; else it
-    replaces the look below (LTP). movement and texture name the layer it plays on, as for a
-    base loop, so the director can keep it off a base loop whose lead layer it would fight."""
-
     strobe: bool
     intensity_htp: bool
     movement: str
@@ -115,24 +108,18 @@ MAX_STROBE_COOLDOWN_SECONDS = 600.0
 DIGITAL_SILENCE_SECONDS = 2.0
 MAX_DIGITAL_SILENCE_SECONDS = 10.0
 MAX_CROSSFADE_BEATS = 16.0
-# The dashboard's three intensity levels. They differ in kind, not just degree: calm
-# re-maps drops and builds to quiet banks and drops strobes, wild leans on energy 3 and
-# strobes more often. Starfire's pulse/movement curve (starfire::intensity) keys off the
-# same three values.
+# Starfire's pulse/movement curve (starfire::intensity) keys off these same three levels.
 INTENSITY_CALM = 0.3
 INTENSITY_BALANCED = 0.7
 INTENSITY_WILD = 1.0
 DEFAULT_INTENSITY = INTENSITY_BALANCED
 CALM, BALANCED, WILD = 'calm', 'balanced', 'wild'
-# Strobes (and starfire's intense-special gate) are off at or below calm.
 STROBE_GATE_INTENSITY = INTENSITY_CALM
-# Calm stretches every look change; wild snaps between them.
 CROSSFADE_SCALE = {CALM: 2.0, BALANCED: 1.0, WILD: 0.5}
 DROP_STROBE_COOLDOWN_SCALE = {CALM: 1.0, BALANCED: 1.0, WILD: 0.5}
 
 
 def intensity_level(intensity: float) -> str:
-    """Continuous intensities between calm and wild behave as balanced."""
     if intensity <= INTENSITY_CALM:
         return CALM
     if intensity >= INTENSITY_WILD:
@@ -166,8 +153,7 @@ class ShowSettings:
     intensity: float = DEFAULT_INTENSITY
     intensity_auto: bool = False
     fx_auto: bool = True
-    # Inhibitive submasters by rig group, 0..1: Starfire scales the group after the master.
-    # An absent group is at full.
+    # 0..1 per rig group, applied by Starfire after the master; an absent group is at full.
     group_masters: dict[str, float] = field(default_factory=dict)
 
     def __post_init__(self):
@@ -176,7 +162,6 @@ class ShowSettings:
                 raise ValueError(f'{name} must be true or false')
         if not isinstance(self.group_masters, dict):
             raise TypeError('group_masters must map group names to levels')
-        # Before sorting, which mixed key types would fail with a bare TypeError.
         if any(type(group) is not str or not group for group in self.group_masters):
             raise ValueError('group_masters keys must be group names')
         masters = {}
@@ -208,7 +193,6 @@ class ShowSettings:
 
 
 def live_crossfade_beats(settings: ShowSettings) -> float:
-    """The renderer's default crossfade: the saved setting scaled by the intensity level."""
     return settings.crossfade_beats * CROSSFADE_SCALE[intensity_level(settings.intensity)]
 
 

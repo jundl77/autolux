@@ -1,5 +1,3 @@
-"""Source-analysis invariants and semantic lighting checks for fast simulation."""
-
 import copy
 import json
 from pathlib import Path

@@ -36,7 +36,6 @@ release_beats = 32
 
 
 def row(**sections) -> dict:
-    """ROW with each named section updated; a None value deletes that key."""
     changed = {key: dict(value) if isinstance(value, dict) else value for key, value in ROW.items()}
     for section, values in sections.items():
         if not isinstance(values, dict):
