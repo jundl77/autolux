@@ -1,10 +1,11 @@
-import copy
 import json
+import shutil
 
 import pytest
 
 from autolux.lib.clock import VirtualClock
 from autolux.lib.engine.event_buffer import EventBuffer
+from autolux.lighting.autoloop_catalogue import AUTOLOOP_DIRECTORY
 from autolux.lighting.starfire_replay import report_to_replay
 
 
@@ -17,8 +18,25 @@ def report():
     }
 
 
-def selections(replay):
-    return [event for event in replay['events'] if event['command']['kind'] == 'select']
+def sections(replay):
+    """When each section starts: a cue at its start beat, a selection when it is sent."""
+    beats = {
+        event['command']['beat_index']: event['at_seconds']
+        for event in replay['events']
+        if event['command']['kind'] == 'beat'
+    }
+    starts = []
+    for event in replay['events']:
+        command = event['command']
+        if command['kind'] == 'cue_section':
+            starts.append(beats[command['value']['start_beat_index']])
+        elif command['kind'] == 'select':
+            starts.append(event['at_seconds'])
+    return starts
+
+
+def cues(replay):
+    return [event for event in replay['events'] if event['command']['kind'] == 'cue_section']
 
 
 async def test_actual_event_buffer_queue_delivery_is_aligned_to_source_time_once():
@@ -42,12 +60,14 @@ async def test_actual_event_buffer_queue_delivery_is_aligned_to_source_time_once
     assert saved['beats'][0]['t'] == 1.0
     assert saved['intents'][0]['t'] == 15.0
     replay = report_to_replay(saved)
+    # The cue goes out the look-ahead before its start beat, here clamped to the start.
     assert [(event['at_seconds'], event['command']['kind']) for event in replay['events']] == [
+        (0.0, 'cue_section'),
         (1.0, 'beat'),
         (1.0, 'set_normalized_rms_level'),
-        (1.0, 'select'),
         (16.0, 'stop'),
     ]
+    assert sections(replay) == [1.0]
 
 
 def test_source_boundary_wins_over_late_delivery_and_legacy_subtracts_delay_once():
@@ -56,8 +76,8 @@ def test_source_boundary_wins_over_late_delivery_and_legacy_subtracts_delay_once
         {'t': 15.0, 'intent': 'atmospheric'},
         {'t': 19.0, 'song_t': 2.0, 'intent': 'drop'},
     ]
-    result = selections(report_to_replay(source))
-    assert [event['at_seconds'] for event in result] == [1.0, 2.0]
+    # 2.0 s has no beat within half a beat, so it switches by selection at its time.
+    assert sections(report_to_replay(source)) == [1.0, 2.0]
 
 
 def test_simulation_end_clamp_does_not_shift_a_recorded_source_boundary():
@@ -72,7 +92,7 @@ def test_simulation_end_clamp_does_not_shift_a_recorded_source_boundary():
     buffer.set_intent('buildup', song_sec=4.0)
     saved = buffer.to_report()
     assert saved['intents'][0]['t'] == 5.0
-    assert selections(report_to_replay(saved))[0]['at_seconds'] == 4.0
+    assert sections(report_to_replay(saved)) == [4.0]
 
 
 def test_silence_stops_immediately_and_same_autoloop_can_resume_after_transport_stop():
@@ -84,28 +104,88 @@ def test_silence_stops_immediately_and_same_autoloop_can_resume_after_transport_
         {'t': 19.0, 'song_t': 18.0, 'intent': 'drop'},
     ]
     result = report_to_replay(source)
-    assert [event['at_seconds'] for event in selections(result)] == [1.0, 18.0]
-    assert {'at_seconds': 17.0, 'command': {'kind': 'stop'}} in result['events']
+    assert sections(result) == [1.0, 18.0]
+    silence = [event for event in result['events'] if event['at_seconds'] == 17.0]
+    assert [event['command'] for event in silence] == [{'kind': 'clear_cues'}, {'kind': 'stop'}]
     assert result['events'][-1] == {'at_seconds': 20.0, 'command': {'kind': 'stop'}}
 
 
-def test_all_four_intents_map_to_authored_autoloops_in_stable_order():
-    source = report()
-    source['intents'] = [
-        {'t': 15.0, 'song_t': 1.0, 'intent': name}
-        for name in ['atmospheric', 'breakdown', 'buildup', 'drop']
+def overlay_catalogue(directory):
+    """The shipped base banks with a generic overlay of every kind the director names, in
+    place of the shipped overlays, so the plan depends only on the base banks."""
+    skipped = shutil.ignore_patterns('*.md', 'hit', 'fill', 'riser', 'dip', 'accent')
+    shutil.copytree(AUTOLOOP_DIRECTORY, directory, ignore=skipped)
+    header = '-- overlay\n-- strobe: no\n-- intensity: htp\n-- movement: still\n-- texture: mixed\n'
+    for bank, name in [
+        ('dip', 'last_beat'),
+        ('dip', 'fade'),
+        ('hit', 'colour_bump'),
+        ('hit', 'flash'),
+        ('riser', 'swell'),
+        ('fill', 'turnaround'),
+        ('fill', 'roll'),
+        ('accent', 'sparkle'),
+        ('accent', 'shimmer'),
+    ]:
+        (directory / bank).mkdir(exist_ok=True)
+        (directory / bank / f'{name}.lua').write_text(header + 'return {}\n', encoding='utf-8')
+    return directory
+
+
+def a_set():
+    """Four sections at 120 bpm: an intro, a 16-bar build, a drop and a breakdown."""
+    return {
+        'duration_sec': 120.0,
+        'beats': [
+            {'t': 0.5 + index / 2, 'bpm': 120.0, 'rms': 0.1 + (index % 4) * 0.05}
+            for index in range(230)
+        ],
+        'intents': [
+            {'t': 10.0, 'song_t': 0.5, 'intent': 'atmospheric'},
+            {'t': 40.0, 'song_t': 30.5, 'intent': 'buildup'},
+            {'t': 72.0, 'song_t': 62.5, 'intent': 'drop'},
+            {'t': 104.0, 'song_t': 94.5, 'intent': 'breakdown'},
+        ],
+        'metrics': {'look_ahead_sec': 9.0},
+    }
+
+
+def planned(seed=7, settings=({'t': 0.0, 'settings': {}},)):
+    return {**a_set(), 'planning': {'seed': seed, 'venue': {}, 'settings': list(settings)}}
+
+
+def test_the_director_cues_every_section_with_its_overlays_deterministically(tmp_path):
+    catalogue = overlay_catalogue(tmp_path / 'autoloops')
+    first = report_to_replay(planned(), autoloops=catalogue)
+    assert json.dumps(first) == json.dumps(report_to_replay(planned(), autoloops=catalogue))
+    cued = [event['command']['value'] for event in cues(first)]
+    assert [cue['intent'] for cue in cued] == ['atmospheric', 'buildup', 'drop', 'breakdown']
+    # Each cue goes out the look-ahead before its start beat.
+    assert [event['at_seconds'] for event in cues(first)] == [0.0, 21.5, 53.5, 85.5]
+    assert sections(first) == [0.5, 30.5, 62.5, 94.5]
+    drop_rows = {(row['bank'], row['autoloop']) for row in cued[2]['overlays']}
+    assert ('dip', 'last_beat') in drop_rows
+    assert {bank for bank, _ in drop_rows} >= {'dip', 'hit'}
+    # The recorded seed is the show's: another one keys the cues differently.
+    other = report_to_replay(planned(seed=8), autoloops=catalogue)
+    assert [cue['seed'] for cue in cued] != [
+        event['command']['value']['seed'] for event in cues(other)
     ]
-    result = report_to_replay(source)
-    assert result['events'][0]['command']['kind'] == 'beat'
-    assert [
-        (event['command']['bank'], event['command']['autoloop']) for event in selections(result)
-    ] == [
-        ('atmospheric', 'dawn'),
-        ('breakdown', 'drift_apart'),
-        ('buildup', 'stutter'),
-        ('drop', 'kick'),
-    ]
-    assert report_to_replay(source) == report_to_replay(copy.deepcopy(source))
+
+
+def test_each_section_is_planned_at_the_level_in_force_when_the_room_hears_it(tmp_path):
+    catalogue = overlay_catalogue(tmp_path / 'autoloops')
+    wild = {'t': 0.0, 'settings': {'intensity': 1.0}}
+    # The drop starts at 62.5 s and is heard 9 s later; calm from 70 s is in force by then.
+    calm_by_the_drop = [wild, {'t': 70.0, 'settings': {'intensity': 0.3}}]
+    calm_after_it = [wild, {'t': 72.0, 'settings': {'intensity': 0.3}}]
+
+    def drop(settings):
+        replay = report_to_replay(planned(settings=settings), autoloops=catalogue)
+        return [event['command']['value'] for event in cues(replay)][2]
+
+    assert drop(calm_by_the_drop) != drop([wild])
+    assert drop(calm_after_it) == drop([wild])
 
 
 def test_replay_preserves_measured_loudness_instead_of_a_fixed_strength():
@@ -168,12 +248,13 @@ def test_missing_tempo_or_delay_and_backwards_beats_are_rejected():
         report_to_replay(source)
 
 
-def test_a_replay_embeds_the_login_palette_table_and_names_each_selection_palette():
-    from autolux.lighting.palettes import DEFAULT_PALETTE, palette_table
+def test_a_replay_embeds_the_login_palette_table_and_names_only_its_palettes():
+    from autolux.lighting.palettes import palette_table
 
-    replay = report_to_replay(report())
+    replay = report_to_replay(a_set())
     assert [palette['name'] for palette in replay['palettes']] == [
         palette.name for palette in palette_table()
     ]
     assert replay['palettes'][0]['secondary'] == {'red': 1.0, 'green': 140 / 255, 'blue': 26 / 255}
-    assert {event['command']['palette'] for event in selections(replay)} == {DEFAULT_PALETTE}
+    names = {palette['name'] for palette in replay['palettes']}
+    assert {event['command']['value']['palette'] for event in cues(replay)} <= names

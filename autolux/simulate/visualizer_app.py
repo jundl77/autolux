@@ -1,11 +1,16 @@
 import argparse
+import base64
 import http.client
 import itertools
 import json
 import logging
+import os
 import re
+import subprocess
+import tempfile
 import threading
 import time
+from pathlib import Path
 from statistics import median
 
 import dash
@@ -39,6 +44,13 @@ from autolux.lib.ui_bridge import (
 )
 from autolux.lighting.fixture_setup import FixtureStore
 from autolux.lighting.palettes import PALETTES, base_palette_name
+from autolux.lighting.starfire_replay import (
+    bar_starts,
+    is_preview,
+    load_preview,
+    preview_overview,
+    report_to_replay,
+)
 from autolux.simulate import system_metrics
 from autolux.simulate.fixture_panel import FIXTURE_CSS, build_fixture_panel
 from autolux.simulate.runner import TIMING_TOLERANCE_SEC
@@ -1864,7 +1876,7 @@ CALLBACK_RESOLVED_JS = (
 )
 
 GATE_JS = (
-    'function(n, selected, control) {'
+    'function(n, selected) {'
     + _GATE_STATE_JS
     + '''
     const changed = gate.tab !== selected || gate.hidden;
@@ -1894,10 +1906,11 @@ GATE_JS = (
     + ''';
     if (timeline) gate.viewAt = now;
     if (metrics) gate.metricsAt = now;
-    // The rig changes only on a show restart, so it is fetched once per rig revision.
-    if (control && 'rig' in control) gate.rig = control.rig_revision;
+    // The rig changes only on a show restart, so a request names the revision the Config page
+    // holds and the show sends the rig until the page has taken it: a control state that
+    // carried it but was overtaken before the page saw it cannot lose it.
     const request = {tick: n, tab: selected, timeline: timeline, metrics: metrics};
-    if ('rig' in gate) request.rig = gate.rig;
+    if (ds.fixture_rig_revision !== undefined) request.rig = ds.fixture_rig_revision;
     return request;
 }'''
 )
@@ -1971,6 +1984,260 @@ class SnapshotPoller:
             self._lock.release()
 
 
+# ---- Offline preview: a recording played through Starfire onto the Config plan ----------
+
+PREVIEW_UPLOAD_MAX_BYTES = 32 * 1024 * 1024
+PREVIEW_RENDER_TIMEOUT_SEC = 300
+PREVIEW_FRAMES_PATH = '/preview/frames'
+PREVIEW_BAR_LABELS = 12
+PREVIEW_CSS = '''
+.preview-card {margin-top:16px;}
+.preview-card .patch-heading {margin-bottom:10px;}
+.preview-label {min-height:16px;margin-bottom:6px;font-size:12px;color:var(--muted);}
+.preview-scrub,.preview-overview {display:grid;grid-template-columns:110px minmax(0,1fr);gap:2px 8px;}
+.preview-scrub {align-items:center;}
+.preview-transport {display:flex;align-items:center;gap:12px;}
+.preview-beat {width:12px;height:12px;border-radius:50%;background:#1d2733;flex:none;}
+.preview-beat.on {background:#73b6ff;}
+.preview-beat.bar {background:#e6edf3;box-shadow:0 0 6px #e6edf3;}
+.preview-overview {position:relative;font-size:11px;color:var(--muted);margin-top:6px;}
+.preview-overview {cursor:pointer;}
+.preview-overview:focus-visible {outline:1px solid var(--accent);}
+.preview-overview svg {display:block;width:100%;height:12px;background:#0b121c;}
+.preview-overview svg.band {height:22px;}
+.preview-overview .preview-headroom {stroke:#e5534b;stroke-width:1;stroke-dasharray:3 3;}
+.preview-banks {position:relative;height:14px;}
+.preview-banks span {position:absolute;top:0;overflow:hidden;white-space:nowrap;}
+.preview-banks .drop {color:#f0c674;font-weight:600;}
+.preview-overview .preview-cursor,.preview-overview .preview-phrase {position:absolute;top:0;bottom:0;width:1px;pointer-events:none;}
+.preview-overview .preview-cursor {background:#e6edf3;}
+.preview-overview .preview-phrase {background:#5d6d80;opacity:.7;}
+#mvr-plan:has(svg.elevation) {display:grid;grid-template-columns:3fr 2fr;gap:8px;}
+#mvr-plan:has(svg.elevation) .plan-legend {grid-column:1 / -1;}
+#mvr-plan svg.elevation {display:block;width:100%;height:max(480px,55vh);background:#0b121c;border:1px solid #273345;border-radius:4px;}
+#mvr-plan .plan-strobe {fill:none;stroke:#f5f7fa;}
+#mvr-plan svg circle.preview-cell {stroke:var(--group);}
+#mvr-plan svg.elevation .selected circle:not(.plan-strobe) {stroke:var(--accent);}
+#mvr-plan svg.elevation text {fill:var(--muted);}
+@media (max-width:700px) {#mvr-plan:has(svg.elevation) {grid-template-columns:1fr;}}
+'''
+
+
+def render_recording(report: dict, rig_path: Path) -> str:
+    """The report's preview frames, converted here and rendered by `starfire preview` on the
+    saved patch."""
+    from cli.starfire import DEFAULT_AUTOLOOPS, DEFAULT_BINARY
+    from cli.starfire_assets import native_rig
+
+    if not DEFAULT_BINARY.is_file():
+        raise ValueError(f'the Starfire binary is missing: {DEFAULT_BINARY}; build it first')
+    replay = report_to_replay(report, autoloops=DEFAULT_AUTOLOOPS)
+    with (
+        tempfile.TemporaryDirectory(prefix='autolux-preview-') as directory,
+        native_rig(rig_path) as rig,
+    ):
+        source, target = Path(directory) / 'replay.json', Path(directory) / 'preview.jsonl'
+        source.write_text(json.dumps(replay, allow_nan=False), encoding='utf-8')
+        subprocess.run(
+            [
+                str(DEFAULT_BINARY),
+                'preview',
+                '--input',
+                str(source),
+                '--rig',
+                str(rig),
+                '--autoloops',
+                str(DEFAULT_AUTOLOOPS),
+                '--output',
+                str(target),
+            ],
+            check=True,
+            capture_output=True,
+            encoding='utf-8',
+            errors='replace',
+            timeout=PREVIEW_RENDER_TIMEOUT_SEC,
+            stdin=subprocess.DEVNULL,
+            creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0,
+        )
+        # The bound an uploaded preview meets, so a render cannot hold more than a load would.
+        if target.stat().st_size > PREVIEW_UPLOAD_MAX_BYTES:
+            raise ValueError(f'the preview exceeds {PREVIEW_UPLOAD_MAX_BYTES} bytes')
+        return target.read_text(encoding='utf-8')
+
+
+def preview_marks(preview) -> dict:
+    """Bar numbers under the scrubber, thinned by powers of two to a readable count."""
+    starts = bar_starts(preview)
+    step = 1
+    while len(starts) > PREVIEW_BAR_LABELS * step:
+        step *= 2
+    return {frame: str(bar) for bar, frame in starts if (bar - 1) % step == 0}
+
+
+def _build_preview_card():
+    return html.Div(
+        [
+            html.Div(
+                [
+                    html.H3('Preview recording'),
+                    html.Span(
+                        'Load a session report (rendered on the saved patch) or a starfire '
+                        'preview file.',
+                        id='preview-status',
+                        className='patch-muted',
+                        role='status',
+                    ),
+                    dcc.Upload(
+                        html.Button('Load recording', type='button'),
+                        id='preview-upload',
+                        accept='.json,.jsonl',
+                        max_size=PREVIEW_UPLOAD_MAX_BYTES,
+                    ),
+                ],
+                className='patch-heading',
+            ),
+            html.Div(id='preview-label', className='preview-label'),
+            # The slider shares the strip's track column, so a frame sits above its slice.
+            html.Div(
+                [
+                    html.Div(
+                        [
+                            html.Button('Play', id='preview-play', type='button', disabled=True),
+                            html.Span(id='preview-beat', className='preview-beat'),
+                        ],
+                        className='preview-transport',
+                    ),
+                    dcc.Slider(
+                        id='preview-frame',
+                        min=0,
+                        max=0,
+                        step=1,
+                        value=0,
+                        marks=None,
+                        updatemode='drag',
+                        allow_direct_input=False,
+                        disabled=True,
+                    ),
+                ],
+                className='preview-scrub',
+            ),
+            # fixture_patch.js draws the whole-track strip here once the frames arrive.
+            html.Div(
+                id='preview-overview',
+                className='preview-overview',
+                tabIndex='0',
+                title='Click to seek; arrows step a beat, Shift+arrows a bar, PgUp/PgDn a section',
+            ),
+            dcc.Interval(id='preview-clock', interval=100, disabled=True),
+            dcc.Store(id='preview-source'),
+            dcc.Store(id='preview-ready'),
+        ],
+        id='preview-card',
+        className='patch-card preview-card',
+    )
+
+
+def _register_preview(app, fixture_store: FixtureStore) -> None:
+    from flask import Response
+
+    lock = threading.Lock()
+    loaded = {'text': None, 'revision': 0}
+
+    @app.server.route(PREVIEW_FRAMES_PATH)
+    def preview_frames():
+        with lock:
+            text = loaded['text']
+        if text is None:
+            return Response('no recording loaded', status=404)
+        return Response(
+            text, mimetype='application/x-ndjson', headers={'Cache-Control': 'no-store'}
+        )
+
+    @app.callback(
+        Output('preview-source', 'data'),
+        Output('preview-frame', 'max'),
+        Output('preview-frame', 'marks'),
+        Output('preview-frame', 'disabled'),
+        Output('preview-play', 'disabled'),
+        Output('preview-clock', 'interval'),
+        Output('preview-status', 'children'),
+        Input('preview-upload', 'contents'),
+        State('preview-upload', 'filename'),
+        prevent_initial_call=True,
+    )
+    def load_recording(contents, filename):
+        unchanged = [dash.no_update] * 6
+        try:
+            text = base64.b64decode(contents.split(',', 1)[1]).decode('utf-8')
+            if not is_preview(text):
+                text = render_recording(json.loads(text), fixture_store.rig_path)
+            preview = load_preview(text)
+        except subprocess.CalledProcessError as error:
+            reason = (error.stderr or '').strip().splitlines()[-1:] or [f'exit {error.returncode}']
+            return [*unchanged, f'{filename}: Starfire refused it: {reason[0]}']
+        except (ValueError, TypeError, KeyError, OSError, subprocess.TimeoutExpired) as error:
+            return [*unchanged, f'{filename}: not loaded: {error}']
+        with lock:
+            loaded['text'] = text
+            loaded['revision'] += 1
+            revision = loaded['revision']
+        rate = preview.rate_hz
+        faults = sum(1 for frame in preview.frames if frame.get('fault'))
+        first_error = next(
+            (str(frame['error']) for frame in preview.frames if 'error' in frame), ''
+        )
+        status = (
+            f'{filename}: {preview.header["duration_seconds"]:.0f} s, '
+            f'{len(bar_starts(preview))} bars, {len(preview.frames)} frames at {rate} Hz'
+            + (f'; {faults} frames dark from a script fault' if faults else '')
+            + (f': {first_error.strip().splitlines()[0]}' if first_error.strip() else '')
+        )
+        source = {
+            'url': f'{PREVIEW_FRAMES_PATH}?v={revision}',
+            'overview': preview_overview(preview),
+        }
+        return [
+            source,
+            len(preview.frames) - 1,
+            preview_marks(preview),
+            False,
+            False,
+            1000 / rate,
+            status,
+        ]
+
+    for function, outputs, inputs, states in (
+        ('loadPreview', [Output('preview-ready', 'data')], [Input('preview-source', 'data')], []),
+        (
+            'showPreviewFrame',
+            [Output('preview-label', 'children'), Output('preview-beat', 'className')],
+            [Input('preview-frame', 'value'), Input('preview-ready', 'data')],
+            [],
+        ),
+        (
+            'stepPreview',
+            [
+                Output('preview-frame', 'value'),
+                Output('preview-clock', 'disabled'),
+                Output('preview-play', 'children'),
+            ],
+            [Input('preview-play', 'n_clicks'), Input('preview-clock', 'n_intervals')],
+            [
+                State('preview-frame', 'value'),
+                State('preview-frame', 'max'),
+                State('preview-clock', 'disabled'),
+            ],
+        ),
+    ):
+        app.clientside_callback(
+            dash.ClientsideFunction(namespace='fixture_patch', function_name=function),
+            *outputs,
+            *inputs,
+            *states,
+            prevent_initial_call=True,
+        )
+
+
 def control_page_config(snapshot_source) -> dict:
     return {
         'bridgePort': getattr(snapshot_source, 'port', None),
@@ -1987,7 +2254,9 @@ def build_app(snapshot_source, fixture_store: FixtureStore | None = None) -> das
         eager_loading=True,
         hooks={'request_pre': REQUEST_PRE_JS, 'callback_resolved': CALLBACK_RESOLVED_JS},
     )
-    app.index_string = INDEX_TEMPLATE.replace('</style>', FIXTURE_CSS + '</style>').replace(
+    app.index_string = INDEX_TEMPLATE.replace(
+        '</style>', FIXTURE_CSS + PREVIEW_CSS + '</style>'
+    ).replace(
         '{%css%}',
         '{%css%}<script>window.autoluxControlConfig = '
         + json.dumps(control_page_config(snapshot_source))
@@ -2024,10 +2293,17 @@ def build_app(snapshot_source, fixture_store: FixtureStore | None = None) -> das
         'flex': 'none',
     }
     selected_tab_style = {**tab_style, 'color': '#e6edf3', 'borderBottomColor': '#73b6ff'}
-    config_panel = (
-        build_fixture_panel(app, fixture_store)
-        if fixture_store is not None
-        else html.Section(
+    if fixture_store is not None:
+        config_panel = build_fixture_panel(app, fixture_store)
+        workspace = next(
+            index
+            for index, child in enumerate(config_panel.children)
+            if getattr(child, 'id', None) == 'fixture-workspace'
+        )
+        config_panel.children.insert(workspace + 1, _build_preview_card())
+        _register_preview(app, fixture_store)
+    else:
+        config_panel = html.Section(
             [
                 html.Div(html.H2('Fixture setup'), className='section-heading'),
                 html.P('Fixture setup is unavailable in this session.', className='subtitle'),
@@ -2035,7 +2311,6 @@ def build_app(snapshot_source, fixture_store: FixtureStore | None = None) -> das
             id='config-panel',
             style={'display': 'none'},
         )
-    )
     app.layout = html.Div(
         [
             html.Header(
@@ -2242,7 +2517,6 @@ def build_app(snapshot_source, fixture_store: FixtureStore | None = None) -> das
         Output('gate', 'data'),
         Input('tick', 'n_intervals'),
         Input('dashboard-tab', 'value'),
-        State('control-state', 'data'),
     )
 
     @app.callback(

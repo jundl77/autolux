@@ -554,6 +554,35 @@ def test_restart_show_is_enabled_while_a_show_runs_and_confirms_on_a_second_clic
     assert seen['restart'] == [restarting, restarting, ['', False]]
 
 
+@pytest.mark.skipif(NODE is None, reason='needs node to run fixture_patch.js')
+def test_the_gate_asks_for_the_rig_until_the_config_page_holds_it():
+    from autolux.simulate.visualizer_app import GATE_JS
+
+    source = (Path(__file__).parents[1] / 'simulate/assets/fixture_patch.js').read_text('utf8')
+    script = (
+        'const listen = () => {};\n'
+        'globalThis.document = {addEventListener: listen, hidden: false};\n'
+        'globalThis.window = {addEventListener: listen, autoluxControl: {dispatch: async () => ({})},\n'
+        '    dash_clientside: {set_props: () => {}}};\n'
+        f'{source}\n'
+        f'const gate = {GATE_JS};\n'
+        'const patch = window.dash_clientside.fixture_patch;\n'
+        'const asked = () => gate(0, "config").rig ?? null;\n'
+        'const seen = [asked()];\n'
+        # The state that carried the rig was overtaken: the page saw one without it.
+        'patch.syncTest({rig_revision: "r1"}, "config", "r1");\n'
+        'seen.push(asked());\n'
+        'patch.syncTest({rig_revision: "r1", rig: {fixtures: []}}, "config", "r1");\n'
+        'seen.push(asked());\n'
+        'console.log(JSON.stringify(seen));\n'
+    )
+    result = subprocess.run(
+        [NODE, '-'], input=script, capture_output=True, text=True, encoding='utf8', check=True
+    )
+    # Until the page holds a rig the request names none, so every Config poll carries it.
+    assert json.loads(result.stdout) == [None, None, 'r1']
+
+
 CONTROL_JS = Path(__file__).parents[1] / 'simulate' / 'assets' / 'control.js'
 
 

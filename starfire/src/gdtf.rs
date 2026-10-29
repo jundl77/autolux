@@ -834,6 +834,40 @@ impl GdtfProfile {
             .any(|set| set.colour == Some(BLACK))
     }
 
+    /// The colour `state` comes out as: its mixed colour, filtered by the colour-wheel slot the
+    /// encode selects (read back from the encoded DMX), or that slot's colour alone on a head
+    /// without mixing. Without a coloured slot in play it is the state's colour.
+    pub fn emitted_colour(&self, state: &FixtureState) -> Result<Rgb> {
+        let mut output = vec![0; self.footprint];
+        self.encode(state, &mut output)?;
+        let mixes = self.channels.iter().any(|channel| channel.has_rgb);
+        let mut colour = state.colour;
+        for channel in &self.channels {
+            let value = channel.offsets.iter().fold(0, |value, &offset| {
+                (value << DMX_BYTE_BITS) | u32::from(output[offset])
+            });
+            let slot = channel
+                .functions
+                .iter()
+                .filter(|function| function.attribute.starts_with("Color"))
+                .flat_map(|function| &function.sets)
+                .find(|set| (set.first..=set.last).contains(&value))
+                .and_then(|set| set.colour);
+            if let Some(slot) = slot {
+                colour = if mixes {
+                    Rgb {
+                        red: colour.red * slot.red,
+                        green: colour.green * slot.green,
+                        blue: colour.blue * slot.blue,
+                    }
+                } else {
+                    slot
+                };
+            }
+        }
+        Ok(colour)
+    }
+
     /// A later layer's key replaces every earlier key that addresses one of its channels.
     pub fn overlay_attributes(
         &self,

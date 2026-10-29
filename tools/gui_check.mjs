@@ -1683,6 +1683,86 @@ const SUITES = {
         await check('plan nav', 'a pinch zooms in about threefold', Math.abs(fit[2] / pinched[2] - 3) < 0.3, {pinched, fit});
     },
 
+    // A tiny hand-written preview of the plan's own first two fixtures, hung 3 m up where the
+    // plan has them, loaded as a file.
+    cfg_preview: async () => {
+        await cfgFresh();
+        const [lit, strobing] = (await rigFiles()).fixtures;
+        const cell = (fixture) => ({id: fixture.fixture_uuid, fixture: fixture.fixture_uuid,
+            x: fixture.matrix[9] / 1000, y: fixture.matrix[10] / 1000, z: 3});
+        const frame = (t, cells, overlays) => ({t, beat: t * 2, intent: 'drop', bank: 'drop', autoloop: 'chase', c: cells,
+            ...(overlays ? {overlays} : {})});
+        const lines = [
+            {kind: 'starfire_preview', frame_rate_hz: 10, duration_seconds: 0.1, frames: 2, beats_per_bar: 4,
+                cells: [cell(lit), cell(strobing)], groups: {pair: [0, 1]}},
+            frame(0, [[1, 1, 0, 0, 0, [0.6, -0.8, 0]], [0, 1, 1, 1, 0]]),
+            frame(0.1, [[0.5, 1, 0, 0, 0, [0, 0, -1], 'Dots'], [1, 0, 0, 1, 8]], ['hit/flash']),
+        ];
+        const file = join(PROFILE, 'preview.jsonl');
+        writeFileSync(file, lines.map((line) => JSON.stringify(line)).join('\n') + '\n');
+        const {root} = await cdp('DOM.getDocument');
+        const {nodeId} = await cdp('DOM.querySelector', {nodeId: root.nodeId, selector: '#preview-upload input[type=file]'});
+        await cdp('DOM.setFileInputFiles', {nodeId, files: [file]});
+        const markOfUuid = (fixture) => `[...document.querySelectorAll('#mvr-plan svg.plan .mvr-object')].find((g) =>
+            g.querySelector('title')?.textContent === ${JSON.stringify(fixture.name)})`;
+        const loaded = await waitFor(`!!document.querySelector('#mvr-plan svg.plan .plan-beam')`, 8000);
+        await check('preview', 'a loaded file draws a beam on the plan', loaded, {status: await text('#preview-status')});
+        const look = (fixture) => ev(`(() => { const g = ${markOfUuid(fixture)}; const disc = g?.querySelector('circle.preview-cell');
+            return disc && {fill: disc.getAttribute('fill'), outlined: disc.style.getPropertyValue('--group') !== '',
+                title: disc.querySelector('title').textContent, beam: g.querySelector('.plan-beam')?.getAttribute('stroke') ?? null,
+                dashed: g.querySelector('.plan-beam')?.hasAttribute('stroke-dasharray') ?? null, strobe: !!g.querySelector('.plan-strobe')}; })()`);
+        const first = await look(lit);
+        await check('preview', 'the lit cell is red, outlined in its group colour, and throws a red beam',
+            sub(first, {fill: 'rgb(255,0,0)', outlined: true, title: `${lit.name} · 100%`, beam: 'rgb(255,0,0)', dashed: false, strobe: false}), {first});
+        const dark = await look(strobing);
+        await check('preview', 'the dark cell is black and says 0% in its title', sub(dark, {fill: 'rgb(0,0,0)', title: `${strobing.name} · 0%`, beam: null}), {dark});
+        await check('preview', 'the yaw arrows hide while a recording is shown',
+            (await ev(`document.querySelectorAll('#mvr-plan svg.plan .mvr-object line:not(.plan-beam)').length`)) === 0);
+        await check('preview', 'a front elevation stands beside the plan', await ev(`document.querySelectorAll('#mvr-plan svg.elevation circle.preview-cell').length === 2`));
+        await check('preview', 'the label names time, bar, section and base loop', (await text('#preview-label')) === '0:00.0 · bar 1.1 · drop · drop/chase', {label: await text('#preview-label')});
+        const rows = await ev(`[...document.querySelectorAll('#preview-overview > div')].map((d) => d.textContent)`);
+        await check('preview', 'the strip shows banks, sections, the group band, white and strobe rows',
+            same(rows, ['', '▼ drop', 'overlays', 'sections', 'pair', 'white', 'strobe 0.1 s'])
+            && !!(await ev(`!!document.querySelector('#preview-overview svg.band .preview-headroom')`)), {rows});
+        const marker = await ev(`(() => { const mark = document.querySelector('#preview-overview rect.preview-overlay');
+            return mark && {title: mark.querySelector('title').textContent, x: Number(mark.getAttribute('x'))}; })()`);
+        await check('preview', 'the strip marks the overlay where it sounds', sub(marker, {title: 'hit/flash', x: 1}), {marker});
+        await shot('config_preview', '.mvr-card');
+        await shot('config_preview_strip', '#preview-card');
+
+        await ev(`window.dash_clientside.set_props('preview-frame', {value: 1})`);
+        const second = await waitFor(`(() => { const g = ${markOfUuid(strobing)}; return !!g?.querySelector('.plan-strobe'); })()`, 4000);
+        await check('preview', 'scrubbing to the next frame rings the strobing cell and names its rate', second
+            && (await look(strobing))?.title === `${strobing.name} · 100% · strobe 8 Hz`, {second: await look(strobing)});
+        await check('preview', 'the label adds the sounding overlay to the base loop',
+            (await text('#preview-label')) === '0:00.1 · bar 1.1 · drop · drop/chase + hit/flash', {label: await text('#preview-label')});
+        await check('preview', 'a gobo other than Open dashes the beam and is named', sub(await look(lit), {dashed: true, title: `${lit.name} · 50% · gobo Dots`}), {lit: await look(lit)});
+        // Thrown straight down from 3 m: a dot on the plan, a beam ending on the elevation's floor.
+        const down = await ev(`(() => {
+            const line = document.querySelector('#mvr-plan svg.elevation .plan-beam');
+            const box = line?.ownerSVGElement.viewBox.baseVal;
+            const [x2, y2] = [Number(line?.getAttribute('x2')), Number(line?.getAttribute('y2'))];
+            return line && {y1: Number(line.getAttribute('y1')), y2, inside: x2 >= box.x && x2 <= box.x + box.width && y2 >= box.y && y2 <= box.y + box.height}; })()`);
+        await check('preview', 'a beam thrown straight down stops on the floor, inside the elevation', sub(down, {y1: -3000, y2: 0, inside: true}), {down});
+
+        // The strip seeks where it is clicked; arrows then step by beat from the focused strip.
+        await click('#preview-overview svg.band', {fx: 0.05});
+        await check('preview', 'a click near the start of the strip seeks to the first frame',
+            await waitFor(`document.getElementById('preview-label').textContent.startsWith('0:00.0')`, 3000), {label: await text('#preview-label')});
+        await key(null, 'ArrowRight');
+        await check('preview', '→ steps to the next beat (here the last frame)',
+            await waitFor(`document.getElementById('preview-label').textContent.startsWith('0:00.1')`, 3000), {label: await text('#preview-label')});
+        await key(null, 'ArrowLeft');
+        await check('preview', '← steps back to the start of the beat',
+            await waitFor(`document.getElementById('preview-label').textContent.startsWith('0:00.0')`, 3000), {label: await text('#preview-label')});
+
+        await click('#preview-play');
+        const played = await waitFor(`document.getElementById('preview-label').textContent.startsWith('0:00.1')
+            && document.getElementById('preview-play').textContent === 'Play'`, 4000);
+        await check('preview', 'Play runs to the last frame and stops there', played, {label: await text('#preview-label'), button: await text('#preview-play')});
+        await check('preview', 'loading, scrubbing, seeking and playing send no show commands', (await since()).length === 0, {seen: await since()});
+    },
+
     narrow: async () => {
         await fresh({width: 390});
         const views = [
