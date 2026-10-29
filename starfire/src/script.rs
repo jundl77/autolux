@@ -594,6 +594,17 @@ impl LuaAutoloop {
                 Ok(aim.unzip())
             })?,
         )?;
+        let reaching = Rc::clone(&shared);
+        api.set(
+            "pan_reach",
+            lua.create_function(move |_, cell: Value| {
+                // A cell without a pan range turns nowhere: nil, nil, as sf.aim.
+                let reach = cell_fact(&reaching, &cell, |id| {
+                    reaching.profile(id).map(|_| reaching.pan_reach(id))
+                })?;
+                Ok(reach.unzip())
+            })?,
+        )?;
         let focusing = Rc::clone(&shared);
         api.set(
             "focus",

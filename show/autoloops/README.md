@@ -287,7 +287,14 @@ sf.phaser(target, ctx, spec) -> effects
 --   phase = -1..1 cycles spread across the selection; positive runs left to right,
 --   wings = mirror partners share a rank and move outward (default true; false for tilt_wave),
 --   centre_pan, centre_tilt = degrees added to every member,
---   at = {x, y, z} every beam rests on, or direction = {dx, dy, dz} (default each focus) }
+--   at = {x, y, z} every beam rests on, or direction = {dx, dy, dz} (default each focus),
+--   spin = sf.spin spec: one member's look turns a full circle and back (below) }
+sf.pan_reach(cell) -> clockwise, anticlockwise -- degrees of heading the pan can turn from the
+-- focus aim (clockwise seen from above) before an end stop; nil, nil without a pan range
+sf.spin(target, ctx, spec) -> cell, degrees    -- nil between spins
+-- spec = { measure = 4, 8 or 16 beats, every = period in beats (default 64: 16 bars),
+--   at = beats into each period it starts (default 0) }. One member whose pan reaches a full
+-- circle one way turns round and back, eased; sf.random picks it, and the way, per period.
 -- Cycles count from the section start; change measure only where the elapsed beats are a
 -- multiple of both measures (any bar line for measures up to 4).
 ```

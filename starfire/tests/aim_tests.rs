@@ -1,8 +1,10 @@
 mod support;
 
 use serde_json::{Value, json};
+use starfire::engine::Engine;
 use starfire::fixtures::FixtureRig;
-use starfire::model::{Effect, PropertyValues, RenderContext, Target};
+use starfire::model::{Command, Effect, PropertyValues, RenderContext, Target, Transition};
+use starfire::protocol::wire;
 use starfire::script::LuaAutoloop;
 
 const HEAD: &str = "scanner";
@@ -900,4 +902,154 @@ fn centre_offsets_shift_every_member_before_the_shape() {
     );
     let aims = render(&mut autoloop, &elapsed(1.0));
     assert_same_aims(&aims[..4], &aims[4..], "centred tilt_wave");
+}
+
+const MOVERS_SWEEP: &str = r#"return { render = function(ctx)
+    local x = sf.osc.triangle(sf.section_beats(ctx), 16, -4, 4)
+    local effects = { sf.dimmer(sf.group("movers"), 1) }
+    for _, cell in ipairs(sf.members(sf.group("movers"))) do
+        local pan, tilt = sf.aim(cell, x, -1, 0)
+        effects[#effects + 1] = sf.pan_tilt(sf.fixture(cell), pan, tilt)
+    end
+    return sf.scene(effects)
+end }"#;
+
+fn physical_pan_degrees(frame: &starfire::engine::RenderedFrame, fixture: &wire::Fixture) -> f64 {
+    let start = fixture.address as usize - 1;
+    let dmx = &frame.dmx_frames_by_universe[&(fixture.universe as u16)][start..start + 2];
+    let (from, to) = (-220.0, 320.0);
+    from + (to - from) * f64::from(u16::from_be_bytes([dmx[0], dmx[1]])) / 65535.0
+}
+
+/// The generic stage hangs both movers facing downstage (MVR yaw 180), so a target walked along a
+/// line in front of them passes the heading where one pan solution runs out at an end stop. The
+/// head has the other solution within reach and must keep to it, not swing a full turn back.
+#[test]
+fn a_target_walked_across_the_stage_keeps_each_mover_on_a_continuous_pan() {
+    let definition = support::stage_definition();
+    let movers: Vec<_> = ["mover_left", "mover_right"]
+        .map(|name| definition.fixtures.iter().find(|f| f.name == name).unwrap())
+        .into();
+    for intensity in [0.5, 1.0] {
+        let catalog =
+            support::directory_catalog("test", &[("sweep", support::base_loop(MOVERS_SWEEP))])
+                .unwrap();
+        let mut engine = Engine::new(support::stage(), catalog, support::palettes()).unwrap();
+        engine.apply(0.0, &support::beat(0, None, 120.0)).unwrap();
+        engine
+            .apply(0.0, &Command::SetIntensity { level: intensity })
+            .unwrap();
+        engine
+            .apply(
+                0.0,
+                &support::select("test", "sweep", Transition::default()),
+            )
+            .unwrap();
+        let mut previous: Vec<Option<f64>> = vec![None; movers.len()];
+        let mut travel = vec![0.0; movers.len()];
+        // Two 16-beat out-and-back walks at 120 bpm, 40 frames a second.
+        for frame_index in 0..=640 {
+            let frame = engine.render_at(f64::from(frame_index) / 40.0).unwrap();
+            for (index, fixture) in movers.iter().enumerate() {
+                let pan = physical_pan_degrees(&frame, fixture);
+                if let Some(previous) = previous[index] {
+                    let step = (pan - previous).abs();
+                    assert!(
+                        step <= 90.0,
+                        "{} at intensity {intensity}, frame {frame_index}: pan {previous:.1} -> {pan:.1}",
+                        fixture.name
+                    );
+                    travel[index] += step;
+                }
+                previous[index] = Some(pan);
+            }
+        }
+        // Each walk turns a head through about 95 degrees out and back; a full turn on top of
+        // that is the long way round, however slowly the slew limit lets it happen.
+        for (fixture, travel) in movers.iter().zip(travel) {
+            assert!(
+                travel < 4.0 * 130.0,
+                "{} at intensity {intensity}: {travel:.0} degrees of pan travel",
+                fixture.name
+            );
+        }
+    }
+}
+
+const SPIN: &str = r#"return { render = function(ctx)
+    return sf.scene {
+        sf.dimmer(sf.group("movers"), 1),
+        sf.phaser(sf.group("movers"), ctx, {
+            shape = "fan", size = 10, spin = { measure = 8, every = 16, at = 4 },
+        }),
+    }
+end }"#;
+
+/// mover_left refocused upstage rests 111 degrees off pan centre, which leaves a full circle one
+/// way; mover_right still rests mid-range and has 320 and 220 degrees, so it never spins.
+#[test]
+fn sf_spin_turns_a_member_with_a_full_circle_of_pan_once_round_and_back() {
+    let mut definition = support::stage_definition();
+    let left = definition
+        .fixtures
+        .iter_mut()
+        .find(|f| f.name == "mover_left")
+        .unwrap();
+    left.focus = vec![-2000.0, 3000.0, 0.0];
+    let movers: Vec<wire::Fixture> = definition
+        .fixtures
+        .iter()
+        .filter(|f| f.name.starts_with("mover"))
+        .cloned()
+        .collect();
+    let rig = FixtureRig::from_wire(&definition).unwrap();
+    let reach = |name: &str| rig.pan_reach(rig.uuid_of_label(name).unwrap()).unwrap();
+    let (clockwise, anticlockwise) = reach("mover_left");
+    assert!((clockwise - 158.4).abs() < 0.5 && (anticlockwise - 381.6).abs() < 0.5);
+    let (clockwise, anticlockwise) = reach("mover_right");
+    assert!((clockwise - 320.0).abs() < 0.5 && (anticlockwise - 220.0).abs() < 0.5);
+
+    let catalog =
+        support::directory_catalog("test", &[("spin", support::base_loop(SPIN))]).unwrap();
+    let mut engine = Engine::new(rig, catalog, support::palettes()).unwrap();
+    engine.apply(0.0, &support::beat(0, None, 120.0)).unwrap();
+    engine
+        .apply(0.0, &support::select("test", "spin", Transition::default()))
+        .unwrap();
+    let mut pans = vec![Vec::new(); movers.len()];
+    // 16 beats at 120 bpm, 40 frames a second: rest, an 8-beat spin from beat 4, rest.
+    for frame_index in 0..=320 {
+        let frame = engine.render_at(f64::from(frame_index) / 40.0).unwrap();
+        for (index, fixture) in movers.iter().enumerate() {
+            pans[index].push(physical_pan_degrees(&frame, fixture));
+        }
+    }
+    for (fixture, pans) in movers.iter().zip(&pans) {
+        let steps: Vec<f64> = pans.windows(2).map(|pair| pair[1] - pair[0]).collect();
+        let big: Vec<_> = steps
+            .iter()
+            .enumerate()
+            .filter(|(_, s)| s.abs() > 20.0)
+            .map(|(i, s)| (i, *s, pans[i]))
+            .collect();
+        assert!(big.is_empty(), "{} jumps {big:?}", fixture.name);
+        let travel: f64 = steps.iter().map(|step| step.abs()).sum();
+        // The spin runs over frames 80..240 and is a full circle round at beat 8, frame 160.
+        let (rest, after) = (pans[40], pans[300]);
+        assert!((rest - after).abs() < 1.0, "{} rests", fixture.name);
+        if fixture.name == "mover_left" {
+            let lowest = pans.iter().copied().fold(f64::INFINITY, f64::min);
+            // At the top of the circle the look has faded: the focus aim (heading -18.4 degrees,
+            // yaw 180), a whole turn below where it rests.
+            let focus_pan = (-500.0_f64).atan2(1500.0).to_degrees() + 180.0;
+            assert!((pans[160] - (focus_pan - 360.0)).abs() < 0.5 && lowest == pans[160]);
+            let round = rest - pans[160];
+            assert!(
+                (travel - 2.0 * round).abs() < 30.0,
+                "mover_left travels {travel:.1}"
+            );
+        } else {
+            assert!(travel < 1.0, "{} travels {travel:.1}", fixture.name);
+        }
+    }
 }
