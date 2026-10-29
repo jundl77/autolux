@@ -237,7 +237,8 @@ message BeatFeatures {
 // The plan for one section, sent when Autolux decides it, ahead of the room. Starfire starts it
 // on the first frame at or past start_beat_index on its own clock; a cue whose start has already
 // passed starts on the next bar line, its rotation still counted from the true start. A cue drops
-// every pending cue starting at or after its start. At most 4 cues wait.
+// every pending cue starting at or after its start, so Autolux re-sends cues in start order. A
+// re-sent cue's rows that are already playing carry on. At most 4 cues wait.
 message CueSection {
   uint64 command_id = 1;
   uint64 start_beat_index = 2;  // An UpdateBeat.beat_index whose bar_phase is 0.
@@ -260,7 +261,8 @@ message CueSection {
   message Overlay {
     string autoloop_id = 1;
     sint32 priority = 2;  // Higher composes later; ties keep list order.
-    // From the section start; -64..0 is pre-roll, only when every_bars is 0.
+    // From the section start. Playing once: -64..1024, negative is pre-roll. Repeating: within the
+    // period, and length plus release fit it.
     double begin_beats = 3;
     double length_beats = 4;   // Positive.
     uint32 every_bars = 5;     // 0 plays once; otherwise repeats every this many bars while active.

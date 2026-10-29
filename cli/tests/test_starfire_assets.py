@@ -129,6 +129,17 @@ def test_full_autoloop_library_fits_one_login(login_assets):
     assert len(login.autoloops) == 41
 
 
+def test_overlay_intensity_composition_comes_from_the_loop_header(login_assets):
+    rig, autoloops = login_assets
+    (autoloops / 'hit').mkdir()
+    body = 'return {render=function(ctx) return {} end}\n'
+    (autoloops / 'hit/blinder.lua').write_text('-- 1-beat hit\n-- intensity: htp\n' + body)
+    (autoloops / 'hit/later.lua').write_text('-- x\nlocal y = 1\n-- intensity: htp\n' + body)
+    login = assets.load_login(rig, autoloops, '127.0.0.1:6454', run_id=1)
+    htp = {script.autoloop_id: script.intensity_htp for script in login.autoloops}
+    assert htp['hit/blinder'] and not htp['hit/later']
+
+
 def test_single_autoloop_over_its_cap_is_rejected(login_assets):
     rig, autoloops = login_assets
     _fill_bank(autoloops, 1, assets.MAX_SCRIPT_BYTES + 1)

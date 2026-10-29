@@ -13,9 +13,6 @@ if TYPE_CHECKING:
 
 RMS_LEVEL_FLOOR_DBFS = -48.0
 RMS_LEVEL_CEILING_DBFS = -12.0
-# A band's share of the mix sits well below full-scale RMS, so its range starts lower.
-BAND_LEVEL_FLOOR_DBFS = -60.0
-BAND_LEVEL_CEILING_DBFS = -12.0
 BEAT_FEATURES = ('onset', 'bass', 'mid', 'high')
 WHOLE_RIG = 'all'
 
@@ -32,19 +29,6 @@ def rms_to_normalized_level(rms: float) -> float:
         max(
             0.0,
             (dbfs - RMS_LEVEL_FLOOR_DBFS) / (RMS_LEVEL_CEILING_DBFS - RMS_LEVEL_FLOOR_DBFS),
-        ),
-    )
-
-
-def band_to_normalized_level(dbfs: float) -> float:
-    """Map a band's energy in dBFS linearly onto 0..1, as the RMS level is mapped."""
-    if math.isnan(dbfs):
-        raise ValueError('band level must be a number')
-    return min(
-        1.0,
-        max(
-            0.0,
-            (dbfs - BAND_LEVEL_FLOOR_DBFS) / (BAND_LEVEL_CEILING_DBFS - BAND_LEVEL_FLOOR_DBFS),
         ),
     )
 

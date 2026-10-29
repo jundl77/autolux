@@ -2,15 +2,17 @@
 
 from __future__ import annotations
 
-import math
 from dataclasses import dataclass
 
 from autolux.lib.engine.effect_definitions import LightIntent
+from autolux.lib.engine.section_decoder import BEATS_PER_BAR
 
-# Starfire refuses anything larger; at these bounds a CueSection stays under the 4 KiB cap.
+# Starfire's row checks, mirrored so a bad plan is refused before it reaches the stage; at these
+# bounds a CueSection stays under the 4 KiB cap.
 MAX_ROTATION = 8
 MAX_OVERLAYS = 8
 MAX_PREROLL_BEATS = 64.0
+MAX_OVERLAY_BEATS = 1024.0
 MAX_IDENTIFIER_BYTES = 128
 
 
@@ -81,14 +83,21 @@ class Cue:
         if any(look.bars < 1 for look in self.rotation):
             raise ValueError('a rotation entry lasts at least one bar')
         for overlay in self.overlays:
-            if not (math.isfinite(overlay.length_beats) and overlay.length_beats > 0):
+            if not 0 < overlay.length_beats <= MAX_OVERLAY_BEATS:
                 raise ValueError('an overlay lasts a positive number of beats')
+            for beats in (overlay.attack_beats, overlay.release_beats):
+                if not 0 <= beats <= MAX_OVERLAY_BEATS:
+                    raise ValueError('overlay attack and release are within 0..1024 beats')
             if overlay.every_bars < 0:
                 raise ValueError('an overlay repeats every nonnegative number of bars')
-            if overlay.every_bars == 0 and not -MAX_PREROLL_BEATS <= overlay.begin_beats <= 0:
-                raise ValueError('a one-shot overlay begins in the pre-roll or on the start')
-            if overlay.every_bars > 0 and overlay.begin_beats < 0:
+            period = overlay.every_bars * BEATS_PER_BAR
+            if overlay.every_bars == 0:
+                if not -MAX_PREROLL_BEATS <= overlay.begin_beats <= MAX_OVERLAY_BEATS:
+                    raise ValueError('a one-shot overlay begins within -64..1024 beats')
+            elif not 0 <= overlay.begin_beats < period:
                 raise ValueError('a repeating overlay begins inside its period')
+            elif overlay.length_beats + overlay.release_beats > period:
+                raise ValueError("a repeating overlay's length and release fit its period")
         if self.drop_strength is not None and (
             self.intent is not LightIntent.DROP or not 0.0 <= self.drop_strength <= 1.0
         ):

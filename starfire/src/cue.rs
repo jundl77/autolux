@@ -17,6 +17,11 @@ pub const MAX_PENDING_CUES: usize = 4;
 pub const MAX_ACTIVE_OVERLAYS: usize = 8;
 pub const MAX_PREROLL_BEATS: f64 = 64.0;
 pub const MAX_OVERLAY_ERROR_BYTES: usize = 256;
+/// A cue resolving this soon after its start (a frame or two of command latency) is on time,
+/// not a bar late.
+const ON_TIME_GRACE_BEATS: f64 = 0.125;
+/// The overlay bank whose pre-roll row is the blackout before the section; a finale aims at it.
+const DIP_BANK: &str = "dip";
 
 /// What the cue timeline reads from the musical clock at one instant.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -53,6 +58,7 @@ pub struct SectionContext {
     pub section_elapsed_beats: Option<f64>,
     pub next_intent: Option<SectionIntent>,
     pub beats_until_next: Option<f64>,
+    pub beats_until_dip: Option<f64>,
     pub drop_strength: Option<f64>,
     pub next_drop_strength: Option<f64>,
     pub seed: u32,
@@ -67,6 +73,7 @@ pub struct BaseStep {
     pub autoloop: String,
     pub transition: Transition,
     pub begin_beat: f64,
+    pub seed: u32,
     /// Set on the frame a cue activates: its palette, crossfaded over `transition`.
     pub palette: Option<String>,
 }
@@ -99,7 +106,10 @@ pub struct OverlayInstance {
     /// Start order across all cues; ties of priority compose in this order.
     pub order: u64,
     pub state: InstanceState,
+    /// The owning cue's, for sf.random.
+    pub seed: u32,
     owner: u64,
+    row: usize,
     /// The beat index `overlay.begin_beats` counts from.
     anchor_index: i128,
 }
@@ -115,8 +125,23 @@ impl OverlayInstance {
         }
     }
 
+    /// The nominal end as a grid beat; `None` before any beat.
+    pub fn nominal_end(&self, now: &CueSample) -> Option<f64> {
+        Some(self.nominal_begin(now)? + self.overlay.length_beats)
+    }
+
     fn nominal_begin(&self, now: &CueSample) -> Option<f64> {
         Some(now.grid_of(self.anchor_index)? + self.overlay.begin_beats)
+    }
+
+    /// The same row of a re-sent cue: it carries on instead of restarting.
+    fn continues(&self, row: &OverlayCue, anchor_index: i128) -> bool {
+        let own = &self.overlay;
+        self.anchor_index == anchor_index
+            && (own.bank.as_str(), own.autoloop.as_str(), own.every_bars)
+                == (row.bank.as_str(), row.autoloop.as_str(), row.every_bars)
+            && own.begin_beats == row.begin_beats
+            && own.length_beats == row.length_beats
     }
 
     fn release(&mut self, at: f64) {
@@ -128,34 +153,37 @@ impl OverlayInstance {
         }
     }
 
-    /// Advances the state; false once done.
-    fn advance(&mut self, now: &CueSample, live: &mut usize, refused: &mut Option<String>) -> bool {
-        let at = now.elapsed_musical_beats;
-        if self.state == InstanceState::Pending {
-            let Some(begin) = self.nominal_begin(now) else {
-                return true;
-            };
-            let end = begin + self.overlay.length_beats;
-            if now.beat_position >= end {
-                return false;
-            }
-            if now.beat_position < begin {
-                return true;
-            }
-            if *live >= MAX_ACTIVE_OVERLAYS {
-                *refused = Some(format!(
-                    "overlay {}/{} not started: {MAX_ACTIVE_OVERLAYS} overlays already play",
-                    self.overlay.bank, self.overlay.autoloop
-                ));
-                return false;
-            }
-            *live += 1;
-            self.state = InstanceState::Running(Span {
-                started: at,
-                late_beats: now.beat_position - begin,
-                ends: at + (end - now.beat_position),
-            });
+    /// Starts a due instance (false once it can never play); `live` counts the cap.
+    fn start(&mut self, now: &CueSample, live: &mut usize, refused: &mut Option<String>) -> bool {
+        let Some(begin) = self.nominal_begin(now) else {
+            return true;
+        };
+        let end = begin + self.overlay.length_beats;
+        if now.beat_position >= end {
+            return false;
         }
+        if now.beat_position < begin {
+            return true;
+        }
+        if *live >= MAX_ACTIVE_OVERLAYS {
+            *refused = Some(format!(
+                "overlay {}/{} not started: {MAX_ACTIVE_OVERLAYS} overlays already play",
+                self.overlay.bank, self.overlay.autoloop
+            ));
+            return false;
+        }
+        *live += 1;
+        let at = now.elapsed_musical_beats;
+        self.state = InstanceState::Running(Span {
+            started: at,
+            late_beats: now.beat_position - begin,
+            ends: at + (end - now.beat_position),
+        });
+        true
+    }
+
+    /// Ends and releases a started instance; false once done.
+    fn finish(&mut self, at: f64) -> bool {
         if let InstanceState::Running(span) = self.state
             && at >= span.ends
         {
@@ -185,7 +213,7 @@ struct ActiveCue {
     id: u64,
     /// The rotation step playing, counted over cycles; only increases.
     step: Option<u64>,
-    /// Per overlay row: the next repetition a recurring row may start.
+    /// Per overlay row: the next repetition a recurring row may start (`u64::MAX` once stopped).
     next_repetition: Vec<u64>,
 }
 
@@ -221,9 +249,6 @@ impl CueTimeline {
             .collect();
         self.pending
             .retain(|pending| pending.cue.start_beat_index < start);
-        for id in dropped {
-            self.release_owner(id, now.elapsed_musical_beats);
-        }
         self.next_id += 1;
         let mut pending = PendingCue {
             cue,
@@ -231,6 +256,10 @@ impl CueTimeline {
             activates_at: None,
         };
         self.resolve(&mut pending, &now);
+        for id in dropped {
+            self.hand_over(id, pending.id, None, &now);
+            self.release_owner(id, now.elapsed_musical_beats);
+        }
         self.pending.push(pending);
         Ok(())
     }
@@ -266,53 +295,19 @@ impl CueTimeline {
             self.resolve(cue, &now);
         }
         self.pending = pending;
-        let mut activation = None;
-        // Several cues may pass in one frame (after a resume): the latest wins, the rest drop.
-        let passed: Vec<usize> = (0..self.pending.len())
-            .filter(|&index| {
-                self.pending[index]
-                    .activates_at
-                    .and_then(|at| now.grid_of(at))
-                    .is_some_and(|grid| now.beat_position >= grid)
-            })
-            .collect();
-        if let Some(&latest) = passed.iter().max_by_key(|&&index| {
-            let pending = &self.pending[index];
-            (pending.activates_at, pending.id)
-        }) {
-            let winner = self.pending[latest].id;
-            let mut losers = Vec::new();
-            let mut chosen = None;
-            for index in passed.into_iter().rev() {
-                let cue = self.pending.remove(index);
-                if cue.id == winner {
-                    chosen = Some(cue);
-                } else {
-                    losers.push(cue.id);
-                }
-            }
-            for id in losers {
-                self.release_owner(id, now.elapsed_musical_beats);
-            }
-            activation = chosen;
-        }
-        if let Some(cue) = activation {
-            if let Some(previous) = self.active.take() {
-                self.release_owner(previous.id, now.elapsed_musical_beats);
-            }
-            self.overlay_error = None;
-            self.active = Some(ActiveCue {
-                next_repetition: vec![0; cue.cue.overlays.len()],
-                cue: cue.cue,
-                id: cue.id,
-                step: None,
-            });
-        }
+        self.activate_due(&now);
         self.schedule_recurring(&now);
+        // Finished instances leave before new ones start, so a boundary frame keeps its slot.
+        let at = now.elapsed_musical_beats;
+        self.instances
+            .retain_mut(|instance| instance.state == InstanceState::Pending || instance.finish(at));
         let mut live = self.active_overlay_count();
         let mut refused = None;
-        self.instances
-            .retain_mut(|instance| instance.advance(&now, &mut live, &mut refused));
+        self.instances.retain_mut(|instance| {
+            instance.state != InstanceState::Pending
+                || (instance.start(&now, &mut live, &mut refused)
+                    && (instance.state == InstanceState::Pending || instance.finish(at)))
+        });
         if let Some(reason) = refused {
             self.record_overlay_error(reason);
         }
@@ -330,18 +325,32 @@ impl CueTimeline {
             context.seed = active.cue.seed;
         }
         if let Some((cue, grid)) = self.next_cue(now) {
+            let until = (grid - now.beat_position).max(0.0);
             context.next_intent = Some(cue.intent);
-            context.beats_until_next = Some((grid - now.beat_position).max(0.0));
+            context.beats_until_next = Some(until);
             context.next_drop_strength = cue.drop_strength;
+            context.beats_until_dip = cue
+                .overlays
+                .iter()
+                .filter(|row| row.bank == DIP_BANK && row.begin_beats < 0.0)
+                .map(|row| row.begin_beats)
+                .reduce(f64::min)
+                .map(|begin| (until + begin).max(0.0));
         }
         context
     }
 
-    /// The earliest resolved pending cue and the grid beat it activates at.
+    /// The earliest resolved pending cue and the grid beat it activates at. A re-sent cue for
+    /// the active section is no next section.
     pub fn next_cue(&self, now: &CueSample) -> Option<(&SectionCue, f64)> {
+        let active_start = self
+            .active
+            .as_ref()
+            .map(|active| active.cue.start_beat_index);
         let (at, pending) = self
             .pending
             .iter()
+            .filter(|pending| Some(pending.cue.start_beat_index) != active_start)
             .filter_map(|pending| Some((pending.activates_at?, pending)))
             .min_by_key(|(at, pending)| (*at, pending.id))?;
         Some((&pending.cue, now.grid_of(at)?))
@@ -375,9 +384,22 @@ impl CueTimeline {
         self.overlay_error = Some(message);
     }
 
-    /// Stops one instance at once, its release skipped (after its script failed).
-    pub fn stop_instance(&mut self, order: u64) {
-        self.instances.retain(|instance| instance.order != order);
+    /// Stops a broken overlay at once, its release skipped, and its row for the rest of the
+    /// owning cue: a recurring row starts no further repetitions.
+    pub fn stop_row(&mut self, order: u64) {
+        let Some(index) = self
+            .instances
+            .iter()
+            .position(|instance| instance.order == order)
+        else {
+            return;
+        };
+        let stopped = self.instances.remove(index);
+        if let Some(active) = &mut self.active
+            && active.id == stopped.owner
+        {
+            active.next_repetition[stopped.row] = u64::MAX;
+        }
     }
 
     fn resolve(&mut self, pending: &mut PendingCue, now: &CueSample) {
@@ -392,7 +414,7 @@ impl CueTimeline {
             .active
             .as_ref()
             .is_some_and(|active| active.cue.start_beat_index == pending.cue.start_beat_index);
-        let activates_at = if start_grid >= now.beat_position {
+        let activates_at = if start_grid >= now.beat_position - ON_TIME_GRACE_BEATS {
             start
         } else {
             let bar = now.bar_beats();
@@ -400,19 +422,130 @@ impl CueTimeline {
             now.index_of_grid(bar_line as i128).expect("anchor present")
         };
         pending.activates_at = Some(activates_at);
-        // One-shot rows enter with the cue; a re-sent cue (same start as the active one) keeps
-        // the true start, so its entry rows, long past, never fire twice.
-        let entry = if replaces_active { start } else { activates_at };
-        for overlay in &pending.cue.overlays {
-            if overlay.every_bars == 0 {
-                self.next_order += 1;
-                self.instances.push(OverlayInstance {
-                    overlay: overlay.clone(),
-                    order: self.next_order,
-                    state: InstanceState::Pending,
-                    owner: pending.id,
-                    anchor_index: entry,
+        for (row, overlay) in pending.cue.overlays.iter().enumerate() {
+            if overlay.every_bars != 0 {
+                continue;
+            }
+            // A late cue enters on its bar line with its entry rows; its pre-roll, and every row
+            // of a re-sent cue (same start as the active one), keep the true start and so are
+            // skipped as past, never fired twice.
+            let entry = if replaces_active || overlay.begin_beats < 0.0 {
+                start
+            } else {
+                activates_at
+            };
+            self.next_order += 1;
+            self.instances.push(OverlayInstance {
+                overlay: overlay.clone(),
+                order: self.next_order,
+                state: InstanceState::Pending,
+                seed: pending.cue.seed,
+                owner: pending.id,
+                row,
+                anchor_index: entry,
+            });
+        }
+    }
+
+    fn activate_due(&mut self, now: &CueSample) {
+        // Several cues may pass in one frame (after a resume): the latest wins, the rest drop.
+        let passed: Vec<usize> = (0..self.pending.len())
+            .filter(|&index| {
+                self.pending[index]
+                    .activates_at
+                    .and_then(|at| now.grid_of(at))
+                    .is_some_and(|grid| now.beat_position >= grid)
+            })
+            .collect();
+        let Some(&latest) = passed.iter().max_by_key(|&&index| {
+            let pending = &self.pending[index];
+            (pending.activates_at, pending.id)
+        }) else {
+            return;
+        };
+        let winner = self.pending[latest].id;
+        let mut chosen = None;
+        let mut losers = Vec::new();
+        for index in passed.into_iter().rev() {
+            let cue = self.pending.remove(index);
+            if cue.id == winner {
+                chosen = Some(cue);
+            } else {
+                losers.push(cue.id);
+            }
+        }
+        let cue = chosen.expect("the latest passed cue");
+        for id in losers {
+            self.release_owner(id, now.elapsed_musical_beats);
+        }
+        let mut active = ActiveCue {
+            next_repetition: vec![0; cue.cue.overlays.len()],
+            cue: cue.cue,
+            id: cue.id,
+            step: None,
+        };
+        if let Some(previous) = self.active.take() {
+            self.hand_over(previous.id, active.id, Some(&mut active), now);
+            self.release_owner(previous.id, now.elapsed_musical_beats);
+        }
+        self.overlay_error = None;
+        self.active = Some(active);
+    }
+
+    /// Gives `to` the running instances of `from` that its own rows would play again, so a
+    /// re-sent cue's riser, accent or fill carries on instead of restarting.
+    fn hand_over(
+        &mut self,
+        from: u64,
+        to: u64,
+        mut active: Option<&mut ActiveCue>,
+        now: &CueSample,
+    ) {
+        let mut index = 0;
+        while index < self.instances.len() {
+            let instance = &self.instances[index];
+            index += 1;
+            if instance.owner != from || !matches!(instance.state, InstanceState::Running(_)) {
+                continue;
+            }
+            let index = index - 1;
+            // A one-shot row of `to` already waits as a pending instance; it yields.
+            let waiting = self.instances.iter().position(|candidate| {
+                candidate.owner == to
+                    && candidate.state == InstanceState::Pending
+                    && instance.continues(&candidate.overlay, candidate.anchor_index)
+            });
+            if let Some(waiting) = waiting {
+                let (row, seed) = (self.instances[waiting].row, self.instances[waiting].seed);
+                let carried = &mut self.instances[index];
+                (carried.owner, carried.row, carried.seed) = (to, row, seed);
+                self.instances.remove(waiting);
+                // Carried instances now belong to `to`, so a rescan skips them.
+                return self.hand_over(from, to, active, now);
+            }
+            // A recurring row of the newly active cue: that repetition carries on.
+            let Some(active) = active.as_deref_mut() else {
+                continue;
+            };
+            let start = i128::from(active.cue.start_beat_index);
+            let offset = instance.anchor_index - start;
+            let matched = active
+                .cue
+                .overlays
+                .iter()
+                .enumerate()
+                .find_map(|(row, overlay)| {
+                    let period = i128::from(overlay.every_bars) * i128::from(now.beats_per_bar);
+                    (period > 0
+                        && offset >= 0
+                        && offset % period == 0
+                        && instance.continues(overlay, instance.anchor_index))
+                    .then(|| (row, (offset / period) as u64))
                 });
+            if let Some((row, repetition)) = matched {
+                let carried = &mut self.instances[index];
+                (carried.owner, carried.row, carried.seed) = (to, row, active.cue.seed);
+                active.next_repetition[row] = active.next_repetition[row].max(repetition + 1);
             }
         }
     }
@@ -451,7 +584,9 @@ impl CueTimeline {
                 overlay: overlay.clone(),
                 order: self.next_order,
                 state: InstanceState::Pending,
+                seed: active.cue.seed,
                 owner: active.id,
+                row,
                 anchor_index: start + i128::from(due) * (period as i128),
             });
         }
@@ -490,6 +625,7 @@ impl CueTimeline {
             autoloop: entry.autoloop.clone(),
             transition: entry.transition.clone(),
             begin_beat: start_grid + entry_begin,
+            seed: active.cue.seed,
             palette: entering.then(|| active.cue.palette.clone()),
         })
     }
