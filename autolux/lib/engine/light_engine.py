@@ -783,7 +783,7 @@ class LightEngine(IMusicAnalyserHandler):
         planned.cue = self._plan_cue(planned)
         # While Static holds the look the plan waits; leaving Static sends it.
         if planned.cue is not None and not self._static_mode:
-            self.lighting_client.cue_section(planned.cue)
+            self._cue_out(planned.cue)
 
     def _withdraw_superseded_cues(self) -> None:
         """Starfire drops a pending cue only for a cue starting at or before it; a replacement
@@ -872,6 +872,12 @@ class LightEngine(IMusicAnalyserHandler):
             return [self._current_plan, *ahead]
         return ahead
 
+    def _cue_out(self, cue: Cue) -> None:
+        """Every cue Starfire is sent goes into the report once, as sent."""
+        self.lighting_client.cue_section(cue)
+        if self.event_buffer is not None:
+            self.event_buffer.add_cue(cue.command()['value'])
+
     def _sendable(self, planned: PlannedSection, cue: Cue) -> Cue:
         """A section the room is in goes out with its recurring rows only: Starfire would
         anchor its one-shot rows on the bar line it activates on and fire the entry again."""
@@ -886,7 +892,7 @@ class LightEngine(IMusicAnalyserHandler):
         for planned in self._planned_sections(current=current):
             cue = self.effect_controller.cue_for(planned)
             if cue is not None:
-                self.lighting_client.cue_section(self._sendable(planned, cue))
+                self._cue_out(self._sendable(planned, cue))
 
     def _revise_cues(self, *, palette: bool) -> None:
         """A level or palette change: each stored cue again with its start and seed."""
@@ -897,7 +903,7 @@ class LightEngine(IMusicAnalyserHandler):
                 continue
             planned.cue = cue
             if not self._static_mode:
-                self.lighting_client.cue_section(self._sendable(planned, cue))
+                self._cue_out(self._sendable(planned, cue))
 
     # ---- end W5 plan state ----
 
