@@ -279,13 +279,14 @@ local function rotate(v, axis, degrees)
         v[3] * c + k[3] * s + axis[3] * along }
 end
 
-function sf.aim_offset(cell, spread_degrees, elevation_degrees, beam)
+-- The beam sf.aim_offset aims along, or nil for a cell focused on itself.
+local function offset_beam(cell, spread_degrees, elevation_degrees, beam)
     assert(finite(spread_degrees) and finite(elevation_degrees), "aim offsets must be finite degrees")
-    local x, y, z = sf.position(cell)
     if beam == nil then
+        local x, y, z = sf.position(cell)
         local focus_x, focus_y, focus_z = sf.focus(cell)
         beam = { focus_x - x, focus_y - y, focus_z - z }
-        if norm(beam) == 0 then return sf.aim(cell, x, y, z) end
+        if norm(beam) == 0 then return nil end
     else
         assert(type(beam) == "table" and finite(beam[1]) and finite(beam[2]) and finite(beam[3])
             and norm(beam) > 0, "a rest beam must be a finite nonzero {dx, dy, dz}")
@@ -294,8 +295,17 @@ function sf.aim_offset(cell, spread_degrees, elevation_degrees, beam)
     local spread_axis = cross(elevation_axis, beam)
     local scale = (beam[2] < 0 and 1 or -1) / norm(spread_axis)
     spread_axis = { spread_axis[1] * scale, spread_axis[2] * scale, spread_axis[3] * scale }
-    beam = rotate(rotate(beam, elevation_axis, elevation_degrees), spread_axis, spread_degrees)
+    return rotate(rotate(beam, elevation_axis, elevation_degrees), spread_axis, spread_degrees)
+end
+
+local function aim_along(cell, beam)
+    local x, y, z = sf.position(cell)
+    if beam == nil then return sf.aim(cell, x, y, z) end
     return sf.aim(cell, x + beam[1], y + beam[2], z + beam[3])
+end
+
+function sf.aim_offset(cell, spread_degrees, elevation_degrees, beam)
+    return aim_along(cell, offset_beam(cell, spread_degrees, elevation_degrees, beam))
 end
 
 function sf.aim_direction(cell, dx, dy, dz)
@@ -323,6 +333,12 @@ local STATIC_SHAPES = { fan = true, cross = true }
 -- Powers of two divide a phrase, so every member is back at its start on each phrase line.
 local MEASURES = { [1] = true, [2] = true, [4] = true, [8] = true, [16] = true, [32] = true }
 
+local SPIN_MEASURES = { [4] = true, [8] = true, [16] = true }
+local FULL_CIRCLE_DEGREES = 360
+-- A spinning member's look fades out over the first quarter turn and back in over the last, so
+-- the circle runs round its focus aim, which sf.pan_reach measures from.
+local SPIN_LOOK_FADE_TURNS = 0.25
+
 function sf.phaser(target, ctx, spec)
     local shape = PHASER_SHAPES[spec.shape]
     assert(shape ~= nil, "unknown phaser shape")
@@ -346,6 +362,8 @@ function sf.phaser(target, ctx, spec)
         "phaser at must be finite {x, y, z} metres")
     local wings = spec.wings
     if wings == nil then wings = spec.shape ~= "tilt_wave" end
+    local spun, spin_degrees
+    if spec.spin ~= nil then spun, spin_degrees = sf.spin(target, ctx, spec.spin) end
 
     local aimable_members, aimable = {}, {}
     for _, cell in ipairs(sf.members(target)) do
@@ -391,11 +409,47 @@ function sf.phaser(target, ctx, spec)
             local x, y, z = sf.position(cell)
             beam = { at[1] - x, at[2] - y, at[3] - z }
         end
-        local pan, tilt = sf.aim_offset(cell, size * spread + centre_pan,
-            tilt_size * elevation + centre_tilt, beam)
+        local look = 1
+        if cell == spun then
+            look = 1 - math.min(1, math.abs(spin_degrees) / (SPIN_LOOK_FADE_TURNS * FULL_CIRCLE_DEGREES))
+        end
+        beam = offset_beam(cell, look * (size * spread + centre_pan),
+            look * (tilt_size * elevation + centre_tilt), beam)
+        if cell == spun and beam ~= nil then beam = rotate(beam, Z_AXIS, -spin_degrees) end
+        local pan, tilt = aim_along(cell, beam)
         effects[#effects + 1] = sf.pan_tilt(sf.fixture(cell), pan, tilt)
     end
     return effects
+end
+
+-- Spin: one member's beam turns a full circle about the vertical and unwinds, eased, over
+-- `measure` beats from `at` beats into every `every`-beat period of section time. Returns that
+-- member and its heading offset in degrees (clockwise seen from above), or nil between spins;
+-- a phaser with `spin = spec` turns that member's look by it. Only members whose pan reaches a
+-- full circle one way from the focus aim take part, so no head meets an end stop mid-turn;
+-- sf.random picks the member and, where both ways reach, the way, per period.
+function sf.spin(target, ctx, spec)
+    local measure, every, at = spec.measure, spec.every or 64, spec.at or 0
+    assert(SPIN_MEASURES[measure], "spin measure must be 4, 8 or 16 beats")
+    assert(finite(every) and finite(at) and at >= 0 and at + measure <= every,
+        "a spin must fit inside its period")
+    local elapsed = sf.section_beats(ctx)
+    local period = math.floor(elapsed / every)
+    local progress = (elapsed - period * every - at) / measure
+    if progress < 0 or progress >= 1 then return nil end
+    local able = {}
+    for _, cell in ipairs(sf.members(target)) do
+        local clockwise, anticlockwise = sf.pan_reach(cell)
+        if clockwise ~= nil and math.max(clockwise, anticlockwise) >= FULL_CIRCLE_DEGREES then
+            able[#able + 1] = { cell = cell, clockwise = clockwise >= FULL_CIRCLE_DEGREES,
+                anticlockwise = anticlockwise >= FULL_CIRCLE_DEGREES }
+        end
+    end
+    if #able == 0 then return nil end
+    local chosen = able[1 + math.floor(sf.random(ctx, period) * #able)]
+    local sense = chosen.clockwise and 1 or -1
+    if chosen.clockwise and chosen.anticlockwise and sf.random(ctx, period, 1) < 0.5 then sense = -1 end
+    return chosen.cell, sense * FULL_CIRCLE_DEGREES * (1 - math.cos(FULL_TURN * progress)) / 2
 end
 
 -- Show helpers
