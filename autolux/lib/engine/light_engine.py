@@ -308,6 +308,7 @@ class LightEngine(IMusicAnalyserHandler):
         context = self._selection_context(intent, self._entered_label, self._clock.monotonic())
         self.effect_controller.skip_autoloop(context)
         # The selection ended every cue; the operator's loop holds until the next section.
+        self._current_plan = None
         self._resend_cues(current=False)
 
     def set_master_level(self, level: float) -> None:

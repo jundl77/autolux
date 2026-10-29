@@ -357,16 +357,15 @@ class EffectController:
         )
 
     def skip_autoloop(self, context: SelectionContext) -> AutoloopChoice:
-        """The operator's next loop; its selection ends every cue, so the section's plan goes."""
+        """The operator's next loop; its selection ends every cue, so the section plays on
+        uncued."""
         playing = self.lighting_client.selected_autoloop
         if playing is None and self._entered is not None:
             playing = self._entered[1].bank, self._entered[1].autoloop
         choice = self._policy.choose(context, exclude=playing, intensity=self._settings().intensity)
         self.lighting_client.select_autoloop(choice.bank, choice.autoloop)
         self._policy.record(context, choice)
-        if self._entered_moment is not None:
-            self.drop_cue(self._entered_moment)
-            self._entered_moment = None
+        self._entered_moment = None
         self._entered = context.intent, choice
         self._announce(
             '[lighting] next autoloop |', context.intent, choice, self.lighting_client.palette

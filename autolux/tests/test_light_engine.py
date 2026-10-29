@@ -148,6 +148,7 @@ def engine(
     queue=True,
     events=False,
     playing=True,
+    **effects,
 ):
     clock = clock or VirtualClock()
     lighting = RecordingStarfireClient(clock=clock)
@@ -162,7 +163,7 @@ def engine(
         buffer.start()
     light = LightEngine(
         lighting,
-        EffectController(lighting, event_buffer=buffer),
+        EffectController(lighting, event_buffer=buffer, **effects),
         command_queue,
         event_buffer=buffer,
         playback_delay_sec=playback_delay_sec,
@@ -2235,3 +2236,39 @@ async def test_a_selection_or_leaving_standby_sends_the_planned_cues_again(stand
     *_, select, again = lighting.events
     assert select['command']['kind'] == 'select'
     assert again['command'] == light.effect_controller.cue_for(planned).command()
+
+
+async def test_a_skip_holds_the_operators_loop_and_keeps_the_later_cues():
+    from autolux.lib.engine.effect_definitions import (
+        DEFAULT_AUTOLOOP_META,
+        DEFAULT_AUTOLOOPS,
+        AutoloopMeta,
+    )
+
+    decoder = FakeDecoder()
+    drops = (*DEFAULT_AUTOLOOPS[LightIntent.DROP], ('drop', 'other'))
+    light, queue, clock, lighting = engine(
+        decoder=decoder,
+        autoloops={**DEFAULT_AUTOLOOPS, LightIntent.DROP: drops},
+        autoloop_meta={
+            **DEFAULT_AUTOLOOP_META,
+            ('drop', 'other'): AutoloopMeta(3, 'sweep', 'beam'),
+        },
+    )
+    planned = await planned_drop(light, decoder, clock)
+    clock.advance(14.5)
+    await queue.drain()
+    assert light.current_intent is LightIntent.DROP
+    decoder._script.append([BarDecision(0, 'breakdown', light.audio_sec)])
+    await light.on_beat(1, 128.0, False)
+    [later] = light._pending_intents
+    light.next_autoloop()
+    *_, select, again = lighting.events
+    assert select['command']['kind'] == 'select'
+    assert again['command'] == light.effect_controller.cue_for(later).command()
+    before = len(cue_events(lighting))
+    light.intensity_changed()
+    assert [e['command']['value']['intent'] for e in cue_events(lighting)[before:]] == [
+        'breakdown'
+    ], 'the skipped section is no longer cued'
+    assert light.effect_controller.cue_for(planned) is not None, 'its plan stays for the track'
