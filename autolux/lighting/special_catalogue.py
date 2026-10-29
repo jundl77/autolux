@@ -9,10 +9,8 @@ from autolux.lighting.mvr_schema import DEPTHS, ROLES, ZONES
 from autolux.lighting.palettes import SLOTS
 
 SPECIAL_DIRECTORY = Path(__file__).resolve().parents[2] / 'show' / 'specials'
-# The room's limits across all specials; every other file is one special.
 VENUE_FILE = 'venue.toml'
 NAME = re.compile(r'[a-z][a-z0-9_]*')
-# The one place the file's console words meet the wire fields.
 FILE_FIELDS = {
     ('name',): 'name',
     ('intents',): 'intents',
@@ -34,7 +32,6 @@ SECTIONS = {path[:depth] for path in FILE_FIELDS for depth in range(1, len(path)
 SPECIAL_KEYS = frozenset(
     {'name', 'intents', 'colour_slot', 'energy', 'speed', 'attack_beats', 'release_beats'}
 )
-# A special row plays on one named group or on every group of a role.
 TARGET_KEYS = ('group', 'role')
 OPTIONAL_KEYS = {'pulse_beats', 'pattern', 'cooldown_seconds', 'group', 'role', 'zone', 'depth'}
 
@@ -44,7 +41,6 @@ class SpecialError(ValueError):
 
 
 def file_fields(document: dict) -> dict:
-    """Flatten a special file into wire fields, naming an unknown key by its file path."""
     fields, unknown = {}, []
 
     def walk(table: dict, path: tuple) -> None:
@@ -145,7 +141,6 @@ def parse_special(document, stem: str) -> Special:
 
 
 def _special_values(data: dict, labels: dict | None = None) -> dict:
-    """Validate wire fields; labels name each field the way its source wrote it."""
     labels = labels or {}
     if data['colour_slot'] not in SLOTS:
         raise SpecialError(
@@ -181,7 +176,6 @@ def discover_specials(directory: Path = SPECIAL_DIRECTORY) -> tuple[Special, ...
 
 
 def read_venue(directory: Path = SPECIAL_DIRECTORY) -> Venue:
-    """The `[venue]` table of venue.toml; an absent file or key keeps the default."""
     path = Path(directory) / VENUE_FILE
     if not path.is_file():
         return Venue()

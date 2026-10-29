@@ -325,7 +325,6 @@ async def test_a_measured_track_sends_its_palette_once_and_the_next_look_keeps_i
     await controller.change_effect(
         LightIntent.ATMOSPHERIC, context=SelectionContext(LightIntent.ATMOSPHERIC, new_track=True)
     )
-    # Mono until the track's first drop.
     assert palette_kinds(lighting) == [('select', DEFAULT_PALETTE + MONO)]
     chosen = controller.choose_track_palette(WARM_BRIGHT_LAID_BACK)
     assert palette_kinds(lighting)[1:] == [('set_palette', chosen + MONO)]
@@ -404,7 +403,6 @@ async def enter(light, intent):
 
 
 async def test_a_drop_too_early_in_the_window_leaves_it_open_until_the_next_section():
-    # Joined mid-track: the drop 14 s in finds only a few measured beats in the window.
     light, lighting = await engine_showing_an_intro()
     measure_beats(light, MIN_MOOD_BEATS - 10)
     await enter(light, LightIntent.DROP)

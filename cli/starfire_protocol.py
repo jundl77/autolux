@@ -1,5 +1,3 @@
-"""Bounded renderer pipes and the adapter from recorded musical commands."""
-
 import math
 import struct
 
@@ -82,7 +80,6 @@ PARAMETERS = {
 
 
 def build_command(command: dict | Message) -> Message:
-    """Copy a generated command, or adapt the application's replay command shape."""
     if isinstance(command, Message):
         if type(command) not in COMMAND_MESSAGES.values():
             raise ValueError('Expected a Starfire client command')
@@ -283,7 +280,6 @@ def _special_fx(value):
 def login_groups(reply) -> list[dict]:
     groups = []
     for group in reply.groups:
-        # An absent area (the members' areas differ) reads as UNSPECIFIED, which has no place.
         zone, depth = AREA_PLACES.get(group.area, (None, None))
         groups.append(
             {

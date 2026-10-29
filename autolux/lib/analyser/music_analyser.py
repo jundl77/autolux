@@ -23,15 +23,10 @@ _RHYTHM_LOG_INTERVAL = datetime.timedelta(seconds=10)
 
 _ENERGY_WINDOW_BUFFERS = 26
 
-# Swept to reproduce the committed sound-start/stop instants on the golden fixtures.
 _SILENCE_RMS = 1.5e-4
 
-# A stopped player is not exact zeros on the MME capture path: it delivers 16-bit
-# samples (1 LSB = 3e-5) with conversion noise of a few LSB. 1e-4 (-80 dBFS)
-# clears that yet sits below any audible quiet passage, unlike _SILENCE_RMS,
-# which judges a song's end from mean energy.
+# MME delivers a stopped player as a few 16-bit LSB (3e-5 each) of noise, not exact zeros.
 _DIGITAL_SILENCE_PEAK = 1e-4
-# A DJ's track change can leave a short run of exact zeros; shorter runs are dropouts.
 TRACK_GAP_MIN_SECONDS = 0.05
 TRACK_GAP_IGNORED_AFTER_START_SECONDS = 2.0
 
@@ -44,21 +39,15 @@ _SPECTRUM_HZ = np.fft.rfftfreq(FRAME_SIZE, 1.0 / SAMPLE_RATE)
 _BASS_BINS = _SPECTRUM_HZ < BASS_CEILING_HZ
 _TREBLE_BINS = _SPECTRUM_HZ >= TREBLE_FLOOR_HZ
 _SILENT_POWER = 1e-12
-# Starfire's BeatFeatures bands; the onset reads the kick band only, so pads never read as kicks.
 BEAT_BANDS_HZ = {'bass': (20.0, 150.0), 'mid': (150.0, 2500.0), 'high': (2500.0, 16000.0)}
 _BEAT_BAND_BINS = {
     name: (_SPECTRUM_HZ >= low) & (_SPECTRUM_HZ < high)
     for name, (low, high) in BEAT_BANDS_HZ.items()
 }
 _KICK_BINS = _SPECTRUM_HZ <= 150.0
-# A beat is reported up to about 50 ms after its transient, so the flux peak is looked for
-# across the last 100 ms of buffers.
 ONSET_WINDOW_SECONDS = 0.1
-# Levels are relative to the track's own loudest beats (a peak that halves over 256 beats), so
-# capture gain and mastering do not matter and a drop keeps its dynamics after a breakdown.
 REFERENCE_HALF_LIFE_BEATS = 256
 _REFERENCE_DECAY = 0.5 ** (1.0 / REFERENCE_HALF_LIFE_BEATS)
-# A band at its track peak is 1, this far below it 0.
 BAND_RANGE_DB = 36.0
 
 
@@ -70,8 +59,6 @@ class SpectralBalance:
 
 @dataclass(frozen=True)
 class BeatFeatures:
-    """Starfire's per-beat music signals, each 0..1."""
-
     onset: float
     bass: float
     mid: float
@@ -79,7 +66,6 @@ class BeatFeatures:
 
 
 def kick_flux(previous: np.ndarray, magnitude: np.ndarray) -> float:
-    """Half-wave rectified: only energy arriving counts, so decays never read as onsets."""
     return float(np.maximum(magnitude[_KICK_BINS] - previous[_KICK_BINS], 0.0).sum())
 
 
@@ -155,9 +141,7 @@ class MusicAnalyser:
         self._reset_state()
 
     def _roll_song_clock(self) -> None:
-        # The horizon is about memory, not music: re-locking madmom mid-audio
-        # gains or loses beats, and every one rotates the bar grid's four-count
-        # permanently. Its online state is bounded, so the beat stream survives.
+        # madmom stays locked: re-locking mid-audio would rotate the bar grid's four-count.
         playing = self.is_playing
         self._reset_song_clock()
         self.is_playing = playing
@@ -198,7 +182,6 @@ class MusicAnalyser:
         return self._fold_bpm(self.get_detector_bpm())
 
     def get_detector_bpm(self) -> float:
-        """Tempo in the same beat units as the emitted detector events."""
         if not self.is_playing or len(self._beat_stream_times) < 3:
             return 0.0
         interval = float(np.median(np.diff(np.array(self._beat_stream_times))))
@@ -229,7 +212,6 @@ class MusicAnalyser:
         return spectral_balance(self._spectrum_frame)
 
     def get_beat_features(self) -> BeatFeatures | None:
-        """The newest beat's onset and band levels; None before any beat since sound start."""
         return self._beat_features
 
     def _track_spectrum(self) -> None:
@@ -241,7 +223,6 @@ class MusicAnalyser:
         self._band_buffers += 1
 
     def _measure_beat(self) -> None:
-        """Closes the beat: its onset peak and band averages against the track's references."""
         peak = max(self._flux_window, default=0.0)
         self._onset_reference = decayed_reference(self._onset_reference, peak)
         levels = {}
@@ -264,7 +245,6 @@ class MusicAnalyser:
         now = self._clock.now()
         if not self._audio_started:
             self._track_start_sample = self._sample_clock - len(audio_signal)
-            # The first buffer covers audio captured before this callback.
             started = now - datetime.timedelta(seconds=self.buffer_size / self.sample_rate)
             self.song_start_time = self.silence_period_start = started
             self.last_beat_detected = self.last_note_detected = started

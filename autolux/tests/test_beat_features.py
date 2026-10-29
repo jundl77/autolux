@@ -33,7 +33,6 @@ def test_a_bass_tone_reads_as_bass_and_only_kick_band_arrivals_are_onsets():
 
 
 def test_levels_are_relative_to_the_track_and_bounded():
-    # The same mix at any capture gain reads the same.
     for gain in (1e-4, 1.0, 1e4):
         assert relative_level(0.5 * gain, gain) == pytest.approx(
             1 + 10 * np.log10(0.5) / BAND_RANGE_DB
@@ -71,7 +70,6 @@ def test_the_largest_cue_fits_the_realtime_cap_and_round_trips():
         seed=2**32 - 1,
     )
     command = cue.command()
-    # The proto allows a 128-byte palette name; size the cue at that.
     command['value']['palette'] = 'p' * 128
     message = build_command(command)
     assert message.ByteSize() <= MAX_MESSAGE_BYTES

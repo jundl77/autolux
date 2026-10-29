@@ -176,7 +176,6 @@ def test_invalid_autoloop_name_is_rejected(login_assets):
 
 
 @pytest.mark.parametrize(
-    # The repo rig stays here: Save and export-rig must keep its committed rig.pb in step.
     'rig',
     [
         DEFAULT_RIG,
@@ -197,8 +196,6 @@ def test_committed_native_rig_is_the_exported_login_rig(rig):
 
 
 def test_stage_areas_cut_the_rigs_bounding_box_into_thirds():
-    # Box X 1000..4000, Y -500..2500: cuts at X 2000 / 3000 and Y 500 / 1500; the origin is
-    # outside the rig and plays no part.
     areas = assets.stage_areas([(1000, -500), (2500, 1000), (4000, 2500), (1100, 2400)])
     assert [rig_wire.StageArea.Name(area) for area in areas] == [
         'STAGE_AREA_DOWN_LEFT',
@@ -230,17 +227,15 @@ def test_an_axis_without_extent_puts_every_fixture_in_its_centre():
 
 
 def test_the_room_rig_fixtures_lie_in_their_stage_areas():
-    # The frozen room: X -900..900 cuts at -300 / 300 (the spots and mid washes sit on them),
-    # Y -2000..0 at -1333 / -667.
     expected = {
-        'spot_left': 'STAGE_AREA_UP_CENTRE',  # (-300, 0)
-        'spot_right': 'STAGE_AREA_UP_CENTRE',  # (300, 0)
-        'wash_left': 'STAGE_AREA_CENTRE_LEFT',  # (-900, -1000)
-        'wash_mid_left': 'STAGE_AREA_CENTRE',  # (-300, -1000)
-        'wash_mid_right': 'STAGE_AREA_CENTRE',  # (300, -1000)
-        'wash_right': 'STAGE_AREA_CENTRE_RIGHT',  # (900, -1000)
-        'zq06017': 'STAGE_AREA_DOWN_CENTRE',  # (0, -2000), the strip bar
-        'kinta': 'STAGE_AREA_UP_CENTRE',  # (0, -500)
+        'spot_left': 'STAGE_AREA_UP_CENTRE',
+        'spot_right': 'STAGE_AREA_UP_CENTRE',
+        'wash_left': 'STAGE_AREA_CENTRE_LEFT',
+        'wash_mid_left': 'STAGE_AREA_CENTRE',
+        'wash_mid_right': 'STAGE_AREA_CENTRE',
+        'wash_right': 'STAGE_AREA_CENTRE_RIGHT',
+        'zq06017': 'STAGE_AREA_DOWN_CENTRE',
+        'kinta': 'STAGE_AREA_UP_CENTRE',
     }
     rig = assets.rig_definition(ROOM)
     assert {
@@ -252,7 +247,6 @@ def test_login_carries_the_palette_table_and_palette_commands_round_trip():
     login = assets.load_login(ROOM, DEFAULT_AUTOLOOPS, '127.0.0.1:6454', run_id=1)
     assert [palette.name for palette in login.palettes][:2] == ['techno', 'techno_breakdown']
     techno = login.palettes[0]
-    # show/palettes/techno.toml: secondary = "#ff8c1a".
     assert (techno.secondary.red, techno.secondary.green, techno.secondary.blue) == (
         1.0,
         140 / 255,
@@ -334,7 +328,6 @@ def test_the_room_rig_names_every_fixture_and_cell_and_a_highlight_encodes_for_s
     )
     moved = (sweep.pan_sweep, sweep.HasField('pan'), sweep.HasField('tilt'), aim.aim_focus)
     assert moved == (True, False, False, True)
-    # The pose reaches Starfire in the rig's own Fixture terms.
     assert (list(aim.pose.matrix), list(aim.pose.focus), aim.HasField('tilt')) == (
         pose['matrix'],
         pose['focus'],
@@ -345,7 +338,6 @@ def test_the_room_rig_names_every_fixture_and_cell_and_a_highlight_encodes_for_s
         True,
         False,
     )
-    # The mode reaches Starfire as the profile the login compiled for it.
     assert (aim.pose.universe, aim.pose.address, aim.pose.profile_id) == (
         0,
         300,

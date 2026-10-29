@@ -26,12 +26,9 @@ LONG_SINCE_DROP_SECONDS = 90.0
 ARRIVAL_BEATS = 4
 MAXIMAL_ARRIVAL_OF_PEAK = 0.9
 MAX_ENERGY = 3
-# Calm tranquilises: a drop plays from the breakdown bank, so the room never gets a drop look
-# while the operator asked for calm.
 CALM_INTENT_BANKS: dict[LightIntent, LightIntent] = {
     LightIntent.DROP: LightIntent.BREAKDOWN,
 }
-# Calm still builds, on the gentler builds: a build at energy 1 would not rise at all.
 CALM_BUILD_ENERGY = 2
 WILD_MAX_ENERGY_WEIGHT = 3
 
@@ -52,8 +49,6 @@ class AutoloopChoice:
     autoloop: str
     meta: AutoloopMeta
     reason: str
-    # The intent whose bank the loop came from; differs from the section's intent when
-    # calm re-maps it. Rotation, palette variant and transition follow the look.
     look: LightIntent
 
 
@@ -82,7 +77,6 @@ TIER_RULES: tuple[tuple[LightIntent, str | None, tuple[int, ...], str], ...] = (
 def max_energy_for_intensity(intensity: float, look: LightIntent | None = None) -> int:
     if intensity <= INTENSITY_CALM:
         return CALM_BUILD_ENERGY if look is LightIntent.BUILDUP else 1
-    # Balanced and above get every tier; the renderer's intensity curve restrains them.
     if intensity < INTENSITY_BALANCED:
         return 2
     return MAX_ENERGY
@@ -107,7 +101,6 @@ def arrival_of_peak(
 
 
 def soft_drop(arrival: float | None) -> bool:
-    """A drop known to arrive below MAXIMAL_ARRIVAL_OF_PEAK; an unknown arrival is not soft."""
     return arrival is not None and arrival < MAXIMAL_ARRIVAL_OF_PEAK
 
 
@@ -149,8 +142,6 @@ class AutoloopPolicy:
         intensity: float = INTENSITY_BALANCED,
         contrast: AutoloopMeta | None = None,
     ) -> AutoloopChoice:
-        """contrast: the look this one follows in a rotation; the choice differs from it in
-        movement or texture."""
         look = look_intent(context.intent, intensity)
         wild = intensity_level(intensity) == WILD
         loops = [loop for loop in self._autoloops[look] if loop != exclude]
@@ -164,7 +155,6 @@ class AutoloopPolicy:
         if look != context.intent:
             reason = f'{reason}; calm plays it from the {look.value} bank'
         if wild and MAX_ENERGY not in tiers:
-            # Weights alone cannot reach energy 3 when the tier rule excluded it.
             tiers = (*tiers, MAX_ENERGY)
             reason = f'{reason}; wild adds energy {MAX_ENERGY}'
         candidates, exact = self._nearest_tier(loops, tiers)
@@ -225,8 +215,6 @@ class AutoloopPolicy:
     def _contrasting(
         self, loops, candidates, tiers, contrast: AutoloopMeta, reason: str
     ) -> tuple[list[tuple[str, str]], str]:
-        """Loops differing in both movement and texture first, then in either; the energy tier
-        before the contrast."""
 
         def differs_in(loop) -> int:
             meta = self._meta[loop]

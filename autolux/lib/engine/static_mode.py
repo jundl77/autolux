@@ -37,7 +37,6 @@ HIGHLIGHT_COLOURS = {**PRESET_COLOURS, 'green': (0.0, 1.0, 0.0)}
 
 
 def names_target(fixtures, target: dict) -> bool:
-    """Whether {'fixture': uuid} or {'cell': id} is one of these (uuid, name, cell ids) fixtures."""
     return any(
         target in ({'fixture': fixture}, *({'cell': cell} for cell in cells))
         for fixture, _, cells in fixtures
@@ -48,15 +47,10 @@ def names_target(fixtures, target: dict) -> bool:
 class StaticRig:
     groups: tuple[str, ...] = ()
     uv_groups: tuple[str, ...] = ()
-    # (fixture uuid, name, its Starfire cell ids); a single-cell fixture's cell is the fixture.
     fixtures: tuple[tuple[str, str, tuple[str, ...]], ...] = ()
-    # Fixture uuids and cell ids Starfire accepts a UV attribute on.
     uv_targets: tuple[str, ...] = ()
-    # Fixture uuids whose mode has a pan channel, the ones a highlight can sweep.
     pan_targets: tuple[str, ...] = ()
-    # Each fixture's GDTF spec and mode, universe, address and matrix, by uuid.
     patch: Mapping[str, dict] = field(default_factory=dict)
-    # Each spec's modes Starfire was sent: {spec: {mode: {channels, cells, attributes}}}.
     modes: Mapping[str, dict] = field(default_factory=dict)
 
     @property
@@ -64,7 +58,6 @@ class StaticRig:
         return (ALL_FIXTURES, *self.groups)
 
     def published(self) -> dict:
-        """The running rig as the control state reports it to the dashboard."""
         return {
             'fixtures': [
                 {
@@ -117,9 +110,6 @@ class StaticLooks:
     def special_rows(
         self, target: str, capabilities: SpecialCapabilities | None = None
     ) -> list[str]:
-        """Catalogue rows the operator may hold on target: the rows the automatic show could
-        place on that group (its own group, or its role where the fixtures render the row's
-        axes), and on the whole rig any row it could place somewhere."""
         capabilities = capabilities or self._capabilities()
         return [
             name
@@ -128,15 +118,12 @@ class StaticLooks:
         ]
 
     def special(self, row: str, target: str) -> None:
-        """Hold a catalogue row on target until Clear FX or Clear all; cooldowns and the FX auto
-        toggle belong to the automatic show and never touch it."""
         if target not in self.rig.targets:
             raise ValueError(f'unknown static target {target!r}')
         if row not in self._rows:
             raise ValueError(f'unknown FX {row!r}')
         if row not in self.special_rows(target):
             raise ValueError(f'{target!r} cannot render {row!r}')
-        # Cut in at once and release short: the operator's hand, not the row's section pacing.
         self._special = dataclasses.replace(
             self._rows[row],
             group=target,
@@ -198,7 +185,6 @@ class StaticLooks:
             for group in self.rig.uv_groups:
                 self.look(group, colour=BLACK, dimmer=1.0, uv=True)
         elif name == 'off':
-            # Clearing alone would reveal the held automatic look.
             self._set_floor()
 
     def highlight(
@@ -211,12 +197,6 @@ class StaticLooks:
         pose: dict | None = None,
         paused: bool = False,
     ) -> None:
-        """Locate {'fixture': uuid} or {'cell': id}: open white (or a swatch), beam home, no
-        strobe. One highlight at a time, so testing another fixture moves it. On a mover, a
-        sweep pans between the soft limits and an aim points at the focus point, so the operator
-        can check yaw and mount against the plan. A pose ({matrix, pan, tilt, focus, universe,
-        address, gdtf_mode} as the rig patch has them) places and patches the fixture for the
-        test as the unsaved patch does."""
         if not names_target(self.rig.fixtures, target):
             raise ValueError(f'unknown fixture or cell {target!r}')
         if colour not in HIGHLIGHT_COLOURS:
@@ -227,7 +207,6 @@ class StaticLooks:
             raise ValueError(f'{target!r} has no pan')
         if pose is not None and 'fixture' not in target:
             raise ValueError('a pose places a whole fixture, not a cell')
-        # Paused or blacked out, the rig is dark and the Locate would light nothing.
         if paused:
             raise ValueError('the show is paused')
         if self.blackout:
@@ -243,7 +222,6 @@ class StaticLooks:
             'priority': STATIC_GROUP_PRIORITY + 1,
             'lifetime': {'kind': 'seconds', 'duration_seconds': HIGHLIGHT_SECONDS},
         }
-        # Starfire moves the head itself, through the logical pan the show's loops drive.
         if sweep:
             override['pan_sweep'] = True
         elif aim:
@@ -255,7 +233,6 @@ class StaticLooks:
             override['pose'] = {**pose, 'gdtf_spec': self.rig.patch[fixture_uuid]['gdtf_spec']}
         if fixture_uuid in self.rig.uv_targets:
             values['attributes'] = {UV_ATTRIBUTE: 0.0}
-        # Starfire resolves a cell id through its fixture target too.
         self._lighting.set_override(
             {**override, 'target': {'fixture': fixture_uuid}, 'values': values}
         )

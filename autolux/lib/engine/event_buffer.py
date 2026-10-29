@@ -1,5 +1,3 @@
-"""Thread-safe store of pipeline events — the only state the Dash thread shares."""
-
 import copy
 import math
 import threading
@@ -33,7 +31,6 @@ class EventBuffer:
         self._beats: deque[dict] = deque(maxlen=None if window_sec == float('inf') else 3000)
         self._beats_detected: int = 0
         self._effects: list[dict] = []
-        # Every cue sent to Starfire, once per send, as the director planned it.
         self._cues: list[dict] = []
         self._intents: list[dict] = []
         self._timing_log: list[dict] = []
@@ -58,9 +55,7 @@ class EventBuffer:
         self._cooldown_source: Callable[[], list[dict]] | None = None
         self._track: dict | None = None
         self._rig_revision: str | None = None
-        # What the director plans from, so a recording replays the show it came from.
         self._planning: dict | None = None
-        # Tells the page a restarted show from the one before it, even on the same rig.
         self._session = uuid.uuid4().hex
         self._system_health: dict = {}
         self._system_history = TelemetryHistory()
@@ -102,8 +97,6 @@ class EventBuffer:
         selection: dict | None = None,
         cue_start_beat_index: int | None = None,
     ) -> None:
-        """cue_start_beat_index: the look entered with its section's cue, which Starfire
-        switched on its own clock; no selection went out for it."""
         if duration_seconds is not None and (
             not math.isfinite(duration_seconds) or duration_seconds <= 0
         ):
@@ -128,7 +121,6 @@ class EventBuffer:
             self._effects = [e for e in self._effects if e.get('end', now) >= cutoff]
 
     def add_cue(self, cue: dict) -> None:
-        """A cue as sent (Starfire's `cue_section` value): its base looks and overlay rows."""
         with self._lock:
             now = self.elapsed()
             record = {
@@ -209,7 +201,6 @@ class EventBuffer:
         self,
     ) -> tuple[str | None, bool | None, str | None, dict | None, dict | None]:
         with self._lock:
-            # set_control_state replaces these whole, so the references are never mutated.
             return (
                 self._current_intent,
                 self._control_state['paused'],
@@ -253,7 +244,6 @@ class EventBuffer:
             self._planning = {'seed': seed, 'venue': dict(venue), 'settings': []}
 
     def record_settings(self, settings: dict) -> None:
-        """Each change of the settings the director plans with, at song time."""
         with self._lock:
             if self._planning is None:
                 return
@@ -416,7 +406,6 @@ class EventBuffer:
             }
             if self._planning is not None:
                 report['planning'] = copy.deepcopy(self._planning)
-            # Offline replays have no hardware telemetry; retain their deterministic schema.
             if self._system_health:
                 report['system'] = copy.deepcopy(self._system_health)
                 report['system_history'] = self._system_history.snapshot()

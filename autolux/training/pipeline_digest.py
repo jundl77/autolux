@@ -1,5 +1,3 @@
-"""Compare source analysis and semantic lighting behavior from deterministic simulation."""
-
 from __future__ import annotations
 
 import argparse
@@ -95,9 +93,6 @@ def _cue_record(value: dict) -> dict:
 
 
 def _effects_match_report(events: list, report: dict) -> bool:
-    """Selections and accents match the looks the report played, in order; every cue sent is
-    recorded once, in order, with its base looks and overlay rows; and every look a cue entered
-    was its section's first planned look."""
     commands = [event['command'] for event in events]
     applied = [_command_effect(command) for command in commands]
     played = [
@@ -232,8 +227,6 @@ def check_digest(name: str, digest: dict, fixture: dict) -> list:
     if name not in fixture:
         return [f'{name}: not in the fixture']
     failures = []
-    # Analysis invariants have their own contract; renderer payloads are checked
-    # by the semantic relations and Starfire's full-DMX replay tests.
     expected = fixture[name]['survives']
     if digest['survives'] != expected:
         moved = sorted(set(digest['survives']) | set(expected))

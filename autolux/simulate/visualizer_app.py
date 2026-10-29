@@ -59,17 +59,12 @@ LOGGER = logging.getLogger(__name__)
 TITLE = 'Autolux'
 TIMELINE_WINDOW_SEC = 30.0
 TIMELINE_LEAD_SEC = 0.5
-# Drawn past the lead so the strip the browser translates in from the right is
-# always future the audience has not reached, never a gap in the show.
 TIMELINE_PAD_SEC = 1.0
 TIMELINE_FULL_SEC = TIMELINE_WINDOW_SEC + TIMELINE_LEAD_SEC + TIMELINE_PAD_SEC
 NOW_CURSOR_X = TIMELINE_WINDOW_SEC / TIMELINE_FULL_SEC
 TIMELINE_MARGIN_L_PX = 8
 TIMELINE_MARGIN_R_PX = 8
-# The cursor's fraction is of the AXIS, not of the container: ignoring the
-# figure margins parked it a constant ~7 px right of the axis' now, which at
-# this scale is ~150 ms of claimed future -- measured as a -146 ms crossing
-# bias on every marker, and worse the narrower the window.
+# Of the axis, not the container: the figure margins once biased every marker by -146 ms.
 NOW_CURSOR_LEFT = (
     f'calc({TIMELINE_MARGIN_L_PX}px + {NOW_CURSOR_X * 100:.4f}% - '
     f'{NOW_CURSOR_X:.6f} * {TIMELINE_MARGIN_L_PX + TIMELINE_MARGIN_R_PX}px)'
@@ -165,10 +160,6 @@ def _room_sound_events(snapshot: dict) -> list:
 
 
 def _room_markers(snapshot: dict) -> list:
-    # Heard boundaries, plus the stop still travelling: that one rides the lead
-    # strip and crosses the cursor at exactly its room instant -- the instant
-    # the display ends the song, so afterwards there is no axis to draw it on.
-    # A resume inside the window elides it before the room ever reaches it.
     now = snapshot.get('now', 0.0)
     heard = [(event['t'], event['playing']) for event in _room_sound_events(snapshot)]
     pending = [(stop, False) for stop in _room_stops(snapshot) if stop > now]
@@ -237,9 +228,6 @@ def _song_and_room(snapshot: dict) -> tuple:
 
 
 def _anchor(snapshot: dict) -> dict:
-    # Every beat is stamped one look-ahead before the room hears it, so the
-    # whole drawable window -- the lead included -- is known in advance and the
-    # browser can land each marker at exactly its room instant.
     origin = _song_origin(snapshot)
     now = _display_now(snapshot, origin)
     beats = (
@@ -404,9 +392,6 @@ def _build_timeline(snapshot: dict) -> go.Figure:
                 }
             )
 
-    # Beats are deliberately NOT drawn here: a figure push arrives most of a
-    # second after the beat it carries, so the browser owns the markers (see
-    # ANIMATION_JS) and this figure carries everything that is known ahead.
     fig = go.Figure()
     fig.update_layout(
         shapes=shapes,
@@ -516,7 +501,6 @@ def _fx_text(snapshot: dict) -> str | None:
     special = snapshot.get('special')
     if special:
         return f'{fx_row_label(special["name"])} · {special["group"]}'
-    # The operator's held row reads apart from the show's own pick.
     held = (snapshot.get('static') or {}).get('special_fx')
     if held:
         return f'Static · {fx_row_label(held["name"])} · {held["group"]}'
@@ -535,7 +519,6 @@ MISSED_RATE = 'starfire_missed_render_deadlines_per_second'
 
 
 def render_window(history: list, now: float) -> tuple[float | None, int]:
-    """Rendered frames per second and missed deadlines over the last few seconds of samples."""
     if not history or not 0 <= now - history[-1]['at'] < TELEMETRY_STALE_SECONDS:
         return None, 0
     recent = [sample for sample in history if now - sample['at'] <= RENDER_WINDOW_SECONDS]
@@ -567,7 +550,6 @@ def _track_status(snapshot: dict) -> list:
     if len(text) <= TRACK_TITLE_CHARS:
         value = text
     else:
-        # Two copies scroll by half their width, so the loop has no seam.
         value = html.Span(
             [html.Span(text), html.Span(text, **{'aria-hidden': 'true'})],
             className='marquee',
@@ -584,7 +566,6 @@ def _autoloop_status(snapshot: dict, cfg: dict, name: str | None, detail: str):
     tag = selection.get('intent') or cfg['label'].lower()
     if selection.get('look') not in (None, selection.get('intent')):
         tag = f'{tag} · {selection.get("level")}'
-    # The dot is the loop's own bank: a level remap can play a breakdown loop under a DROP.
     bank = name.split('/', 1)[0] if name else None
     value = [
         _dot(INTENT_CONFIG.get(bank, cfg)['primary']),
@@ -677,7 +658,6 @@ SETTINGS_ORDER = (
     'strobe_burst_seconds',
     'drop_strobe_cooldown_seconds',
 )
-# FX chips: automatic specials on or off.
 FX_AUTO_IDS = {'control-fx-auto': True, 'control-fx-off': False}
 INTENSITY_LEVELS = (
     (CALM, INTENSITY_CALM),
@@ -730,8 +710,6 @@ def group_master_rows(groups, settings: dict | None, *, disabled: bool) -> list:
     ]
 
 
-# Sends only group_masters, with the one group changed: the engine merges it, so a stale
-# poll of any other setting is never sent back.
 GROUP_MASTER_JS = '''function(level, state) {
     if (level === null || level === undefined) {
         return '—';
@@ -806,9 +784,6 @@ _SETTING_LIMITS = [
     for low, high in [SHOW_SETTING_RANGES[name]]
 ]
 
-# Validates every field and sends the edited one, alone: the show keeps every other setting
-# as it has it, never a stale poll's copy. A field the poll filled reads exactly the show's
-# own text, so it sends nothing.
 SETTINGS_FORM_JS = (
     r'''function(...values) {
         const state = window.autoluxControl.view(values.pop()) || {};
@@ -872,17 +847,13 @@ def _with_base_palette(snapshot: dict) -> dict:
     palette = snapshot.get('palette') or {}
     if not palette.get('name'):
         return snapshot
-    # The show reports the section's variant (ice_breakdown); the dropdown and the pin speak base names.
     return {
         **snapshot,
         'palette': {**palette, 'name': base_palette_name(palette['name'])},
     }
 
 
-# The dropdown is the operator's: a poll writes it only when the show reports a different pin
-# than the last poll did, so a pick survives the stale polls before its pin lands.
-# Poll-driven writes to operator controls go through set_props rather than Outputs: an Output
-# would make the control's own callback wait for every in-flight poll before it may run.
+# set_props, not an Output: an Output would make the operator's callback wait for each poll.
 PALETTE_SYNC_JS = (
     """function(state) {
     const palette = state && state.palette;
@@ -994,7 +965,6 @@ def _build_control_card() -> list:
                         html.Div(
                             [
                                 html.Span('Intensity', className='control-label'),
-                                # Auto and the levels read as one joined control.
                                 html.Div(
                                     [
                                         html.Button(
@@ -1077,8 +1047,6 @@ STATIC_PRESETS = {
     'off': 'Off',
 }
 STATIC_PRESET_IDS = {f'static-preset-{name}': name for name in STATIC_PRESETS}
-# Targets and UV come from the rig the show published; a rig without UV fixtures
-# greys the UV chip rather than offering commands the show would refuse.
 STATIC_TARGETS_JS = (
     '''function(state) {
     const all = '''
@@ -1116,7 +1084,6 @@ STATIC_SELECTED_TAB_STYLE = {
 
 
 def _build_static_fx():
-    # Catalogue rows that fit the chosen target; picking one holds it until Clear FX.
     return html.Div(
         [
             html.Div(
@@ -1154,7 +1121,6 @@ def _build_static_panel():
                         type='color',
                         value=colour_hex(PRESET_COLOURS['warm']),
                         debounce=0.3,
-                        # Restoring the last chosen colour sends nothing: the callback skips initial calls.
                         persistence=True,
                         persistence_type='local',
                     ),
@@ -1199,7 +1165,6 @@ OVERLAY_BANNER_JS = (
 )
 
 
-# Clear all has nothing to remove once the show is back on auto.
 CLEAR_GATE_JS = '''function(state) {
     state = window.autoluxControl.view(state);
     return !(state && state.mode === 'static');
@@ -1218,7 +1183,6 @@ def _build_overlay_banner():
     )
 
 
-# Before the first poll neither FX chip is lit, as the show's choice is not known yet.
 CHIPS_SYNC_JS = '''function(state) {
     const settings = (window.autoluxControl.view(state) || {}).settings;
     window.autoluxControl.paintFx(settings ? settings.fx_auto !== false : null);
@@ -1226,7 +1190,6 @@ CHIPS_SYNC_JS = '''function(state) {
 }'''
 
 
-# The Auto tab's clicks flip their own look at once; the bridge round trip never gates it.
 AUTO_CONTROLS_JS = (
     """function(toggles, nexts, palette, intensity, follows, fxOn, fxOff, state) {
             const control = window.autoluxControl;
@@ -1340,7 +1303,6 @@ def _register_static_controls(app) -> None:
             });
             return presets.map((id) => id === chip ? 'active' : '');
         }""",
-        # The clear buttons keep their own ghost-button class.
         *[Output(name, 'className') for name in STATIC_PRESET_IDS],
         *[Input(name, 'n_clicks') for name in STATIC_CHIP_IDS],
         Input('static-colour', 'value'),
@@ -1350,9 +1312,6 @@ def _register_static_controls(app) -> None:
     )
 
 
-# The picker lists the rows that fit the target and shows the one held there. It writes the
-# picker's value only when that changes, through set_props: an Output would make the pick's own
-# callback wait for every in-flight poll.
 FX_ROWS_JS = (
     """function(target, state) {
     state = window.autoluxControl.view(state);
@@ -1560,7 +1519,6 @@ def _cooldown_bar(row: dict):
     label = row.get('label') or row['group']
     if row['last']:
         label += ' · ' + fx_row_label(row['last'])
-    # control.js draws the fill, the caption and the ready look from the data attributes.
     return html.Div(
         [
             html.Div(
@@ -1573,7 +1531,6 @@ def _cooldown_bar(row: dict):
             html.Div(html.Div(className='cooldown-fill'), className='cooldown-track'),
         ],
         className='cooldown-row',
-        # group and last let the ticker spot a fire even when Dash reuses this element.
         **{
             'data-group': row['group'],
             'data-last': row['last'] or '',
@@ -1938,8 +1895,6 @@ POLL_TIMEOUT_SEC = 1.0
 
 
 class SnapshotPoller:
-    """The show over a socket, in place of the EventBuffer this used to hold."""
-
     def __init__(
         self,
         host: str = SNAPSHOT_HOST,
@@ -1984,8 +1939,6 @@ class SnapshotPoller:
             self._lock.release()
 
 
-# ---- Offline preview: a recording played through Starfire onto the Config plan ----------
-
 PREVIEW_UPLOAD_MAX_BYTES = 32 * 1024 * 1024
 PREVIEW_RENDER_TIMEOUT_SEC = 300
 PREVIEW_FRAMES_PATH = '/preview/frames'
@@ -2024,8 +1977,6 @@ PREVIEW_CSS = '''
 
 
 def render_recording(report: dict, rig_path: Path) -> str:
-    """The report's preview frames, converted here and rendered by `starfire preview` on the
-    saved patch."""
     from cli.starfire import DEFAULT_AUTOLOOPS, DEFAULT_BINARY
     from cli.starfire_assets import native_rig
 
@@ -2059,14 +2010,12 @@ def render_recording(report: dict, rig_path: Path) -> str:
             stdin=subprocess.DEVNULL,
             creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0,
         )
-        # The bound an uploaded preview meets, so a render cannot hold more than a load would.
         if target.stat().st_size > PREVIEW_UPLOAD_MAX_BYTES:
             raise ValueError(f'the preview exceeds {PREVIEW_UPLOAD_MAX_BYTES} bytes')
         return target.read_text(encoding='utf-8')
 
 
 def preview_marks(preview) -> dict:
-    """Bar numbers under the scrubber, thinned by powers of two to a readable count."""
     starts = bar_starts(preview)
     step = 1
     while len(starts) > PREVIEW_BAR_LABELS * step:
@@ -2097,7 +2046,6 @@ def _build_preview_card():
                 className='patch-heading',
             ),
             html.Div(id='preview-label', className='preview-label'),
-            # The slider shares the strip's track column, so a frame sits above its slice.
             html.Div(
                 [
                     html.Div(
@@ -2121,7 +2069,6 @@ def _build_preview_card():
                 ],
                 className='preview-scrub',
             ),
-            # fixture_patch.js draws the whole-track strip here once the frames arrive.
             html.Div(
                 id='preview-overview',
                 className='preview-overview',
@@ -2463,13 +2410,11 @@ def build_app(snapshot_source, fixture_store: FixtureStore | None = None) -> das
     layout = app.layout
 
     def serve_layout():
-        # The first poll filling these would push the controls below them down under a
-        # pointer already aimed at them: a click in that first moment hit the master fader.
+        # Filled before serving: the first poll filling them would shift controls under a click.
         snap, now = _with_base_palette(snapshot_source.snapshot()), time.time()
         layout['show-status'].children = _build_show_status(snap, now)
         layout['telemetry-alerts'].children = system_metrics.build_telemetry_notices(snap, now=now)
         if fixture_store is not None:
-            # A browser reload after Save must open the saved patch, not the one loaded at start.
             layout['fixture-draft'].data, layout['fixture-revision'].data = fixture_store.load()
         return layout
 
@@ -2546,7 +2491,6 @@ def build_app(snapshot_source, fixture_store: FixtureStore | None = None) -> das
         notices = performance = renderer = control = charts = dash.no_update
         on_control = requested['tab'] == 'control'
         due = requested.get('metrics')
-        # The Config tab's fixture test reads only the control state (highlight, paused, blackout).
         if on_control or due or requested['tab'] == 'config':
             control = {
                 key: snap.get(key)
@@ -2570,7 +2514,6 @@ def build_app(snapshot_source, fixture_store: FixtureStore | None = None) -> das
                 target: [{'label': fx_row_label(row), 'value': row} for row in rows]
                 for target, rows in fx_rows.items()
             }
-            # Only the test's Cells list needs the running rig's names.
             if requested['tab'] == 'config' and requested.get('rig', ...) != snap.get(
                 'rig_revision'
             ):
@@ -2708,7 +2651,6 @@ def build_app(snapshot_source, fixture_store: FixtureStore | None = None) -> das
 
     _register_settings_drawer(app)
 
-    # Groups come from the rig Starfire logged in with; the faders are drawn as the drawer opens.
     @app.callback(
         Output('group-masters', 'children'),
         Input('settings-toggle', 'n_clicks'),
