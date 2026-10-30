@@ -17,7 +17,7 @@
       "DnhxAxnCbrY"
     ]
   },
-  "pipeline_sha": "cf48bfe1dba68dc5679c991880bc60164097931897b7cadc02aae03284cb82d1",
+  "pipeline_sha": "0029f3c21815eab49967fa5a9b658d4dc28c5364d920f88dab923531b3464037",
   "space": "raw9",
   "reported_spaces": [
     "raw9",
@@ -43,15 +43,15 @@
     }
   },
   "aggregate": {
-    "macro_f1": 0.557337,
-    "accuracy": 0.759555,
+    "macro_f1": 0.553904,
+    "accuracy": 0.76103,
     "boundary_f1": 0.663551,
     "crispness": 0.598131,
     "flicker_per_min": 0.583644,
     "spaces": {
       "raw9": {
-        "macro_f1": 0.557337,
-        "accuracy": 0.759555,
+        "macro_f1": 0.553904,
+        "accuracy": 0.76103,
         "boundary_f1": 0.663551,
         "crispness": 0.598131,
         "flicker_per_min": 0.583644,
@@ -59,8 +59,8 @@
         "changes_class": 110
       },
       "legacy_v1": {
-        "macro_f1": 0.690555,
-        "accuracy": 0.759555,
+        "macro_f1": 0.681438,
+        "accuracy": 0.76103,
         "boundary_f1": 0.657005,
         "crispness": 0.589372,
         "flicker_per_min": 0.62854,
@@ -70,8 +70,8 @@
     },
     "truths": {
       "owner": {
-        "macro_f1": 0.575692,
-        "accuracy": 0.737724,
+        "macro_f1": 0.572267,
+        "accuracy": 0.738861,
         "boundary_f1": 0.660377,
         "crispness": 0.59434,
         "flicker_per_min": 0.598453,
@@ -79,8 +79,8 @@
         "changes_class": 110,
         "spaces": {
           "raw9": {
-            "macro_f1": 0.575692,
-            "accuracy": 0.737724,
+            "macro_f1": 0.572267,
+            "accuracy": 0.738861,
             "boundary_f1": 0.660377,
             "crispness": 0.59434,
             "flicker_per_min": 0.598453,
@@ -88,8 +88,8 @@
             "changes_class": 110
           },
           "legacy_v1": {
-            "macro_f1": 0.681056,
-            "accuracy": 0.737724,
+            "macro_f1": 0.671902,
+            "accuracy": 0.738861,
             "boundary_f1": 0.636816,
             "crispness": 0.597015,
             "flicker_per_min": 0.688221,
@@ -99,8 +99,8 @@
         }
       },
       "published": {
-        "macro_f1": 0.557337,
-        "accuracy": 0.759555,
+        "macro_f1": 0.553904,
+        "accuracy": 0.76103,
         "boundary_f1": 0.663551,
         "crispness": 0.598131,
         "flicker_per_min": 0.583644,
@@ -108,8 +108,8 @@
         "changes_class": 110,
         "spaces": {
           "raw9": {
-            "macro_f1": 0.557337,
-            "accuracy": 0.759555,
+            "macro_f1": 0.553904,
+            "accuracy": 0.76103,
             "boundary_f1": 0.663551,
             "crispness": 0.598131,
             "flicker_per_min": 0.583644,
@@ -117,8 +117,8 @@
             "changes_class": 110
           },
           "legacy_v1": {
-            "macro_f1": 0.690555,
-            "accuracy": 0.759555,
+            "macro_f1": 0.681438,
+            "accuracy": 0.76103,
             "boundary_f1": 0.657005,
             "crispness": 0.589372,
             "flicker_per_min": 0.62854,
@@ -132,7 +132,7 @@
   "tracks": {
     "0064.hzIFjGcOKbg": {
       "youtube_id": "hzIFjGcOKbg",
-      "checksum": "807cda47f9950994b98724e4bda5553f9da8ae31fa2fb806196183bfb322b713",
+      "checksum": "32588926a1d101ed0d2e859d83208506ab7eaea9749acbc3bd12f31ba203e8ac",
       "beats": 1312,
       "rows": 1312,
       "song_sec": 473.049,
@@ -143,8 +143,8 @@
       "silence_leading": 0,
       "silence_interior": 0,
       "silence_trailing": 0,
-      "macro_f1": 0.543081,
-      "accuracy": 0.801932,
+      "macro_f1": 0.539266,
+      "accuracy": 0.797578,
       "boundary_f1": 0.533333,
       "crispness": 0.533333,
       "flicker_per_min": 0.126957,
@@ -152,8 +152,8 @@
       "changes_class": 5,
       "spaces": {
         "raw9": {
-          "macro_f1": 0.543081,
-          "accuracy": 0.801932,
+          "macro_f1": 0.539266,
+          "accuracy": 0.797578,
           "boundary_f1": 0.533333,
           "crispness": 0.533333,
           "flicker_per_min": 0.126957,
@@ -161,8 +161,8 @@
           "changes_class": 5
         },
         "legacy_v1": {
-          "macro_f1": 0.667973,
-          "accuracy": 0.801932,
+          "macro_f1": 0.65663,
+          "accuracy": 0.797578,
           "boundary_f1": 0.461538,
           "crispness": 0.461538,
           "flicker_per_min": 0.253914,
@@ -180,8 +180,8 @@
           "silence_leading": 0,
           "silence_interior": 0,
           "silence_trailing": 0,
-          "macro_f1": 0.610966,
-          "accuracy": 0.801932,
+          "macro_f1": 0.606674,
+          "accuracy": 0.797578,
           "boundary_f1": 0.533333,
           "crispness": 0.533333,
           "flicker_per_min": 0.126957,
@@ -189,8 +189,8 @@
           "changes_class": 5,
           "spaces": {
             "raw9": {
-              "macro_f1": 0.610966,
-              "accuracy": 0.801932,
+              "macro_f1": 0.606674,
+              "accuracy": 0.797578,
               "boundary_f1": 0.533333,
               "crispness": 0.533333,
               "flicker_per_min": 0.126957,
@@ -198,8 +198,8 @@
               "changes_class": 5
             },
             "legacy_v1": {
-              "macro_f1": 0.79552,
-              "accuracy": 0.801932,
+              "macro_f1": 0.781341,
+              "accuracy": 0.797578,
               "boundary_f1": 0.461538,
               "crispness": 0.461538,
               "flicker_per_min": 0.253914,
@@ -217,8 +217,8 @@
           "silence_leading": 0,
           "silence_interior": 0,
           "silence_trailing": 0,
-          "macro_f1": 0.543081,
-          "accuracy": 0.801932,
+          "macro_f1": 0.539266,
+          "accuracy": 0.797578,
           "boundary_f1": 0.533333,
           "crispness": 0.533333,
           "flicker_per_min": 0.126957,
@@ -226,8 +226,8 @@
           "changes_class": 5,
           "spaces": {
             "raw9": {
-              "macro_f1": 0.543081,
-              "accuracy": 0.801932,
+              "macro_f1": 0.539266,
+              "accuracy": 0.797578,
               "boundary_f1": 0.533333,
               "crispness": 0.533333,
               "flicker_per_min": 0.126957,
@@ -235,8 +235,8 @@
               "changes_class": 5
             },
             "legacy_v1": {
-              "macro_f1": 0.667973,
-              "accuracy": 0.801932,
+              "macro_f1": 0.65663,
+              "accuracy": 0.797578,
               "boundary_f1": 0.461538,
               "crispness": 0.461538,
               "flicker_per_min": 0.253914,
@@ -249,7 +249,7 @@
     },
     "0096.PNpXKsge4xM": {
       "youtube_id": "PNpXKsge4xM",
-      "checksum": "d45dece0f6b60343c6b5d4effaa605336e338c3589de3d2ea3bb4e12e936814c",
+      "checksum": "0b308f8b572cdd8b8c0b5f2340f4fb2073f944e8c93fd7763d39c60a6ff46836",
       "beats": 729,
       "rows": 726,
       "song_sec": 257.643,
@@ -260,8 +260,8 @@
       "silence_leading": 0,
       "silence_interior": 0,
       "silence_trailing": 0,
-      "macro_f1": 0.501207,
-      "accuracy": 0.687867,
+      "macro_f1": 0.508948,
+      "accuracy": 0.717323,
       "boundary_f1": 0.461538,
       "crispness": 0.461538,
       "flicker_per_min": 0.473463,
@@ -269,8 +269,8 @@
       "changes_class": 5,
       "spaces": {
         "raw9": {
-          "macro_f1": 0.501207,
-          "accuracy": 0.687867,
+          "macro_f1": 0.508948,
+          "accuracy": 0.717323,
           "boundary_f1": 0.461538,
           "crispness": 0.461538,
           "flicker_per_min": 0.473463,
@@ -278,8 +278,8 @@
           "changes_class": 5
         },
         "legacy_v1": {
-          "macro_f1": 0.501207,
-          "accuracy": 0.687867,
+          "macro_f1": 0.508948,
+          "accuracy": 0.717323,
           "boundary_f1": 0.461538,
           "crispness": 0.461538,
           "flicker_per_min": 0.473463,
@@ -297,8 +297,8 @@
           "silence_leading": 0,
           "silence_interior": 0,
           "silence_trailing": 0,
-          "macro_f1": 0.501207,
-          "accuracy": 0.687867,
+          "macro_f1": 0.508948,
+          "accuracy": 0.717323,
           "boundary_f1": 0.461538,
           "crispness": 0.461538,
           "flicker_per_min": 0.473463,
@@ -306,8 +306,8 @@
           "changes_class": 5,
           "spaces": {
             "raw9": {
-              "macro_f1": 0.501207,
-              "accuracy": 0.687867,
+              "macro_f1": 0.508948,
+              "accuracy": 0.717323,
               "boundary_f1": 0.461538,
               "crispness": 0.461538,
               "flicker_per_min": 0.473463,
@@ -315,8 +315,8 @@
               "changes_class": 5
             },
             "legacy_v1": {
-              "macro_f1": 0.501207,
-              "accuracy": 0.687867,
+              "macro_f1": 0.508948,
+              "accuracy": 0.717323,
               "boundary_f1": 0.461538,
               "crispness": 0.461538,
               "flicker_per_min": 0.473463,
@@ -334,8 +334,8 @@
           "silence_leading": 0,
           "silence_interior": 0,
           "silence_trailing": 0,
-          "macro_f1": 0.501207,
-          "accuracy": 0.687867,
+          "macro_f1": 0.508948,
+          "accuracy": 0.717323,
           "boundary_f1": 0.461538,
           "crispness": 0.461538,
           "flicker_per_min": 0.473463,
@@ -343,8 +343,8 @@
           "changes_class": 5,
           "spaces": {
             "raw9": {
-              "macro_f1": 0.501207,
-              "accuracy": 0.687867,
+              "macro_f1": 0.508948,
+              "accuracy": 0.717323,
               "boundary_f1": 0.461538,
               "crispness": 0.461538,
               "flicker_per_min": 0.473463,
@@ -352,8 +352,8 @@
               "changes_class": 5
             },
             "legacy_v1": {
-              "macro_f1": 0.501207,
-              "accuracy": 0.687867,
+              "macro_f1": 0.508948,
+              "accuracy": 0.717323,
               "boundary_f1": 0.461538,
               "crispness": 0.461538,
               "flicker_per_min": 0.473463,
@@ -366,7 +366,7 @@
     },
     "0136.FO566BKY2Jc": {
       "youtube_id": "FO566BKY2Jc",
-      "checksum": "22ec27af8133ef75a4d5db3a71c327f7887cb95e51b9c98c33d0eaefa3c35ca6",
+      "checksum": "1b1183af68b83b27eaa820832fe44b42cb60e29fd89570ee460d69c4747d3bca",
       "beats": 924,
       "rows": 924,
       "song_sec": 431.171,
@@ -377,8 +377,8 @@
       "silence_leading": 0,
       "silence_interior": 0,
       "silence_trailing": 0,
-      "macro_f1": 0.619341,
-      "accuracy": 0.709403,
+      "macro_f1": 0.613374,
+      "accuracy": 0.70209,
       "boundary_f1": 0.827586,
       "crispness": 0.827586,
       "flicker_per_min": 0.695882,
@@ -386,8 +386,8 @@
       "changes_class": 17,
       "spaces": {
         "raw9": {
-          "macro_f1": 0.619341,
-          "accuracy": 0.709403,
+          "macro_f1": 0.613374,
+          "accuracy": 0.70209,
           "boundary_f1": 0.827586,
           "crispness": 0.827586,
           "flicker_per_min": 0.695882,
@@ -395,8 +395,8 @@
           "changes_class": 17
         },
         "legacy_v1": {
-          "macro_f1": 0.715169,
-          "accuracy": 0.709403,
+          "macro_f1": 0.708009,
+          "accuracy": 0.70209,
           "boundary_f1": 0.785714,
           "crispness": 0.785714,
           "flicker_per_min": 0.835059,
@@ -414,8 +414,8 @@
           "silence_leading": 0,
           "silence_interior": 0,
           "silence_trailing": 0,
-          "macro_f1": 0.619341,
-          "accuracy": 0.709403,
+          "macro_f1": 0.613374,
+          "accuracy": 0.70209,
           "boundary_f1": 0.827586,
           "crispness": 0.827586,
           "flicker_per_min": 0.695882,
@@ -423,8 +423,8 @@
           "changes_class": 17,
           "spaces": {
             "raw9": {
-              "macro_f1": 0.619341,
-              "accuracy": 0.709403,
+              "macro_f1": 0.613374,
+              "accuracy": 0.70209,
               "boundary_f1": 0.827586,
               "crispness": 0.827586,
               "flicker_per_min": 0.695882,
@@ -432,8 +432,8 @@
               "changes_class": 17
             },
             "legacy_v1": {
-              "macro_f1": 0.715169,
-              "accuracy": 0.709403,
+              "macro_f1": 0.708009,
+              "accuracy": 0.70209,
               "boundary_f1": 0.785714,
               "crispness": 0.785714,
               "flicker_per_min": 0.835059,
@@ -451,8 +451,8 @@
           "silence_leading": 0,
           "silence_interior": 0,
           "silence_trailing": 0,
-          "macro_f1": 0.619341,
-          "accuracy": 0.709403,
+          "macro_f1": 0.613374,
+          "accuracy": 0.70209,
           "boundary_f1": 0.827586,
           "crispness": 0.827586,
           "flicker_per_min": 0.695882,
@@ -460,8 +460,8 @@
           "changes_class": 17,
           "spaces": {
             "raw9": {
-              "macro_f1": 0.619341,
-              "accuracy": 0.709403,
+              "macro_f1": 0.613374,
+              "accuracy": 0.70209,
               "boundary_f1": 0.827586,
               "crispness": 0.827586,
               "flicker_per_min": 0.695882,
@@ -469,8 +469,8 @@
               "changes_class": 17
             },
             "legacy_v1": {
-              "macro_f1": 0.715169,
-              "accuracy": 0.709403,
+              "macro_f1": 0.708009,
+              "accuracy": 0.70209,
               "boundary_f1": 0.785714,
               "crispness": 0.785714,
               "flicker_per_min": 0.835059,
@@ -483,7 +483,7 @@
     },
     "0434.SBnxzXkc_qw": {
       "youtube_id": "SBnxzXkc_qw",
-      "checksum": "362cc5e39d7867d0ead2c66a895c35f722fb21fae33d244e3185956e80e23dcc",
+      "checksum": "6df96f8d0ee0e35e1bc89b4bba67c4a1d637dcdaa3af63206f4c598e95e695d0",
       "beats": 1050,
       "rows": 1047,
       "song_sec": 409.89,
@@ -494,8 +494,8 @@
       "silence_leading": 0,
       "silence_interior": 0,
       "silence_trailing": 0,
-      "macro_f1": 0.54564,
-      "accuracy": 0.860674,
+      "macro_f1": 0.547903,
+      "accuracy": 0.883421,
       "boundary_f1": 0.571429,
       "crispness": 0.571429,
       "flicker_per_min": 0.44319,
@@ -503,8 +503,8 @@
       "changes_class": 9,
       "spaces": {
         "raw9": {
-          "macro_f1": 0.54564,
-          "accuracy": 0.860674,
+          "macro_f1": 0.547903,
+          "accuracy": 0.883421,
           "boundary_f1": 0.571429,
           "crispness": 0.571429,
           "flicker_per_min": 0.44319,
@@ -512,8 +512,8 @@
           "changes_class": 9
         },
         "legacy_v1": {
-          "macro_f1": 0.618444,
-          "accuracy": 0.860674,
+          "macro_f1": 0.622065,
+          "accuracy": 0.883421,
           "boundary_f1": 0.526316,
           "crispness": 0.526316,
           "flicker_per_min": 0.59092,
@@ -531,8 +531,8 @@
           "silence_leading": 0,
           "silence_interior": 0,
           "silence_trailing": 0,
-          "macro_f1": 0.54564,
-          "accuracy": 0.860674,
+          "macro_f1": 0.547903,
+          "accuracy": 0.883421,
           "boundary_f1": 0.571429,
           "crispness": 0.571429,
           "flicker_per_min": 0.44319,
@@ -540,8 +540,8 @@
           "changes_class": 9,
           "spaces": {
             "raw9": {
-              "macro_f1": 0.54564,
-              "accuracy": 0.860674,
+              "macro_f1": 0.547903,
+              "accuracy": 0.883421,
               "boundary_f1": 0.571429,
               "crispness": 0.571429,
               "flicker_per_min": 0.44319,
@@ -549,8 +549,8 @@
               "changes_class": 9
             },
             "legacy_v1": {
-              "macro_f1": 0.618444,
-              "accuracy": 0.860674,
+              "macro_f1": 0.622065,
+              "accuracy": 0.883421,
               "boundary_f1": 0.526316,
               "crispness": 0.526316,
               "flicker_per_min": 0.59092,
@@ -568,8 +568,8 @@
           "silence_leading": 0,
           "silence_interior": 0,
           "silence_trailing": 0,
-          "macro_f1": 0.54564,
-          "accuracy": 0.860674,
+          "macro_f1": 0.547903,
+          "accuracy": 0.883421,
           "boundary_f1": 0.571429,
           "crispness": 0.571429,
           "flicker_per_min": 0.44319,
@@ -577,8 +577,8 @@
           "changes_class": 9,
           "spaces": {
             "raw9": {
-              "macro_f1": 0.54564,
-              "accuracy": 0.860674,
+              "macro_f1": 0.547903,
+              "accuracy": 0.883421,
               "boundary_f1": 0.571429,
               "crispness": 0.571429,
               "flicker_per_min": 0.44319,
@@ -586,8 +586,8 @@
               "changes_class": 9
             },
             "legacy_v1": {
-              "macro_f1": 0.618444,
-              "accuracy": 0.860674,
+              "macro_f1": 0.622065,
+              "accuracy": 0.883421,
               "boundary_f1": 0.526316,
               "crispness": 0.526316,
               "flicker_per_min": 0.59092,
@@ -600,7 +600,7 @@
     },
     "0485.MRRgXXq-0rc": {
       "youtube_id": "MRRgXXq-0rc",
-      "checksum": "f35e712daaab96532d2515cf8065d70d4ce2ddd4a913b1c11a8e81fbdbe9cd62",
+      "checksum": "f87768b22702e46f3c315dec10adf8873e363f2c3ed871b7e3db5f8bec2327b1",
       "beats": 866,
       "rows": 862,
       "song_sec": 412.665,
@@ -717,13 +717,13 @@
     },
     "0501.hwdjIgtMFq8": {
       "youtube_id": "hwdjIgtMFq8",
-      "checksum": "520c378cb20a278cc312b6113cd109e669dea1d5ee9d8024a326620c6320d2aa",
+      "checksum": "94e592a344e93f105945328b016dc5e1c0ba7de01627d1027d33715f4d2905f4",
       "beats": 931,
       "rows": 919,
       "song_sec": 420.003,
       "exposure_sec": 402.907,
       "changes_intent": 12,
-      "late": 2,
+      "late": 0,
       "blocks_measurable": 14,
       "silence_leading": 0,
       "silence_interior": 0,
@@ -760,7 +760,7 @@
           "rows": 919,
           "exposure_sec": 402.907,
           "changes_intent": 12,
-          "late": 2,
+          "late": 0,
           "blocks_measurable": 14,
           "silence_leading": 0,
           "silence_interior": 0,
@@ -797,7 +797,7 @@
           "rows": 919,
           "exposure_sec": 402.907,
           "changes_intent": 12,
-          "late": 2,
+          "late": 0,
           "blocks_measurable": 14,
           "silence_leading": 0,
           "silence_interior": 0,
@@ -834,13 +834,13 @@
     },
     "0640.4o4joooH5tg": {
       "youtube_id": "4o4joooH5tg",
-      "checksum": "d07c55ab9d128b4a3ee70e1cba32ac179b3c1f7744c69f097aaf859c356d4acb",
+      "checksum": "e49bff35a8edb3d380bb872281915bcc3dae96d704da277f44d5214dda466955",
       "beats": 958,
       "rows": 954,
       "song_sec": 434.085,
       "exposure_sec": 421.761,
       "changes_intent": 11,
-      "late": 1,
+      "late": 0,
       "blocks_measurable": 14,
       "silence_leading": 0,
       "silence_interior": 1,
@@ -877,7 +877,7 @@
           "rows": 954,
           "exposure_sec": 421.761,
           "changes_intent": 11,
-          "late": 1,
+          "late": 0,
           "blocks_measurable": 14,
           "silence_leading": 0,
           "silence_interior": 1,
@@ -914,7 +914,7 @@
           "rows": 954,
           "exposure_sec": 421.761,
           "changes_intent": 11,
-          "late": 1,
+          "late": 0,
           "blocks_measurable": 14,
           "silence_leading": 0,
           "silence_interior": 1,
@@ -951,13 +951,13 @@
     },
     "0834.NyEKXA7_6z0": {
       "youtube_id": "NyEKXA7_6z0",
-      "checksum": "6b1351d75b162e3c5250ea795e54e1c604e557f48c9e170261f92f9144a04558",
+      "checksum": "cb97fad6b23ba4a1dad159bcbc8ccdff70a698e0724a0655bc47c450ec1d9df7",
       "beats": 701,
       "rows": 699,
       "song_sec": 365.087,
       "exposure_sec": 360.734,
       "changes_intent": 9,
-      "late": 1,
+      "late": 0,
       "blocks_measurable": 11,
       "silence_leading": 0,
       "silence_interior": 0,
@@ -994,7 +994,7 @@
           "rows": 701,
           "exposure_sec": 361.784,
           "changes_intent": 9,
-          "late": 1,
+          "late": 0,
           "blocks_measurable": 11,
           "silence_leading": 0,
           "silence_interior": 1,
@@ -1031,7 +1031,7 @@
           "rows": 699,
           "exposure_sec": 360.734,
           "changes_intent": 9,
-          "late": 1,
+          "late": 0,
           "blocks_measurable": 11,
           "silence_leading": 0,
           "silence_interior": 0,
@@ -1068,19 +1068,19 @@
     },
     "0911.hSCcLy_OBLM": {
       "youtube_id": "hSCcLy_OBLM",
-      "checksum": "f4fe30b950772c7d56332ff992ea8b3b637c668150ed186e7e5d7b9132748893",
+      "checksum": "4d2d8f60e8f35724feb13fd1d38188c7571840cfa175615238107b69a8d214b2",
       "beats": 833,
       "rows": 828,
       "song_sec": 411.797,
       "exposure_sec": 408.816,
       "changes_intent": 13,
-      "late": 1,
+      "late": 0,
       "blocks_measurable": 14,
       "silence_leading": 0,
       "silence_interior": 0,
       "silence_trailing": 0,
-      "macro_f1": 0.656022,
-      "accuracy": 0.846895,
+      "macro_f1": 0.654278,
+      "accuracy": 0.843005,
       "boundary_f1": 0.666667,
       "crispness": 0.583333,
       "flicker_per_min": 0.733826,
@@ -1088,8 +1088,8 @@
       "changes_class": 13,
       "spaces": {
         "raw9": {
-          "macro_f1": 0.656022,
-          "accuracy": 0.846895,
+          "macro_f1": 0.654278,
+          "accuracy": 0.843005,
           "boundary_f1": 0.666667,
           "crispness": 0.583333,
           "flicker_per_min": 0.733826,
@@ -1097,8 +1097,8 @@
           "changes_class": 13
         },
         "legacy_v1": {
-          "macro_f1": 0.864386,
-          "accuracy": 0.846895,
+          "macro_f1": 0.859045,
+          "accuracy": 0.843005,
           "boundary_f1": 0.666667,
           "crispness": 0.583333,
           "flicker_per_min": 0.733826,
@@ -1111,13 +1111,13 @@
           "rows": 828,
           "exposure_sec": 408.816,
           "changes_intent": 13,
-          "late": 1,
+          "late": 0,
           "blocks_measurable": 14,
           "silence_leading": 0,
           "silence_interior": 0,
           "silence_trailing": 0,
-          "macro_f1": 0.656022,
-          "accuracy": 0.846895,
+          "macro_f1": 0.654278,
+          "accuracy": 0.843005,
           "boundary_f1": 0.666667,
           "crispness": 0.583333,
           "flicker_per_min": 0.733826,
@@ -1125,8 +1125,8 @@
           "changes_class": 13,
           "spaces": {
             "raw9": {
-              "macro_f1": 0.656022,
-              "accuracy": 0.846895,
+              "macro_f1": 0.654278,
+              "accuracy": 0.843005,
               "boundary_f1": 0.666667,
               "crispness": 0.583333,
               "flicker_per_min": 0.733826,
@@ -1134,8 +1134,8 @@
               "changes_class": 13
             },
             "legacy_v1": {
-              "macro_f1": 0.864386,
-              "accuracy": 0.846895,
+              "macro_f1": 0.859045,
+              "accuracy": 0.843005,
               "boundary_f1": 0.666667,
               "crispness": 0.583333,
               "flicker_per_min": 0.733826,
@@ -1148,13 +1148,13 @@
           "rows": 828,
           "exposure_sec": 408.816,
           "changes_intent": 13,
-          "late": 1,
+          "late": 0,
           "blocks_measurable": 14,
           "silence_leading": 0,
           "silence_interior": 0,
           "silence_trailing": 0,
-          "macro_f1": 0.656022,
-          "accuracy": 0.846895,
+          "macro_f1": 0.654278,
+          "accuracy": 0.843005,
           "boundary_f1": 0.666667,
           "crispness": 0.583333,
           "flicker_per_min": 0.733826,
@@ -1162,8 +1162,8 @@
           "changes_class": 13,
           "spaces": {
             "raw9": {
-              "macro_f1": 0.656022,
-              "accuracy": 0.846895,
+              "macro_f1": 0.654278,
+              "accuracy": 0.843005,
               "boundary_f1": 0.666667,
               "crispness": 0.583333,
               "flicker_per_min": 0.733826,
@@ -1171,8 +1171,8 @@
               "changes_class": 13
             },
             "legacy_v1": {
-              "macro_f1": 0.864386,
-              "accuracy": 0.846895,
+              "macro_f1": 0.859045,
+              "accuracy": 0.843005,
               "boundary_f1": 0.666667,
               "crispness": 0.583333,
               "flicker_per_min": 0.733826,
@@ -1185,7 +1185,7 @@
     },
     "1110.DnhxAxnCbrY": {
       "youtube_id": "DnhxAxnCbrY",
-      "checksum": "d75f4c98801743f1f692b01333f22c940606169347446cd950c0b6308e6528bc",
+      "checksum": "5cde11f258ed104bc95fae919bd834547f7bbc9d9803c1bc5ba546415e2c9658",
       "beats": 993,
       "rows": 988,
       "song_sec": 447.019,
@@ -1196,8 +1196,8 @@
       "silence_leading": 0,
       "silence_interior": 0,
       "silence_trailing": 0,
-      "macro_f1": 0.449408,
-      "accuracy": 0.617883,
+      "macro_f1": 0.448898,
+      "accuracy": 0.608977,
       "boundary_f1": 0.583333,
       "crispness": 0.583333,
       "flicker_per_min": 1.080967,
@@ -1205,8 +1205,8 @@
       "changes_class": 15,
       "spaces": {
         "raw9": {
-          "macro_f1": 0.449408,
-          "accuracy": 0.617883,
+          "macro_f1": 0.448898,
+          "accuracy": 0.608977,
           "boundary_f1": 0.583333,
           "crispness": 0.583333,
           "flicker_per_min": 1.080967,
@@ -1214,8 +1214,8 @@
           "changes_class": 15
         },
         "legacy_v1": {
-          "macro_f1": 0.673405,
-          "accuracy": 0.617883,
+          "macro_f1": 0.671591,
+          "accuracy": 0.608977,
           "boundary_f1": 0.583333,
           "crispness": 0.583333,
           "flicker_per_min": 1.080967,
@@ -1233,8 +1233,8 @@
           "silence_leading": 0,
           "silence_interior": 0,
           "silence_trailing": 0,
-          "macro_f1": 0.449408,
-          "accuracy": 0.617883,
+          "macro_f1": 0.448898,
+          "accuracy": 0.608977,
           "boundary_f1": 0.583333,
           "crispness": 0.583333,
           "flicker_per_min": 1.080967,
@@ -1242,8 +1242,8 @@
           "changes_class": 15,
           "spaces": {
             "raw9": {
-              "macro_f1": 0.449408,
-              "accuracy": 0.617883,
+              "macro_f1": 0.448898,
+              "accuracy": 0.608977,
               "boundary_f1": 0.583333,
               "crispness": 0.583333,
               "flicker_per_min": 1.080967,
@@ -1251,8 +1251,8 @@
               "changes_class": 15
             },
             "legacy_v1": {
-              "macro_f1": 0.673405,
-              "accuracy": 0.617883,
+              "macro_f1": 0.671591,
+              "accuracy": 0.608977,
               "boundary_f1": 0.583333,
               "crispness": 0.583333,
               "flicker_per_min": 1.080967,
@@ -1270,8 +1270,8 @@
           "silence_leading": 0,
           "silence_interior": 0,
           "silence_trailing": 0,
-          "macro_f1": 0.449408,
-          "accuracy": 0.617883,
+          "macro_f1": 0.448898,
+          "accuracy": 0.608977,
           "boundary_f1": 0.583333,
           "crispness": 0.583333,
           "flicker_per_min": 1.080967,
@@ -1279,8 +1279,8 @@
           "changes_class": 15,
           "spaces": {
             "raw9": {
-              "macro_f1": 0.449408,
-              "accuracy": 0.617883,
+              "macro_f1": 0.448898,
+              "accuracy": 0.608977,
               "boundary_f1": 0.583333,
               "crispness": 0.583333,
               "flicker_per_min": 1.080967,
@@ -1288,8 +1288,8 @@
               "changes_class": 15
             },
             "legacy_v1": {
-              "macro_f1": 0.673405,
-              "accuracy": 0.617883,
+              "macro_f1": 0.671591,
+              "accuracy": 0.608977,
               "boundary_f1": 0.583333,
               "crispness": 0.583333,
               "flicker_per_min": 1.080967,
