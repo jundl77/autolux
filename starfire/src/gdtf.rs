@@ -17,6 +17,7 @@ const MAX_ATTRIBUTE_ID_BYTES: usize = 512;
 /// Below this a wheel slot is white (GDTF's Open); Autolux's palette floor is the same.
 const WHITE_SLOT_SATURATION: f64 = 0.05;
 pub const GOBO_ATTRIBUTE: &str = "Gobo1";
+pub const POSITION_SPEED_ATTRIBUTE: &str = "PositionMSpeed";
 const OPEN_GOBO: &str = "Open";
 pub const SNAP_POINT: f64 = 0.5;
 const DMX_BYTE_BITS: usize = 8;
@@ -506,6 +507,29 @@ impl GdtfProfile {
             .flat_map(|channel| &channel.functions)
             .find(|function| function.attribute == attribute && function.sets.is_empty())
             .map(|function| (function.physical_from, function.physical_to))
+    }
+
+    /// The physical range of the cell's pan/tilt speed when the encoder sets it from the motion:
+    /// one function, without channel sets or a mode master, proportional to speed (Autolux
+    /// compiles no other).
+    pub fn position_speed(&self) -> Option<(f64, f64)> {
+        match self.matching_functions(POSITION_SPEED_ATTRIBUTE).as_slice() {
+            [(_, function)] if function.sets.is_empty() && function.condition.is_none() => {
+                Some((function.physical_from, function.physical_to))
+            }
+            _ => None,
+        }
+    }
+
+    /// The footprint offsets of the channel `position_speed` describes; none without one.
+    pub fn position_speed_offsets(&self) -> Vec<usize> {
+        if self.position_speed().is_none() {
+            return Vec::new();
+        }
+        self.channels_matching(POSITION_SPEED_ATTRIBUTE)
+            .into_iter()
+            .flat_map(|channel| self.channels[channel].offsets.iter().copied())
+            .collect()
     }
 
     pub fn validate_attributes(&self, attributes: &BTreeMap<String, AttributeValue>) -> Result<()> {

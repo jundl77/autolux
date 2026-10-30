@@ -138,8 +138,10 @@ Position.PanTilt, Color.RGB/Color.Color, Beam.Beam, Gobo.Gobo, Control.Control o
 control channels), ColorAdd_* in ColorComponent, Pan/Tilt on `Axis` geometries (Base ›
 Yoke › Head › Beam), light on a `Beam` geometry, upper-case FixtureTypeID, primitive
 `Models` and an sRGB `PhysicalDescriptions`. Channels Autolux holds at a default carry their
-real attributes (Shutter1, Gobo1, PositionMSpeed, Function, PositionEffect(Rate), ColorAdd_UV,
-ColorMacro1(Rate)).
+real attributes (Shutter1, Gobo1, Function, PositionEffect(Rate), ColorAdd_UV,
+ColorMacro1(Rate)). A PositionMSpeed without ChannelSets is paced from the motion, so it must
+be proportional to speed: the Intimidator Spot 110's is Percent 100 (DMX 0, fast) to 1 (DMX
+255, slow), the manual's "fast to slow"; Robe's profiles write None 1 to 0.01.
 
 Every GDTF node and attribute is shown per fixture, read-only, except:
 DMXMode `Name`/`Description`; ChannelFunction `Name`, `DMXFrom`, `Default`,

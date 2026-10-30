@@ -32,6 +32,8 @@ DMX_BYTE_BITS = 8
 NO_FEATURE = 'NoFeature'
 BRIGHTNESS_PREFIXES = ('ColorAdd_', 'ColorSub_')
 SNAP_ON = ('Yes', 'On')
+POSITION_SPEED = 'PositionMSpeed'
+PROPORTIONAL_SPEED_UNITS = ('None', 'Percent', 'AngularSpeed')
 
 
 @dataclass(frozen=True)
@@ -379,6 +381,22 @@ def _require_continuous_brightness(function, function_count: int) -> None:
         )
 
 
+def _require_proportional_speed(function, unit: str) -> None:
+    """Starfire sets a continuous pan/tilt speed as a share of its fast end's physical value.
+
+    GDTF defines no unit for PositionMSpeed; Robe's profiles write None 1 to 0.01 (a fraction of
+    full speed), ours Percent 100 to 1. A time, or a range without a positive end, would invert
+    or zero that share.
+    """
+    values = (function.physical_from, function.physical_to)
+    if unit not in PROPORTIONAL_SPEED_UNITS or min(values) < 0 or max(values) <= 0:
+        raise ValueError(
+            f'GDTF {POSITION_SPEED} function {function.path} has {unit} '
+            f'{values[0]:g}..{values[1]:g}; a pan/tilt speed must be proportional to speed '
+            '(PhysicalUnit Percent, PhysicalFrom 100 PhysicalTo 1 for fast → slow)'
+        )
+
+
 def compile_mode(description: str, mode_name: str) -> rig_wire.DmxMode:
     """The selected mode as Starfire encodes it; raises ValueError naming what is unsupported."""
     root = mvr.gdtf_root(description, 'GDTF')
@@ -415,6 +433,7 @@ def compile_mode(description: str, mode_name: str) -> rig_wire.DmxMode:
             raise ValueError('duplicate GDTF channel name')
         names[name] = index
     attributes = {attribute.name for attribute in fixture.attributes}
+    units = {node.get('Name'): node.get('PhysicalUnit', 'None') for node in root.iter('Attribute')}
     wheels = {node.get('Name'): node for node in root.findall('FixtureType/Wheels/Wheel')}
     compiled, occupied, function_count = rig_wire.DmxMode(), set(), 0
     for entry in entries:
@@ -433,6 +452,8 @@ def compile_mode(description: str, mode_name: str) -> rig_wire.DmxMode:
         for function in functions:
             if function.attribute == 'Dimmer' or function.attribute.startswith(BRIGHTNESS_PREFIXES):
                 _require_continuous_brightness(function, len(functions))
+            if function.attribute == POSITION_SPEED and not function.sets:
+                _require_proportional_speed(function, units.get(POSITION_SPEED, 'None'))
         function_count += len(functions)
         if function_count > MAX_FUNCTIONS:
             raise ValueError('GDTF channel-function limit exceeded')

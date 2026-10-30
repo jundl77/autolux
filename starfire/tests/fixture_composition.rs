@@ -12,6 +12,19 @@ use starfire::script::AutoloopCatalog;
 
 const MOVERS: [usize; 2] = [32, 44];
 const WASHES: [usize; 4] = [0, 8, 16, 24];
+/// A still, lit head eases off 0.8 of full pan/tilt speed per second from its first frame's
+/// full speed (DMX 0): 80 % (DMX 52) at 0.25 s and 60 % (DMX 103) at 0.5 s.
+const EASED_AT_QUARTER_SECOND: u8 = 52;
+const EASED_AT_HALF_SECOND: u8 = 103;
+const SPEED_CHANNEL: usize = 4;
+
+fn eased_movers(frames: &BTreeMap<u16, Vec<u8>>, speed: u8) -> BTreeMap<u16, Vec<u8>> {
+    let mut frames = frames.clone();
+    for mover in MOVERS {
+        frames.get_mut(&0).unwrap()[mover + SPEED_CHANNEL] = speed;
+    }
+    frames
+}
 
 fn steady_stage() -> Engine {
     let directory = tempfile::tempdir().unwrap();
@@ -203,7 +216,7 @@ fn held_colour_changes_only_target_colour_and_clear_reveals_baseline() {
         )
         .unwrap();
     let held = engine.render_at(0.25).unwrap();
-    let mut expected = before.dmx_frames_by_universe.clone();
+    let mut expected = eased_movers(&before.dmx_frames_by_universe, EASED_AT_QUARTER_SECOND);
     expected.get_mut(&0).unwrap()[MOVERS[0] + 5] = 32;
     assert_eq!(held.dmx_frames_by_universe, expected);
     engine
@@ -217,7 +230,7 @@ fn held_colour_changes_only_target_colour_and_clear_reveals_baseline() {
         .unwrap();
     assert_eq!(
         engine.render_at(0.5).unwrap().dmx_frames_by_universe,
-        before.dmx_frames_by_universe
+        eased_movers(&before.dmx_frames_by_universe, EASED_AT_HALF_SECOND)
     );
 }
 
@@ -293,7 +306,8 @@ fn a_wash_blacklight_accent_drives_uv_full_with_rgb_off_above_the_automatic_look
     }
     assert_eq!(
         &lit.dmx_frames_by_universe[&0][MOVERS[0]..MOVERS[1] + 12],
-        &before.dmx_frames_by_universe[&0][MOVERS[0]..MOVERS[1] + 12]
+        &eased_movers(&before.dmx_frames_by_universe, EASED_AT_HALF_SECOND)[&0]
+            [MOVERS[0]..MOVERS[1] + 12]
     );
     engine
         .apply(0.5, &Command::SetBlackout { enabled: true })

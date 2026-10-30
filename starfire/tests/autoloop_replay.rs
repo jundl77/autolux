@@ -453,10 +453,18 @@ fn check_replay(look: &Look) {
     let mut slower = replay.clone();
     slower.frame_rate_hz = replay.frame_rate_hz / 2;
     let slower = render_replay(&slower, support::stage(), support::show_catalog()).unwrap();
+    let paced = support::stage().paced_slots();
+    let unpaced = |frame: &RenderedFrame| {
+        let mut universes = frame.dmx_frames_by_universe.clone();
+        for (universe, slot) in &paced {
+            universes.get_mut(universe).unwrap()[*slot] = 0;
+        }
+        universes
+    };
     for (index, frame) in slower.iter().enumerate() {
         assert_eq!(
-            frame.dmx_frames_by_universe,
-            first[index * 2].dmx_frames_by_universe,
+            unpaced(frame),
+            unpaced(&first[index * 2]),
             "{look} depends on frame rate"
         );
     }
