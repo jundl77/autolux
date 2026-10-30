@@ -8,7 +8,7 @@ from autolux.lighting import mvr
 from autolux.lighting.gdtf_compile import DmxValue, compile_mode
 from tools.compile_test_profiles import OUTPUT, compiled_profiles, corpus_descriptions
 
-ATTRIBUTES = ('Fog1', 'Gobo1', 'Zoom', 'Mode', 'Dimmer', 'Pan', 'ColorAdd_R')
+ATTRIBUTES = ('Fog1', 'Gobo1', 'Zoom', 'Mode', 'Dimmer', 'Pan', 'ColorAdd_R', 'PositionMSpeed')
 
 
 def description(channels: str, wheels: str = '') -> str:
@@ -162,6 +162,30 @@ def test_brightness_functions_must_be_one_continuous_zero_based_range():
     )
     [dimmer] = compiled(channel('Dimmer', '1', labelled)).channels[0].functions
     assert not dimmer.sets
+
+
+def test_a_continuous_pan_tilt_speed_must_be_proportional_to_speed():
+    def speed(unit: str, physical: str) -> str:
+        speed_function = function('PositionMSpeed').replace(
+            'PhysicalFrom="0" PhysicalTo="100"', physical
+        )
+        unit_less = '<Attribute Name="PositionMSpeed" Pretty="PositionMSpeed" Feature="Control.Control" PhysicalUnit="None"/>'
+        return compile_mode(
+            description(channel('PositionMSpeed', '1', speed_function)).replace(
+                unit_less, unit_less.replace('"None"', f'"{unit}"')
+            ),
+            'Control',
+        )
+
+    [percent] = speed('Percent', 'PhysicalFrom="100" PhysicalTo="1"').channels[0].functions
+    assert (percent.physical_from, percent.physical_to) == (100, 1)
+    speed('None', 'PhysicalFrom="1" PhysicalTo="0.01"')
+    for unit, physical in (
+        ('Time', 'PhysicalFrom="0.2" PhysicalTo="25"'),
+        ('Percent', 'PhysicalFrom="-1" PhysicalTo="1"'),
+    ):
+        with pytest.raises(ValueError, match='must be proportional to speed'):
+            speed(unit, physical)
 
 
 def test_gdtf_1_0_channel_defaults_and_unnamed_functions_follow_the_standard():
