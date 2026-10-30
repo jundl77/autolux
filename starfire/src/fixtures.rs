@@ -6,7 +6,7 @@ use std::path::Path;
 use anyhow::{Context, Result, bail, ensure};
 
 use crate::artnet::MAX_ARTNET_UNIVERSE;
-use crate::gdtf::{GdtfCell, GdtfProfile};
+use crate::gdtf::{GdtfCell, GdtfProfile, POSITION_SPEED_ATTRIBUTE};
 use crate::model::{
     AttributeValue, DMX_CHANNELS, FixturePose, FixtureState, FixtureStates, MovementRange, Rgb,
     Target,
@@ -26,6 +26,16 @@ const HALF_TURN_DEGREES: f64 = 180.0;
 const MAX_PITCH_DEGREES: f64 = 60.0;
 const MATRIX_VALUES: usize = 12;
 const PROBE_DEGREES: f64 = 1.0;
+/// The full pan/tilt speed assumed for every head, because the GDTF Pan/Tilt `RealFade` (seconds
+/// across the full range) does not reach Starfire: the rig proto carries none, and Chauvet
+/// publishes no move time for the Spot 110. Kept low so a held speed never trails the motion.
+const HEAD_SPEED_WITHOUT_REAL_FADE_DEGREES_PER_SECOND: f64 = 120.0;
+/// Speed held above the commanded motion, so a head still accelerating keeps up.
+const SPEED_HEADROOM: f64 = 1.25;
+/// The hysteresis, in shares of full speed, between the held speed and the need.
+const SPEED_BAND: f64 = 0.05;
+/// How fast the held speed may slow, in shares of full speed per second.
+const SPEED_RELEASE_PER_SECOND: f64 = 0.8;
 
 #[derive(Clone, Debug)]
 struct FixturePatch {
@@ -53,10 +63,20 @@ struct Placement {
 
 type DegreeRange = (f64, f64);
 
-/// The physical pan (0..1 of the GDTF range) each moving cell was last sent. A beam direction
-/// has a pan solution every whole turn the range allows; the encoder keeps each head on the one
-/// nearest this, so a beam crossing where one solution meets an end stop does not swing round.
-pub type PanMemory = BTreeMap<String, f64>;
+/// What the encoder last sent each cell, by cell id.
+pub type MotionMemory = BTreeMap<String, HeadMotion>;
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct HeadMotion {
+    /// Physical pan, 0..1 of the GDTF range. A beam direction has a pan solution every whole
+    /// turn the range allows; the encoder keeps each head on the one nearest this, so a beam
+    /// crossing where one solution meets an end stop does not swing round.
+    pub pan: f64,
+    /// Physical tilt, 0..1 of the GDTF range.
+    pub tilt: f64,
+    /// The share of full pan/tilt speed the head's speed channel holds.
+    pub speed: f64,
+}
 
 impl Placement {
     fn from_wire(fixture: &wire::Fixture) -> Result<Self> {
@@ -575,6 +595,24 @@ impl FixtureRig {
             .validate_attributes(values)
     }
 
+    /// The (universe, zero-based slot) pairs carrying a pan/tilt speed the encoder paces from
+    /// the motion between frames: unlike every other slot, they follow the output frame rate.
+    pub fn paced_slots(&self) -> BTreeSet<(u16, usize)> {
+        self.fixtures
+            .iter()
+            .flat_map(|fixture| {
+                self.profiles[&fixture.profile]
+                    .iter()
+                    .flat_map(move |cell| {
+                        cell.profile
+                            .position_speed_offsets()
+                            .into_iter()
+                            .map(move |offset| (fixture.universe, fixture.address - 1 + offset))
+                    })
+            })
+            .collect()
+    }
+
     pub fn profile(&self, cell_id: &str) -> Option<&GdtfProfile> {
         let &(fixture, cell) = self.cells.get(cell_id)?;
         Some(&self.profiles[&self.fixtures[fixture].profile][cell].profile)
@@ -779,17 +817,20 @@ impl FixtureRig {
             .collect()
     }
 
-    /// A frame on its own: each head takes the pan solution nearest its soft-limit centre.
+    /// A frame on its own: each head takes the pan solution nearest its soft-limit centre, at
+    /// full pan/tilt speed.
     pub fn encode(&self, states: &FixtureStates) -> Result<BTreeMap<u16, Vec<u8>>> {
-        self.encode_following(states, &mut PanMemory::new())
+        self.encode_following(states, &mut MotionMemory::new(), None)
     }
 
-    /// The next frame of a show: each head takes the pan solution nearest the one `memory`
-    /// recorded for it, and `memory` records this frame's.
+    /// The next frame of a show, `elapsed_seconds` after the one `memory` recorded: each head
+    /// takes the pan solution nearest its recorded one and a pan/tilt speed for the motion
+    /// between them, and `memory` records this frame's.
     pub fn encode_following(
         &self,
         states: &FixtureStates,
-        memory: &mut PanMemory,
+        memory: &mut MotionMemory,
+        elapsed_seconds: Option<f64>,
     ) -> Result<BTreeMap<u16, Vec<u8>>> {
         ensure!(
             states.len() == self.cells.len(),
@@ -867,17 +908,51 @@ impl FixtureRig {
                     calibrated.intensity = scale(state.intensity);
                     calibrated.attribute_brightness = scale(state.attribute_brightness);
                 }
+                let previous = memory.get(id).copied();
                 calibrated.pan = pan(state.pan);
                 if let Some((from, to)) = pan_range {
                     calibrated.pan = nearest_turn(
                         calibrated.pan,
                         FULL_TURN_DEGREES / (to - from).abs(),
                         &placement.pan,
-                        memory.get(id).copied(),
+                        previous.map(|motion| motion.pan),
                     );
-                    memory.insert(id.clone(), calibrated.pan);
                 }
                 calibrated.tilt = tilt(state.tilt);
+                // Dark heads, move-in-black included, travel at full speed.
+                let lit = state.intensity > 0.0 && !state.output_blackout;
+                let speed = match (previous, elapsed_seconds) {
+                    (Some(previous), Some(elapsed)) if lit && elapsed > 0.0 => {
+                        let degrees = (calibrated.pan - previous.pan).abs() * span(pan_range);
+                        let degrees =
+                            degrees.max((calibrated.tilt - previous.tilt).abs() * span(tilt_range));
+                        let needed = SPEED_HEADROOM * degrees
+                            / elapsed
+                            / HEAD_SPEED_WITHOUT_REAL_FADE_DEGREES_PER_SECOND;
+                        held_speed(previous.speed, needed.min(1.0), elapsed)
+                    }
+                    (Some(previous), Some(_)) if lit => previous.speed,
+                    _ => 1.0,
+                };
+                memory.insert(
+                    id.clone(),
+                    HeadMotion {
+                        pan: calibrated.pan,
+                        tilt: calibrated.tilt,
+                        speed,
+                    },
+                );
+                if let Some((from, to)) = cell.profile.position_speed()
+                    && !cell
+                        .profile
+                        .shares_channel(POSITION_SPEED_ATTRIBUTE, &state.attributes)
+                {
+                    let (slowest, fastest) = (from.min(to), from.max(to));
+                    calibrated.attributes.insert(
+                        POSITION_SPEED_ATTRIBUTE.into(),
+                        AttributeValue::Number((speed * fastest).clamp(slowest, fastest)),
+                    );
+                }
                 cell.profile
                     .encode_calibrated(
                         &calibrated,
@@ -889,6 +964,23 @@ impl FixtureRig {
             }
         }
         Ok(universes)
+    }
+}
+
+fn span(range: Option<DegreeRange>) -> f64 {
+    range.map_or(0.0, |(from, to)| (to - from).abs())
+}
+
+/// The share of full speed a head holds for motion that `needed` it: at once as fast as needed,
+/// so it never trails the motion; slower only once the need falls two `SPEED_BAND`s below, then
+/// gradually and to one band above the need, so a sweep holds one value instead of chasing it.
+fn held_speed(held: f64, needed: f64, elapsed_seconds: f64) -> f64 {
+    if needed > held {
+        needed
+    } else if needed < held - 2.0 * SPEED_BAND {
+        (needed + SPEED_BAND).max(held - SPEED_RELEASE_PER_SECOND * elapsed_seconds)
+    } else {
+        held
     }
 }
 

@@ -142,6 +142,14 @@ remain separate from this sample-position gate.
   identical DMX. Scripts cannot read wall time, files, network or randomness.
 - Queues and script work are bounded. Faults darken fixtures while preserving movement
   positions; there is no automatic autoloop retry.
+- **Pan/tilt speed** (a set-less GDTF `PositionMSpeed`, proportional to speed) is paced by the
+  encoder: each lit head holds 1.25 x its commanded pan/tilt degrees per second since the last
+  frame over its full speed, rising at once and falling only past a 0.1 band at most 0.8 of full
+  speed per second, so it glides between output frames without trailing them; first, dark and
+  blacked-out frames (move in black included) run at full speed. Full speed is the generic
+  `HEAD_SPEED_WITHOUT_REAL_FADE_DEGREES_PER_SECOND` (120 deg/s) because the rig proto carries no
+  GDTF `RealFade` and Chauvet publishes no move time for the Spot 110; a measured `RealFade`
+  replaces it once the proto carries one.
 
 ## Performance
 

@@ -1,10 +1,10 @@
-mod support;
+﻿mod support;
 
 use std::collections::BTreeMap;
 
 use prost::Message;
 use serde_json::json;
-use starfire::fixtures::FixtureRig;
+use starfire::fixtures::{FixtureRig, MotionMemory};
 use starfire::gdtf::GdtfProfile;
 use starfire::model::{AttributeValue, DMX_CHANNELS, FixtureState, Rgb, Target};
 use starfire::protocol::wire;
@@ -769,4 +769,101 @@ fn a_slow_low_fade_on_an_eight_bit_dimmer_over_rgb_steps_finer_than_the_dimmer_b
     levels.dedup();
     assert!(levels.len() > 250, "{} levels", levels.len());
     assert!(largest_relative_step < 0.01, "{largest_relative_step}");
+}
+
+const FRAME_SECONDS: f64 = 1.0 / 40.0;
+/// The stage's first mover starts at slot 33; its Pan/Tilt Speed is channel 5 (000 fast).
+const MOVER_SPEED_SLOT: usize = 36;
+
+/// The first mover's speed byte for each frame of (pan, intensity), every cell alike.
+fn speed_bytes(frames: impl IntoIterator<Item = (f64, f64)>) -> Vec<u8> {
+    let rig = support::stage();
+    let mut memory = MotionMemory::new();
+    let mut elapsed = None;
+    frames
+        .into_iter()
+        .map(|(pan, intensity)| {
+            let mut states = rig.empty_states();
+            for state in states.values_mut() {
+                state.pan = pan;
+                state.intensity = intensity;
+            }
+            let frame = rig.encode_following(&states, &mut memory, elapsed).unwrap();
+            elapsed = Some(FRAME_SECONDS);
+            frame[&0][MOVER_SPEED_SLOT]
+        })
+        .collect()
+}
+
+/// Pan over `seconds` at 40 Hz: a sweep of `swing` (share of the 540-degree range) per 8 beats
+/// at 120 BPM, as a triangle (constant speed) or a sine.
+fn sweep(seconds: f64, swing: f64, sine: bool) -> Vec<f64> {
+    let period = 4.0;
+    (0..(seconds / FRAME_SECONDS) as usize)
+        .map(|index| {
+            let phase = (index as f64 * FRAME_SECONDS / period).fract();
+            let wave = if sine {
+                (std::f64::consts::TAU * phase).sin()
+            } else {
+                1.0 - 4.0 * (phase - 0.5).abs()
+            };
+            0.5 + swing / 2.0 * wave
+        })
+        .collect()
+}
+
+#[test]
+fn a_slow_constant_sweep_holds_one_slow_speed_byte_after_it_settles() {
+    // 0.1 of 540 degrees each half period of 2 s: 27 deg/s.
+    let bytes = speed_bytes(sweep(8.0, 0.1, false).into_iter().map(|pan| (pan, 1.0)));
+    assert_eq!(bytes[0], 0, "a head's first frame has no motion to pace");
+    let movers = [(0, MOVER_SPEED_SLOT), (0, MOVER_SPEED_SLOT + 12)];
+    assert_eq!(support::stage().paced_slots(), movers.into());
+    let settled = &bytes[40..];
+    let turns: Vec<usize> = (1..settled.len())
+        .filter(|&index| settled[index] != settled[index - 1])
+        .collect();
+    // Needed 1.25 x 27 / 120 = 0.28 of full speed, held up to two bands (0.1) above: 33..38 %
+    // on a 100 % (DMX 0) to 1 % (DMX 255) channel.
+    assert!((159..=172).contains(&settled[0]), "{settled:?}");
+    assert!(
+        turns.is_empty(),
+        "the byte changed at {turns:?}: {settled:?}"
+    );
+}
+
+#[test]
+fn a_smooth_sine_sweep_moves_the_speed_byte_in_small_steps() {
+    let bytes = speed_bytes(sweep(8.0, 0.1, true).into_iter().map(|pan| (pan, 1.0)));
+    let largest_step = bytes[40..]
+        .windows(2)
+        .map(|pair| pair[0].abs_diff(pair[1]))
+        .max()
+        .unwrap();
+    assert!(bytes[40..].iter().all(|&byte| byte > 0), "{bytes:?}");
+    assert!(largest_step <= 6, "step {largest_step}: {bytes:?}");
+}
+
+#[test]
+fn a_snap_or_a_dark_move_runs_at_full_speed() {
+    let slow: Vec<(f64, f64)> = sweep(2.0, 0.1, false)
+        .into_iter()
+        .map(|pan| (pan, 1.0))
+        .collect();
+    let (last_pan, _) = *slow.last().unwrap();
+    let mut snap = slow.clone();
+    snap.push((last_pan + 0.3, 1.0));
+    let bytes = speed_bytes(snap);
+    assert!(bytes[bytes.len() - 2] > 0);
+    assert_eq!(*bytes.last().unwrap(), 0);
+
+    let mut dark = slow;
+    dark.extend(sweep(2.0, 0.1, false).into_iter().map(|pan| (pan, 0.0)));
+    let bytes = speed_bytes(dark);
+    assert!(bytes[79] > 0);
+    assert!(
+        bytes[80..].iter().all(|&byte| byte == 0),
+        "{:?}",
+        &bytes[80..]
+    );
 }

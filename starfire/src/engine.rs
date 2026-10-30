@@ -10,7 +10,7 @@ use crate::clock::{BeatFact, ClockSample, MusicalClock, SECONDS_PER_MINUTE, vali
 use crate::cue::{
     CueSample, CueTimeline, DueStep, InstanceState, MAX_OVERLAYS, MAX_PREROLL_BEATS, MAX_ROTATION,
 };
-use crate::fixtures::{FixtureRig, PanMemory};
+use crate::fixtures::{FixtureRig, MotionMemory};
 use crate::gdtf::{GdtfProfile, SNAP_POINT};
 use crate::intensity;
 use crate::model::{
@@ -162,7 +162,7 @@ pub struct Engine {
     blackout: bool,
     script_error: Option<String>,
     last_output_states: FixtureStates,
-    pan_memory: PanMemory,
+    motion_memory: MotionMemory,
     paused_at_seconds: Option<f64>,
     default_crossfade_beats: f64,
     strobe_max_rate_hz: f64,
@@ -220,7 +220,7 @@ impl Engine {
             blackout: false,
             script_error: None,
             last_output_states,
-            pan_memory: PanMemory::new(),
+            motion_memory: MotionMemory::new(),
             paused_at_seconds: None,
             default_crossfade_beats: 0.0,
             strobe_max_rate_hz: MAX_STROBE_HZ,
@@ -752,16 +752,20 @@ impl Engine {
             .filter_map(|active| active.posed.as_ref().map(|rig| (active.order, rig)))
             .max_by_key(|(order, _)| *order)
             .map_or(&self.rig, |(_, rig)| rig);
-        let universes = match rig.encode_following(&encoded_states, &mut self.pan_memory) {
-            Ok(universes) => universes,
-            Err(error) => {
-                self.stop_on_script_error(&error);
-                states = self.dark_states();
-                self.rig
-                    .encode_following(&states, &mut self.pan_memory)
-                    .context("encode safe darkness after render failure")?
-            }
-        };
+        let elapsed = self
+            .last_render_seconds
+            .map(|previous| time_seconds - previous);
+        let universes =
+            match rig.encode_following(&encoded_states, &mut self.motion_memory, elapsed) {
+                Ok(universes) => universes,
+                Err(error) => {
+                    self.stop_on_script_error(&error);
+                    states = self.dark_states();
+                    self.rig
+                        .encode_following(&states, &mut self.motion_memory, elapsed)
+                        .context("encode safe darkness after render failure")?
+                }
+            };
         self.last_time_seconds = time_seconds;
         self.last_render_seconds = Some(time_seconds);
         self.last_output_states = states.clone();
