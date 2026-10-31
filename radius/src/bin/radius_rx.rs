@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 use clap::Parser;
-use radius::{RxConfig, audio, rx::run_receiver};
+use radius::{RxConfig, audio, protocol, rx::run_receiver};
 use std::{
     path::PathBuf,
     sync::{
@@ -63,7 +63,13 @@ fn main() -> Result<()> {
             thread::sleep(Duration::from_millis(50));
         }
     });
-    let result = run_receiver(config, stop.clone(), ready.as_deref(), health.as_deref());
+    let result = run_receiver(
+        config,
+        stop.clone(),
+        ready.as_deref(),
+        health.as_deref(),
+        protocol::HEARTBEAT_TIMEOUT,
+    );
     stop.store(true, Ordering::Release);
     let _ = watcher.join();
     if let Some(path) = ready {
