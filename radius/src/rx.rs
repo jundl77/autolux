@@ -314,6 +314,7 @@ pub fn run_receiver(
     stop: Arc<AtomicBool>,
     ready_file: Option<&Path>,
     health_file: Option<&Path>,
+    login_deadline: Duration,
 ) -> Result<()> {
     config.validate()?;
     pin_worker(config.network_core)?;
@@ -323,11 +324,16 @@ pub fn run_receiver(
         std::fs::write(path, "ready\n")?;
     }
     let allowed_peer: IpAddr = config.peer_address.parse()?;
+    let deadline = Instant::now() + login_deadline;
     while !stop.load(Ordering::Acquire) {
+        ensure!(
+            Instant::now() < deadline,
+            "no Radius transmitter logged in within {login_deadline:?}"
+        );
         match listener.accept() {
             Ok((stream, peer)) if peer.ip() == allowed_peer => {
                 let mut connection = Connection::new(stream)?;
-                let login = match receive_login(&config, &stop, &mut connection) {
+                let login = match receive_login(&config, &stop, &mut connection, deadline) {
                     Ok(Some(login)) => login,
                     Ok(None) => return Ok(()),
                     Err(error) => {
@@ -361,12 +367,13 @@ fn receive_login(
     config: &RxConfig,
     stop: &AtomicBool,
     connection: &mut Connection,
+    deadline: Instant,
 ) -> Result<Option<wire::Login>> {
-    let started = Instant::now();
+    let deadline = deadline.min(Instant::now() + protocol::LOGIN_TIMEOUT);
     while !stop.load(Ordering::Acquire) {
         ensure!(
-            started.elapsed() < protocol::LOGIN_TIMEOUT,
-            "Radius client did not log in within 15 seconds"
+            Instant::now() < deadline,
+            "Radius client did not log in in time"
         );
         let messages = connection.poll()?;
         if messages.is_empty() {

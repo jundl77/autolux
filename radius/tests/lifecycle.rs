@@ -118,7 +118,15 @@ fn old_run_cannot_claim_receiver_before_the_owned_run_logs_in() {
     let stop = Arc::new(AtomicBool::new(false));
     let worker_stop = stop.clone();
     let worker_config = config.clone();
-    let worker = thread::spawn(move || run_receiver(worker_config, worker_stop, None, None));
+    let worker = thread::spawn(move || {
+        run_receiver(
+            worker_config,
+            worker_stop,
+            None,
+            None,
+            protocol::HEARTBEAT_TIMEOUT,
+        )
+    });
     let mut old = connect(config.bus_port);
     old.send(&login(config.run_id - 1)).unwrap();
     // The receiver rejects this connection but keeps listening for the owned run.
@@ -149,6 +157,7 @@ fn embedded_tx_and_rx_keep_heartbeats_when_health_files_are_unwritable() {
             worker_stop,
             None,
             Some(&receiver_health_file),
+            protocol::HEARTBEAT_TIMEOUT,
         )
     });
     let tx = RadiusTx::start(TxConfig {
@@ -190,4 +199,37 @@ fn embedded_tx_and_rx_keep_heartbeats_when_health_files_are_unwritable() {
         heartbeats,
         "both endpoints must independently send 10-second heartbeats"
     );
+}
+
+fn receiver_without_login(silent_connection: bool) -> (String, Duration) {
+    let config = config(free_port());
+    let port = config.bus_port;
+    let deadline = Duration::from_millis(300);
+    let started = Instant::now();
+    let worker = thread::spawn(move || {
+        run_receiver(
+            config,
+            Arc::new(AtomicBool::new(false)),
+            None,
+            None,
+            deadline,
+        )
+    });
+    let _connection = silent_connection.then(|| connect(port));
+    let error = worker.join().unwrap().unwrap_err();
+    (format!("{error:#}"), started.elapsed())
+}
+
+#[test]
+fn receiver_gives_up_when_no_transmitter_connects() {
+    let (error, elapsed) = receiver_without_login(false);
+    assert_eq!(error, "no Radius transmitter logged in within 300ms");
+    assert!(elapsed < Duration::from_secs(5), "{elapsed:?}");
+}
+
+#[test]
+fn silent_connection_does_not_extend_the_login_deadline() {
+    let (error, elapsed) = receiver_without_login(true);
+    assert_eq!(error, "no Radius transmitter logged in within 300ms");
+    assert!(elapsed < protocol::LOGIN_TIMEOUT, "{elapsed:?}");
 }
