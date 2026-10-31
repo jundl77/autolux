@@ -201,10 +201,9 @@ fn embedded_tx_and_rx_keep_heartbeats_when_health_files_are_unwritable() {
     );
 }
 
-fn receiver_without_login(silent_connection: bool) -> (String, Duration) {
+fn receiver_without_login(silent_connection: bool, deadline: Duration) -> (String, Duration) {
     let config = config(free_port());
     let port = config.bus_port;
-    let deadline = Duration::from_millis(300);
     let started = Instant::now();
     let worker = thread::spawn(move || {
         run_receiver(
@@ -222,14 +221,14 @@ fn receiver_without_login(silent_connection: bool) -> (String, Duration) {
 
 #[test]
 fn receiver_gives_up_when_no_transmitter_connects() {
-    let (error, elapsed) = receiver_without_login(false);
+    let (error, elapsed) = receiver_without_login(false, Duration::from_millis(300));
     assert_eq!(error, "no Radius transmitter logged in within 300ms");
     assert!(elapsed < Duration::from_secs(5), "{elapsed:?}");
 }
 
 #[test]
 fn silent_connection_does_not_extend_the_login_deadline() {
-    let (error, elapsed) = receiver_without_login(true);
-    assert_eq!(error, "no Radius transmitter logged in within 300ms");
+    let (error, elapsed) = receiver_without_login(true, Duration::from_secs(3));
+    assert_eq!(error, "no Radius transmitter logged in within 3s");
     assert!(elapsed < protocol::LOGIN_TIMEOUT, "{elapsed:?}");
 }
